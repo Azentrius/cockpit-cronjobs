@@ -64,9 +64,9 @@ jobs:
           sudo systemctl start cron
           sudo ln -sfn "$GITHUB_WORKSPACE/src" /usr/share/cockpit/cronjobs
           dpkg-query -W cockpit-ws cockpit-bridge cron
-      - name: Install Playwright
+      - name: Check tools (pinned in test/requirements.txt) and the browser
         run: |
-          pip install playwright
+          pip install -r test/requirements.txt
           python -m playwright install --with-deps chromium
           echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
       - name: Start Cockpit as root, without login
