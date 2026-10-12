@@ -20,6 +20,11 @@ jobs:
           python-version: "3.12"
       - name: Unit tests (crontab logic, systemd conversion against systemd-analyze, run recorder with dash and bash)
         run: make check
+      - name: Package and changelog for the current version
+        run: |
+          make package
+          version=$(sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
+          tools/release-notes.sh "$version" > /dev/null || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
       - name: Install Playwright
         run: |
           pip install playwright
