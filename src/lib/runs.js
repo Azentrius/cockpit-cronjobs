@@ -5,7 +5,7 @@
  *                   { start, end, rc, trigger, bytes, truncated, out [, aborted] }
  *   STAMP.out       the last 64 KiB of that run's output (stdout and stderr)
  *   STAMP.running   { start, pid, trigger } while a run is going on
- * The page reads all of it with one script (see readRuns in app.js); this parses it
+ * The page reads all of it with one script (see readRuns in app/system.js); this parses it
  * and finds the jobs that no crontab uses any more.
  *
  * Loaded in the browser as window.CronRuns and in Node via require().

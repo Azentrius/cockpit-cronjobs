@@ -240,7 +240,7 @@
     }
 
     /* How the units of a converted job begin and describe themselves. Back to cron only
-       removes units that carry both (see UNITS_SCRIPT in app.js). */
+       removes units that carry both (see UNITS_SCRIPT in app/system.js). */
     const UNIT_HEADER = "# Created by Cockpit Cron Jobs from this line of the root crontab:";
     const unitDescription = name => name + " (from the root crontab)";
 

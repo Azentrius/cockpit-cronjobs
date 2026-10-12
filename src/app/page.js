@@ -1,0 +1,530 @@
+/* Cron Jobs — the page itself: alerts and notices, the root crontab, systemd timers
+ * and the read-only crontabs, focus, and the row menu.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+    $, C, cap, clock, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon, R, rich, S,
+    SD, state, T, tzLabel,
+} from "./core.js";
+import { errText, installWrapper } from "./system.js";
+import {
+    convertedTo, jobInfo, jobTz, loading, noteFor, requestLoad, rootJobs, runsOf, setCapture, toggle,
+} from "./crontab.js";
+import { renderTimeline } from "./timeline.js";
+import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
+import { openRun, openRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
+import { convertBlocker, openBack, openConvert } from "./convert.js";
+
+/* ---------- alerts ---------- */
+
+const ALERT_ICON = { success: "check-circle", warning: "exclamation-triangle", danger: "exclamation-circle", info: "info-circle" };
+
+export function alertEl(kind, title, body, actions) {
+    return h("div", { class: "az-alert az-alert--" + kind, role: kind === "danger" ? "alert" : "status" },
+        h("span", { class: "az-alert__icon" }, icon(ALERT_ICON[kind])),
+        h("p", { class: "az-alert__title" }, rich(title)),
+        body ? h("p", { class: "az-alert__body" }, rich(body)) : null,
+        actions ? h("div", { class: "az-alert__actions" }, actions) : null);
+}
+
+export function showAlert(kind, title, body) {
+    fill($("alerts"), alertEl(kind, title, body));
+}
+export function clearAlerts() { fill($("alerts")); }
+
+/* Lasting notes about the server: no mail program, cron not running, run recorder. */
+export function renderNotices() {
+    const b = state.basics;
+    const out = [];
+    const capturedJobs = rootJobs().filter(({ e }) => {
+        const c = jobInfo(e).capture;
+        return c && c.path === C.WRAPPER_PATH;
+    });
+    if (b.cron && !b.cron.active) {
+        out.push(alertEl("warning", T.cronDownTitle, T.cronDownBody, b.cron.unit && b.systemd
+            ? h("button", { class: "az-btn az-btn--link", type: "button",
+                            onclick: () => cockpit.jump("/system/services#/" + encodeURIComponent(b.cron.unit), cockpit.transport.host) },
+                T.openServices)
+            : null));
+    }
+    if (capturedJobs.length && b.wrapper === "missing") {
+        out.push(alertEl("danger", T.wrapperMissingTitle, T.wrapperMissingBody(capturedJobs.length, C.WRAPPER_PATH),
+            h("button", { class: "az-btn az-btn--secondary", type: "button", id: "wrapper-install",
+                          disabled: state.busy || loading, onclick: () => repairWrapper() }, T.install)));
+    } else if (typeof b.wrapper === "number" && b.wrapper < C.WRAPPER_VERSION) {
+        out.push(alertEl("warning", T.wrapperOldTitle, T.wrapperOldBody(C.WRAPPER_PATH),
+            h("button", { class: "az-btn az-btn--secondary", type: "button", id: "wrapper-install",
+                          disabled: state.busy || loading, onclick: () => repairWrapper() }, T.update)));
+    }
+    if (b.mta === false && state.root.status === "ok" && !state.root.mailto) {
+        out.push(alertEl("info", T.noMtaTitle, T.noMtaBody));
+    }
+    fill($("notices"), out);
+}
+
+async function repairWrapper() {
+    const btn = $("wrapper-install");
+    if (btn) btn.disabled = true;
+    try {
+        await installWrapper();
+        showAlert("success", T.wrapperInstalled, T.wrapperInstalledBody(C.WRAPPER_PATH));
+    } catch (ex) {
+        showAlert("danger", T.wrapperFailed, errText(ex));
+    }
+    renderNotices();
+}
+
+/* ---------- rendering ---------- */
+
+export function renderAll() {
+    renderHeader();
+    renderNotices();
+    renderTimeline();
+    renderRoot();
+    renderOrphans();
+    renderTimers();
+    renderSystem();
+    renderOrphansDialog();
+}
+
+function renderHeader() {
+    fill($("page-desc"), T.pageDesc(state.host));
+    $("sig-host").textContent = state.host;
+    $("sig-host").hidden = !state.host;
+    const meta = [];
+    if (state.loadedAt) meta.push(T.loadedAt(fmtClock(state.loadedAt)));
+    if (state.sys) meta.push(T.serverTz(tzLabel(state.tz)));
+    $("meta").textContent = meta.join(" · ");
+    $("reload").disabled = state.busy || loading;
+}
+
+export function describe(schedule) {
+    return C.describe(schedule, S) || S.custom;
+}
+
+function scheduleCell(schedule, tz) {
+    return h("div", { class: "cron-cell" },
+        h("span", null, describe(schedule)),
+        h("span", { class: "az-cell-sub az-mono" }, schedule + (tz && tz !== state.tz ? " · " + tzLabel(tz) : "")));
+}
+
+function nextCell(e, i) {
+    if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
+    const p = C.parseSchedule(e.schedule);
+    if (p.reboot) return h("span", null, T.nextBoot);
+    const ms = C.nextRun(p, Date.now(), jobTz(state.root.entries, i));
+    if (ms === null) return h("span", null, T.neverRuns);
+    return whenCell(ms);
+}
+
+function whenCell(ms) {
+    const sub = [fmtRelative(ms), fmtLocal(ms)].filter(Boolean).join(" · ");
+    return h("div", { class: "cron-cell" },
+        h("span", null, cap(fmtWhen(ms))),
+        h("span", { class: "az-cell-sub" }, sub));
+}
+
+/* Result label of a run: { kind, icon, text } */
+export function runLabel(r) {
+    const o = R.outcome(r);
+    if (o === "ok") return { kind: "success", icon: "check-circle", text: T.statusOk };
+    if (o === "failed") return { kind: "danger", icon: "exclamation-circle", text: T.statusFailed(r.rc) };
+    return { kind: "warning", icon: "exclamation-triangle", text: T.statusAborted };
+}
+
+/* A status label; with attrs it is a button that wraps the label. */
+export function labelEl(kind, iconName, text, attrs) {
+    const label = h("span", { class: "az-label az-label--" + kind }, iconName ? icon(iconName) : null, text);
+    return attrs ? h("button", Object.assign({ type: "button", class: "cron-label-btn" }, attrs), label) : label;
+}
+
+function lastCell(e, i, editable, frozen) {
+    const info = jobInfo(e);
+    if (!info.capture) {
+        if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
+        const can = editable && C.canCapture(info.command);
+        return h("div", { class: "cron-cell" },
+            h("span", { class: "cron-muted" }, T.notRecorded),
+            can ? h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", disabled: frozen,
+                                "data-key": "capture:" + i, "aria-describedby": "cmd-" + i,
+                                onclick: () => setCapture(i, true, "capture:" + i) }, T.recordLink) : null);
+    }
+    const job = runsOf(info.capture.id);
+    if (!job) return h("span", { class: "cron-muted" }, "—");
+    const open = { "data-key": "runs:" + i, "aria-describedby": "cmd-" + i, title: T.showRuns,
+                   onclick: () => openRuns(i, "runs:" + i) };
+    if (job.running.length) {
+        const start = Math.min.apply(null, job.running.map(r => r.start)) * 1000;
+        return h("div", { class: "cron-cell" },
+            h("span", null, labelEl("info", "sync-alt", T.statusRunning, open)),
+            h("span", { class: "az-cell-sub" }, T.runningSince(clock(start), fmtDuration((Date.now() - start) / 1000))));
+    }
+    const last = job.runs[0];
+    if (!last) return h("span", { class: "cron-muted" }, T.noRunYet);
+    const l = runLabel(last);
+    const d = R.duration(last);
+    return h("div", { class: "cron-cell" },
+        h("span", null, labelEl(l.kind, l.icon, l.text, open)),
+        h("span", { class: "az-cell-sub" }, fmtShort(last.start * 1000) + (d !== null ? " · " + fmtDuration(d) : "")));
+}
+
+export function renderRoot() {
+    const body = $("root-body");
+    const r = state.root;
+    const jobs = rootJobs();
+    const editable = r.status === "ok" && !r.locked;
+    const add = $("add");
+    add.hidden = !(editable && jobs.length > 0);
+    const frozen = state.busy || loading;
+    add.disabled = frozen;
+
+    if (r.status === "loading") {
+        fill(body, h("p", { class: "cron-state" }, T.loading));
+        return;
+    }
+    if (r.status === "denied") {
+        fill(body, h("div", { class: "az-empty" },
+            h("span", { class: "az-empty__icon" }, icon("info-circle")),
+            h("h3", { class: "az-empty__title" }, T.deniedTitle),
+            h("p", { class: "az-empty__body" }, rich(T.deniedBody))));
+        return;
+    }
+    if (r.status === "missing") {
+        fill(body, h("div", { class: "cron-card-alert" }, alertEl("warning", T.noCrontabTitle, T.noCrontabBody)));
+        return;
+    }
+    if (r.status === "error") {
+        fill(body, h("div", { class: "cron-card-alert" },
+            alertEl("danger", T.readErrorTitle, r.message,
+                    h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, T.retry))));
+        return;
+    }
+    if (jobs.length === 0) {
+        fill(body, h("div", { class: "az-empty" },
+            h("span", { class: "az-empty__icon" }, icon("clock")),
+            h("h3", { class: "az-empty__title" }, T.emptyTitle),
+            h("p", { class: "az-empty__body" }, T.emptyBody),
+            editable ? h("div", { class: "az-empty__actions" },
+                h("button", { class: "az-btn az-btn--primary", type: "button", "data-key": "add-empty",
+                              disabled: frozen, onclick: () => openEdit(null, "add-empty") },
+                  icon("plus"), T.add)) : null));
+        return;
+    }
+
+    const rows = jobs.map(({ e, i }) => {
+        const cmdId = "cmd-" + i;
+        const note = noteFor(r, i);
+        const timer = convertedTo(r, i);
+        const info = jobInfo(e);
+        const toggleCell = editable
+            ? h("label", { class: "az-switch" },
+                h("input", { type: "checkbox", role: "switch", checked: e.enabled, disabled: frozen,
+                             "aria-describedby": cmdId, "data-key": "toggle:" + i,
+                             onchange: ev => toggle(i, ev.target.checked) }),
+                h("span", { class: "az-switch__track" }),
+                h("span", { class: "az-sr" }, T.activeSr))
+            : h("span", { class: "cron-muted" }, e.enabled ? T.on : T.off);
+        const btn = (key, label, iconName, onclick, extra) => h("button", Object.assign({
+            class: "az-btn az-btn--plain az-btn--sm", type: "button", "aria-label": label, title: label,
+            "aria-describedby": cmdId, disabled: frozen, "data-key": key + ":" + i, onclick }, extra || {}), icon(iconName));
+        return h("tr", { class: e.enabled ? null : "is-off" },
+            h("td", { class: "az-cell-toggle", "data-label": T.colActive }, toggleCell),
+            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(e.schedule, jobTz(r.entries, i))),
+            h("td", { class: "az-nowrap", "data-label": T.colNext, "data-next": i }, nextCell(e, i)),
+            h("td", { class: "az-nowrap", "data-label": T.colLast, "data-last": i }, lastCell(e, i, editable, frozen)),
+            h("td", { "data-label": T.colCommand },
+                h("div", { class: "cron-cell" },
+                    h("span", { class: "az-mono", id: cmdId }, info.command),
+                    timer ? h("span", { class: "az-cell-sub" }, T.convertedTo, " ",
+                        h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", "data-key": "timer:" + i,
+                                      title: T.openInCockpit(timer + ".timer"), onclick: () => jumpToUnit(timer + ".timer") },
+                          timer + ".timer"))
+                        : note ? h("span", { class: "az-cell-sub" }, note) : null)),
+            h("td", { class: "az-cell-actions" },
+                r.notUtf8 ? null : btn("run", T.actRun, "play", () => openRun(i, "run:" + i)),
+                editable ? btn("edit", T.actEdit, "pencil-alt", () => openEdit(i, "edit:" + i)) : null,
+                menuItems(i).length ? btn("more", T.actMore, "ellipsis-v", ev => openRowMenu(i, ev.currentTarget),
+                    { "aria-haspopup": "menu", "aria-expanded": "false" }) : null));
+    });
+
+    const head = h("tr", null,
+        h("th", { class: "cron-col-toggle", scope: "col" }, T.colActive),
+        h("th", { scope: "col" }, T.colSchedule),
+        h("th", { scope: "col" }, T.colNext),
+        h("th", { scope: "col" }, T.colLast),
+        h("th", { scope: "col" }, T.colCommand),
+        h("th", { scope: "col" }, h("span", { class: "az-sr" }, T.colActions)));
+
+    fill(body,
+        r.locked ? h("div", { class: "cron-card-alert" },
+            alertEl("warning", T.lockedTitle, r.notUtf8 ? T.lockedEncodingBody : T.lockedBody)) : null,
+        h("div", { class: "az-card__body--flush az-table-wrap" },
+            h("table", { class: "az-table az-table--stack cron-root-table" }, h("thead", null, head), h("tbody", null, rows))));
+}
+
+export function updateNextRuns() {
+    const r = state.root;
+    if (r.status !== "ok") return;
+    document.querySelectorAll("td[data-next]").forEach(td => {
+        const e = r.entries[+td.dataset.next];
+        if (e && e.kind === "job") fill(td, nextCell(e, +td.dataset.next));
+    });
+    document.querySelectorAll("td[data-timer-next]").forEach(td => {
+        const t = state.timers.list[+td.dataset.timerNext];
+        if (t) fill(td, timerNextCell(t));
+    });
+}
+
+export function updateLastRuns() {
+    const r = state.root;
+    if (r.status !== "ok" || state.busy || loading) return;
+    const editable = !r.locked;
+    const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
+    document.querySelectorAll("td[data-last]").forEach(td => {
+        const i = +td.dataset.last;
+        const e = r.entries[i];
+        if (e && e.kind === "job") fill(td, lastCell(e, i, editable, false));
+    });
+    renderOrphans();
+    if (focused && !document.activeElement.isConnected) restoreFocus(focused);
+    renderNotices();
+}
+
+/* ---------- systemd timers ---------- */
+
+function jumpToUnit(unit) {
+    cockpit.jump("/system/services#/" + encodeURIComponent(unit), cockpit.transport.host);
+}
+
+function timerNextCell(t) {
+    if (!t.active) return h("span", { class: "cron-muted" }, T.timerInactive);
+    if (t.next === null) return h("span", { class: "cron-muted" }, "—");
+    return whenCell(t.next);
+}
+
+function timerLastCell(t) {
+    if (t.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("info", "sync-alt", T.statusRunning)));
+    if (t.last === null) return h("span", { class: "cron-muted" }, T.noRunYet);
+    let label = null;
+    if (t.result === "success") label = labelEl("success", "check-circle", T.statusOk);
+    else if (t.result === "exit-code" && t.status !== null) label = labelEl("danger", "exclamation-circle", T.statusFailed(t.status));
+    else if (t.result) label = labelEl("danger", "exclamation-circle", T.statusResult(t.result));
+    const dur = t.startUs !== null && t.exitUs !== null && t.exitUs >= t.startUs ? (t.exitUs - t.startUs) / 1000 : null;
+    return h("div", { class: "cron-cell" },
+        label ? h("span", null, label) : null,
+        h("span", { class: label ? "az-cell-sub" : null }, fmtShort(t.last) + (dur !== null ? " · " + fmtDuration(dur) : "")));
+}
+
+function renderTimers() {
+    const card = $("timers-card");
+    const tm = state.timers;
+    card.hidden = tm.status === "none" || (tm.status === "ok" && tm.list.length === 0);
+    if (card.hidden) return;
+    if (tm.status === "error") {
+        fill($("timers-body"), h("div", { class: "cron-card-alert" }, alertEl("warning", T.timersErrorTitle, tm.message)));
+        return;
+    }
+    fill($("timers-body"), h("div", { class: "az-card__body--flush az-table-wrap" },
+        h("table", { class: "az-table az-table--stack" },
+            h("thead", null, h("tr", null,
+                h("th", { scope: "col" }, T.colTimer),
+                h("th", { scope: "col" }, T.colSchedule),
+                h("th", { scope: "col" }, T.colNext),
+                h("th", { scope: "col" }, T.colLast),
+                h("th", { scope: "col" }, h("span", { class: "az-sr" }, T.colActions)))),
+            h("tbody", null, tm.list.map((t, k) => {
+                const ours = / \(from the root crontab\)$/.test(t.description || "");
+                const specs = t.calendar.concat(t.monotonic.map(m => m.base.replace(/USec$/, "Sec") + "=" + SD.formatSpan(m.usec)));
+                const sub = specs.join(" · ") + (t.randomizedUsec ? " · " + T.randomUpTo(SD.formatSpan(t.randomizedUsec)) : "");
+                return h("tr", { class: t.active ? null : "is-off" },
+                    h("td", { class: "az-nowrap", "data-label": T.colTimer },
+                        h("div", { class: "cron-cell" },
+                            h("span", { class: "az-mono" }, t.name),
+                            h("span", { class: "az-cell-sub" }, ours ? T.fromCrontab : t.description))),
+                    h("td", { "data-label": T.colSchedule },
+                        h("div", { class: "cron-cell" },
+                            h("span", null, SD.describeTimer(t, S)),
+                            sub ? h("span", { class: "az-cell-sub az-mono" }, sub) : null)),
+                    h("td", { class: "az-nowrap", "data-label": T.colNext, "data-timer-next": k }, timerNextCell(t)),
+                    h("td", { class: "az-nowrap", "data-label": T.colLast }, timerLastCell(t)),
+                    h("td", { class: "az-cell-actions" },
+                        h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "aria-label": T.openInCockpit(t.name),
+                                      title: T.openInCockpit(t.name),
+                                      onclick: () => jumpToUnit(t.name) },
+                          icon("external-link-alt"))));
+            })))));
+}
+
+/* ---------- read-only crontabs ---------- */
+
+function readOnlyTable(cols, rows) {
+    return h("div", { class: "az-card__body--flush az-table-wrap" },
+        h("table", { class: "az-table az-table--stack" },
+            h("thead", null, h("tr", null, cols.map(c => h("th", { scope: "col" }, c)))),
+            h("tbody", null, rows)));
+}
+
+function emptyState() { return h("p", { class: "cron-state" }, T.noEntries); }
+
+function renderSystem() {
+    const sys = state.sys;
+    ["etc-card", "crond-card", "users-card", "periodic-card"].forEach(id => { $(id).hidden = !sys; });
+    fill($("sys-alerts"), !sys && state.sysError !== null
+        ? alertEl("warning", T.sysErrorTitle, state.sysError) : null);
+    if (!sys) return;
+
+    fill($("etc-body"), sys.etc.length === 0 ? emptyState() : readOnlyTable(
+        [T.colSchedule, T.colUser, T.colCommand],
+        sys.etc.map(j => h("tr", null,
+            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule)),
+            h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
+            h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
+
+    fill($("crond-body"), sys.crond.length === 0 ? emptyState() : readOnlyTable(
+        [T.colFile, T.colSchedule, T.colUser, T.colCommand],
+        sys.crond.map(j => h("tr", { class: j.ignored ? "is-off" : null },
+            h("td", { "data-label": T.colFile },
+                h("div", { class: "cron-cell" },
+                    h("div", { class: "cron-title-row" },
+                        h("span", { class: "az-mono" }, j.file),
+                        j.ignored ? h("span", { class: "az-label az-label--warning", title: T.ignoredWhy[j.ignored] }, T.ignored) : null),
+                    j.ignored ? h("span", { class: "az-cell-sub cron-ignored-why" }, T.ignoredWhy[j.ignored]) : null)),
+            h("td", { class: "az-nowrap", "data-label": T.colSchedule },
+                j.schedule ? scheduleCell(j.schedule) : h("span", { class: "cron-muted" }, "—")),
+            h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user || h("span", { class: "cron-muted" }, "—")),
+            h("td", { "data-label": T.colCommand },
+                j.command ? h("span", { class: "az-mono" }, j.command) : h("span", { class: "cron-muted" }, "—"))))));
+
+    $("users-card").hidden = sys.users.length === 0;
+    fill($("users-body"), readOnlyTable(
+        [T.colUser, T.colSchedule, T.colCommand],
+        sys.users.map(j => h("tr", { class: j.enabled ? null : "is-off" },
+            h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
+            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule)),
+            h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
+
+    $("periodic-card").hidden = sys.periodic.length === 0;
+    fill($("periodic-body"), readOnlyTable(
+        [T.colDir, T.colScripts],
+        sys.periodic.map(p => h("tr", null,
+            h("td", { class: "az-nowrap", "data-label": T.colDir }, h("span", { class: "az-mono" }, p.dir)),
+            h("td", { "data-label": T.colScripts },
+                p.scripts.length === 0 ? h("span", { class: "cron-muted" }, T.none)
+                    : h("div", { class: "cron-chips" }, p.scripts.map(s => h("span", { class: "az-label" }, s))))))));
+}
+
+/* ---------- focus ---------- */
+
+export function restoreFocus(key) {
+    let el = key ? document.querySelector('[data-key="' + key + '"]') : null;
+    if (!el || el.disabled || el.closest("[hidden]")) {
+        const m = key ? /^[a-z-]+:(\d+)$/.exec(key) : null;
+        if (m) el = document.querySelector('[data-key="more:' + m[1] + '"]');
+    }
+    if (!el || el.disabled || el.closest("[hidden]")) {
+        el = [$("add"), document.querySelector('[data-key="add-empty"]'), $("page-title")]
+            .find(x => x && !x.disabled && !x.closest("[hidden]"));
+    }
+    if (el) el.focus();
+}
+
+/* ---------- row menu ---------- */
+
+let menu = null;   /* { el, button, onDoc } */
+
+export function closeMenu(focusButton) {
+    if (!menu) return;
+    const m = menu;
+    menu = null;
+    m.el.remove();
+    m.button.setAttribute("aria-expanded", "false");
+    document.removeEventListener("mousedown", m.onDoc, true);
+    window.removeEventListener("resize", m.onResize);
+    if (focusButton && m.button.isConnected) m.button.focus();
+}
+
+function menuItems(i) {
+    const r = state.root;
+    const e = r.entries[i];
+    const info = jobInfo(e);
+    const editable = r.status === "ok" && !r.locked;
+    const items = [];
+    if (info.capture) items.push({ label: T.showRuns, icon: "history", action: () => openRuns(i, "more:" + i) });
+    if (editable) {
+        if (info.capture) {
+            items.push({ label: T.captureOff, action: () => openCaptureOff(i, "more:" + i) });
+        } else {
+            const can = C.canCapture(info.command);
+            items.push({ label: T.captureOn, icon: "history", disabled: !can, hint: can ? null : T.cannotCapture,
+                         action: () => setCapture(i, true, "more:" + i) });
+        }
+        if (state.basics.systemd && convertedTo(r, i)) {
+            items.push({ label: T.backToCron, icon: "exchange-alt", action: () => openBack(i, "more:" + i) });
+        } else if (state.basics.systemd && state.timers.status === "ok") {
+            const why = convertBlocker(e, info, i);
+            items.push({ label: T.convert, icon: "exchange-alt", disabled: !!why, hint: why,
+                         action: () => openConvert(i, "more:" + i) });
+        }
+        items.push("sep");
+        items.push({ label: T.actDelete, icon: "trash", danger: true, action: () => openDelete(i, "more:" + i) });
+    }
+    return items;
+}
+
+function openRowMenu(i, button) {
+    if (menu && menu.button === button) { closeMenu(true); return; }
+    closeMenu(false);
+    const items = menuItems(i);
+    if (!items.length) return;
+    const el = h("div", { class: "cron-menu", role: "menu", "aria-label": T.actMore, id: "row-menu" },
+        items.map(it => it === "sep" ? h("div", { class: "cron-menu__sep", role: "separator" })
+            : h("button", {
+                type: "button", role: "menuitem", tabindex: "-1",
+                class: "cron-menu__item" + (it.danger ? " is-danger" : ""),
+                "aria-disabled": it.disabled ? "true" : null,
+                onclick: () => { if (it.disabled) return; closeMenu(false); it.action(); },
+            }, it.icon ? icon(it.icon) : h("span", { class: "cron-menu__spacer" }),
+            h("span", { class: "cron-menu__text" }, it.label,
+              it.hint ? h("span", { class: "cron-menu__hint" }, it.hint) : null))));
+    document.body.append(el);
+    const rect = button.getBoundingClientRect();
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let left = rect.right - width;
+    left = Math.max(8, Math.min(left, document.documentElement.clientWidth - width - 8));
+    let top = rect.bottom + 4;
+    if (top + height > window.innerHeight - 8 && rect.top - height - 4 > 8) top = rect.top - height - 4;
+    el.style.left = (left + window.scrollX) + "px";
+    el.style.top = (top + window.scrollY) + "px";
+
+    const all = Array.from(el.querySelectorAll("[role=menuitem]"));
+    const move = (from, step) => {
+        const n = all.length;
+        let k = from;
+        for (let tries = 0; tries < n; tries++) {
+            k = (k + step + n) % n;
+            if (all[k].getAttribute("aria-disabled") !== "true") { all[k].focus(); return; }
+        }
+    };
+    el.addEventListener("keydown", ev => {
+        const cur = all.indexOf(document.activeElement);
+        if (ev.key === "ArrowDown") { ev.preventDefault(); move(cur, 1); }
+        else if (ev.key === "ArrowUp") { ev.preventDefault(); move(cur < 0 ? 0 : cur, -1); }
+        else if (ev.key === "Home") { ev.preventDefault(); move(-1, 1); }
+        else if (ev.key === "End") { ev.preventDefault(); move(0, -1); }
+        else if (ev.key === "Escape") { ev.preventDefault(); closeMenu(true); }
+        else if (ev.key === "Tab") { closeMenu(true); }
+    });
+    const onDoc = ev => {
+        if (!el.contains(ev.target) && ev.target !== button && !button.contains(ev.target)) closeMenu(false);
+    };
+    const onResize = () => closeMenu(false);
+    menu = { el, button, onDoc, onResize };
+    document.addEventListener("mousedown", onDoc, true);
+    window.addEventListener("resize", onResize);
+    button.setAttribute("aria-expanded", "true");
+    button.setAttribute("aria-controls", "row-menu");
+    move(-1, 1);
+}

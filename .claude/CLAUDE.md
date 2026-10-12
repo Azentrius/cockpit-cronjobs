@@ -64,7 +64,12 @@ which takes only `src/`.
 
 ```
 src/                      the Cockpit package (installed as /usr/share/cockpit/cronjobs), no build step
-  index.html, app.js      the page; all root scripts (SAVE_SCRIPT, RUN_SCRIPT, …) live in app.js
+  index.html, app.js      the page; app.js starts it (and holds VERSION), its parts are ES modules in app/
+  app/system.js           everything that runs on the server; all root scripts (SAVE_SCRIPT, RUN_SCRIPT, …)
+  app/core.js             libraries, constants, texts, DOM helpers, times, the page's state
+  app/crontab.js          the root crontab as shown: loading, saving (commit), administrative access
+  app/page.js, timeline.js, dialogs.js, runs.js, convert.js   the page, the timeline, dialogs, run now
+                          and recorded runs, conversion and back to cron
   lib/cron.js             crontab parsing and writing (byte for byte), schedules, next runs, cron's % rules
   lib/systemd.js          cron → OnCalendar, unit files, systemd-analyze output
   lib/runs.js             records of the run recorder
@@ -141,6 +146,11 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
 
 ## Useful knowledge
 
+- **The modules in `src/app/`** import each other in a circle (the page calls dialogs, dialogs save,
+  saving renders the page). That works because only `core.js` and `system.js` compute values when
+  they load; everything else runs later. A module can read another one's `let` (`dialog`, `loading`,
+  `rootVersion`) but not assign it: changes go through a function of the module that owns it
+  (e.g. `loadIfPending`) or through `state`.
 - **Cockpit bridge:** closing a spawn sends SIGTERM to the direct child only, so `RUN_SCRIPT` starts
   the job in its own process group (`setsid`) and forwards the signal. Text channels must be valid
   UTF-8 or the channel (and the job) ends — read and run with `binary: true` and decode leniently.
