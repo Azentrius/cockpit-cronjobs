@@ -19,6 +19,7 @@
  *   dialogs.js   dialogs in general; add, edit, delete, confirm
  *   runs.js      run now, recorded runs, leftover runs
  *   convert.js   convert to a systemd timer and back to cron
+ *   tabs.js      the tabs under the page header
  * The libraries in lib/ and the texts in i18n/ stay plain scripts (window.Cron*),
  * so that the unit tests can load them in Node.
  *
@@ -33,8 +34,9 @@ import {
 } from "./app/dialogs.js";
 import { orphanList, removeOrphanRuns, startRun, stopRun } from "./app/runs.js";
 import { submitBack, submitConvert, toggleUnits, updateConvert } from "./app/convert.js";
+import { initTabs } from "./app/tabs.js";
 
-const VERSION = "2.1.1";
+const VERSION = "2.2.0";
 
 /* ---------- start ---------- */
 
@@ -50,6 +52,7 @@ function translateStatic() {
 
 function init() {
     translateStatic();
+    initTabs();
 
     $("reload").addEventListener("click", () => { clearAlerts(); requestLoad(); });
     $("add").addEventListener("click", () => openEdit(null, "add"));

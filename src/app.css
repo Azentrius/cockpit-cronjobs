@@ -8,6 +8,8 @@ html { background: var(--bg-page); }
 
 .cron-alerts { display: flex; flex-direction: column; gap: var(--space-md); }
 .cron-alerts:empty { display: none; }
+/* A tab's panel: its cards with the page's spacing. */
+.cron-panel { display: flex; flex-direction: column; gap: var(--space-lg); }
 .az-alert__body code, .az-card__desc code, .cron-muted code { overflow-wrap: anywhere; }
 .az-alert__body { white-space: pre-line; }
 

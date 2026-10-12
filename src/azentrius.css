@@ -153,25 +153,21 @@ code, .az-mono { font-family: var(--az-font-code); font-size: 0.875rem; }
   padding: var(--space-lg);
   box-sizing: border-box;
 }
-.az-page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-md);
-}
-.az-page-header > div:first-child { min-width: 0; }
-.az-page-title {
-  margin: 0;
-  font-family: var(--az-font-head);
-  font-size: 24px;
-  line-height: 1.3;
-  font-weight: 600;
-  text-wrap: balance;
-}
+.az-page-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-sm) var(--space-md); padding-block-end: 14px; border-block-end: 1px solid var(--line); }
+.az-page-header > :first-child { min-width: 0; }
+.az-page-title { margin: 0; font-family: var(--az-font-head); font-size: 24px; line-height: 1.3; font-weight: 500; letter-spacing: 0.01em; text-wrap: balance; }
+.az-page-title__suffix { font-family: var(--font-brand); font-style: italic; font-weight: 400; color: var(--signature); }
 .az-page-desc { margin: var(--space-xs) 0 0; color: var(--text-subtle); max-width: 65ch; }
-.az-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.az-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm) var(--space-md); }
 .az-meta { color: var(--text-subtle); font-size: 12px; }
+
+/* ---------- Tabs ---------- */
+.az-tabs { display: flex; flex-wrap: wrap; gap: var(--space-xs); border-block-end: 1px solid var(--line); }
+.az-page-header + .az-tabs { margin-block-start: calc(var(--space-sm) + var(--space-xs) - var(--space-lg)); }
+.az-tab { min-block-size: 44px; margin-block-end: -1px; padding: 10px 14px; border: 0; border-block-end: 2px solid transparent; background: transparent; color: var(--text-subtle); font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.az-tab:hover { color: var(--text); }
+.az-tab[aria-selected="true"] { color: var(--primary-text); border-block-end-color: var(--signature); }
+[role="tabpanel"][hidden] { display: none; }
 
 /* ---------- Button ---------- */
 .az-btn {

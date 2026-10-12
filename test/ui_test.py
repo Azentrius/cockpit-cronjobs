@@ -99,13 +99,42 @@ def focused_key(page):
     return page.evaluate("() => document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null")
 
 
+def show_tab(page, name):
+    """overview, timers or system"""
+    page.click("#tab-" + name)
+    wait_js(page, "!document.querySelector('#panel-" + name + "').hidden")
+
+
+def selected_tab(page):
+    return page.evaluate("() => document.querySelector('#tabs [aria-selected=\"true\"]').id")
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
 
     # ---------- overview: light, dark, narrow ----------
     page = open_page(browser)
     body = page.inner_text("body")
-    check("Geplante Aufgaben auf public-host anzeigen und verwalten." in body, "page desc with host")
+    # the page frame: a one-line header without a description, Refresh as the only filled button
+    check(page.locator(".az-page-desc, #page-desc").count() == 0, "no description in the header")
+    check(page.inner_text(".az-page-header h1").strip() == "Cron Jobs" and page.locator(".az-page-title__suffix").count() == 0,
+          "title Cron Jobs without a suffix")
+    refresh = page.evaluate("""() => { const b = document.querySelector('#reload');
+        return { cls: b.className, icon: b.firstElementChild.matches('svg.az-icon'), text: b.innerText.trim(),
+                 meta: b.previousElementSibling.matches('.az-meta'), inHeader: !!b.closest('.az-page-header') }; }""")
+    check(refresh == {"cls": "az-btn az-btn--primary", "icon": True, "text": "Aktualisieren", "meta": True, "inHeader": True},
+          "Refresh: primary, icon on the left, the state next to it: " + repr(refresh))
+    filled = page.evaluate("() => Array.from(document.querySelectorAll('.az-btn--primary')).filter(b => !b.closest('.az-backdrop')).map(b => b.id)")
+    check(filled == ["reload"], "no other az-btn--primary outside dialogs: " + repr(filled))
+    check(page.get_attribute("#add", "class") == "az-btn az-btn--secondary az-btn--sm", "Add job is an outlined small button")
+    check(selected_tab(page) == "tab-overview" and not page.locator("#panel-overview").is_hidden() and
+          page.locator("#panel-timers").is_hidden() and page.locator("#panel-system").is_hidden(), "Overview is shown on opening")
+    order = page.evaluate("""() => { const t = document.querySelector('#tabs');
+        return [t.previousElementSibling.className, t.nextElementSibling.id, t.nextElementSibling.nextElementSibling.id,
+                t.nextElementSibling.nextElementSibling.nextElementSibling.id,
+                ['notices', 'alerts', 'sys-alerts'].some(id => document.getElementById(id).closest('[role=tabpanel]'))]; }""")
+    check(order == ["az-page-header", "notices", "alerts", "sys-alerts", False],
+          "tabs right under the header, messages right under the tabs, outside the panels: " + repr(order))
     check("Am 2. jedes Monats um 03:00" in body, "describe monthly")
     check("Sonntags um 01:30" in body, "describe weekly")
     check("Montags um 05:00" in body, "disabled job shown (old marker)")
@@ -122,12 +151,7 @@ with sync_playwright() as p:
     check("Nicht erfasst" in row(page, 1).inner_text() and row(page, 1).locator("[data-key='capture:25']").count() == 1,
           "not recorded + record link")
     check(row(page, 2).locator("td[data-last]").inner_text().strip() == "—", "disabled, not recorded: dash")
-    check(page.locator("#crond-body .az-label--warning").count() == 2, "ignored cron.d files flagged (name, owner)")
-    check(page.locator("#crond-body .az-label--warning").nth(1).get_attribute("title").startswith("cron überspringt diese Datei, weil"),
-          "owner reason as hint")
     check("/home/eve/run.sh" not in page.inner_text("#tl-card"), "skipped cron.d file not in timeline")
-    check(not page.locator("#users-card").is_hidden() and "www-data" in page.inner_text("#users-body"), "users card")
-    check("logrotate" in page.inner_text("#periodic-body") and "keine" in page.inner_text("#periodic-body"), "periodic scripts")
     check(f"Cron Jobs {VERSION}" in page.inner_text("footer"), "signature version")
     check(re.search(r"Ortszeit", page.inner_text("#root-body")) is not None, "local time hint (browser Berlin, server UTC)")
     check(page.inner_text("#notices").strip() == "", "no notices on a healthy server")
@@ -142,7 +166,24 @@ with sync_playwright() as p:
     check(page.locator(".cron-tl-band").count() >= 2, "frequent jobs as band")
     check(page.locator(".cron-tl-mark.is-timer:not(.is-legend)").count() >= 3, "timer marks")
     check(page.locator(".cron-tl-midnight").count() == 1, "midnight line")
+    light = page.evaluate("""() => { const r = getComputedStyle(document.querySelector('#reload'));
+        const t = getComputedStyle(document.querySelector('#tab-overview'));
+        return [r.backgroundColor, t.color, t.borderBottomColor]; }""")
+    check(light == ["rgb(10, 10, 15)", "rgb(10, 10, 15)", "rgb(125, 95, 34)"],
+          "light: Refresh in ink, selected tab in ink with a bronze line: " + repr(light))
+    shot(page, "de-light-1280")
+    # System tab: /etc/crontab, /etc/cron.d, other users, periodic scripts
+    show_tab(page, "system")
+    check(page.locator("#crond-body .az-label--warning").count() == 2, "ignored cron.d files flagged (name, owner)")
+    check(page.locator("#crond-body .az-label--warning").nth(1).get_attribute("title").startswith("cron überspringt diese Datei, weil"),
+          "owner reason as hint")
+    check(not page.locator("#etc-card").is_hidden() and not page.locator("#crond-card").is_hidden(), "/etc/crontab and /etc/cron.d")
+    check(not page.locator("#users-card").is_hidden() and "www-data" in page.inner_text("#users-body"), "users card")
+    check("logrotate" in page.inner_text("#periodic-body") and "keine" in page.inner_text("#periodic-body"), "periodic scripts")
+    check(page.locator("#tl-card").is_hidden() and page.locator("#timers-card").is_hidden(), "only the System cards")
+    shot(page, "de-light-1280-system")
     # timers
+    show_tab(page, "timers")
     tm = page.inner_text("#timers-card")
     check(page.locator("#timers-body tbody tr").count() == 6, "6 timers")
     check("aus der root-Crontab übernommen" in tm, "converted timer recognised")
@@ -156,7 +197,7 @@ with sync_playwright() as p:
     loaded = page.evaluate("() => Array.from(document.fonts).filter(f => f.status === 'loaded').map(f => f.family)")
     check(any("DM Sans" in f for f in loaded), "DM Sans loaded: " + repr(loaded))
     check(not page.evaluate("() => document.documentElement.classList.contains('pf-v6-theme-dark')"), "light theme")
-    shot(page, "de-light-1280")
+    shot(page, "de-light-1280-timers")
     check(not page.problems, "no console problems (light): " + repr(page.problems))
     page.context.close()
 
@@ -164,9 +205,13 @@ with sync_playwright() as p:
     check(page.evaluate("() => document.documentElement.classList.contains('pf-v6-theme-dark')"), "dark class set")
     bg = page.evaluate("() => getComputedStyle(document.body).backgroundColor")
     check(bg == "rgb(10, 10, 15)", "dark background (Azentrius ink) " + bg)
-    pbg = page.evaluate("() => getComputedStyle(document.querySelector('#add')).backgroundColor")
-    check(pbg == "rgb(200, 169, 110)", "primary button gold in dark " + pbg)
+    pbg = page.evaluate("() => getComputedStyle(document.querySelector('#reload')).backgroundColor")
+    check(pbg == "rgb(200, 169, 110)", "Refresh gold in dark " + pbg)
+    sel = page.evaluate("() => { const s = getComputedStyle(document.querySelector('#tab-overview')); return [s.color, s.borderBottomColor]; }")
+    check(sel == ["rgb(200, 169, 110)", "rgb(200, 169, 110)"], "selected tab gold in dark: " + repr(sel))
     shot(page, "de-dark-1280")
+    show_tab(page, "system")
+    shot(page, "de-dark-1280-system")
     page.evaluate("() => window.dispatchEvent(new CustomEvent('cockpit-style', { detail: { style: 'light' } }))")
     check(not page.evaluate("() => document.documentElement.classList.contains('pf-v6-theme-dark')"), "cockpit-style event switches")
     check(not page.problems, "no console problems (dark): " + repr(page.problems))
@@ -190,6 +235,70 @@ with sync_playwright() as p:
         shot(page, "de-%s-390" % ("dark" if dark else "light"))
         check(not page.problems, "no console problems (mobile): " + repr(page.problems))
         page.context.close()
+
+    # ---------- tabs and Refresh ----------
+    page = open_page(browser, "delay=300&mta=no")
+    tabs_state = """() => Array.from(document.querySelectorAll('#tabs [role=tab]')).map(t => [t.id, t.getAttribute('aria-selected'),
+        t.getAttribute('tabindex'), document.getElementById(t.getAttribute('aria-controls')).hidden])"""
+    # mouse
+    page.click("#tab-timers")
+    check(page.evaluate(tabs_state) == [["tab-overview", "false", "-1", True], ["tab-timers", "true", None, False],
+                                         ["tab-system", "false", "-1", True]], "click: timers shown " + repr(page.evaluate(tabs_state)))
+    check(not page.locator("#timers-card").is_hidden() and page.locator("#root-body").is_hidden(), "timers card only")
+    page.click("#tab-system")
+    check(selected_tab(page) == "tab-system" and not page.locator("#crond-card").is_hidden(), "click: System shown")
+    # keyboard: arrows (with wrap-around), Home, End; the tab shown follows the focus
+    page.focus("#tab-system")
+    keys = []
+    for key in ["ArrowLeft", "ArrowLeft", "ArrowLeft", "ArrowRight", "Home", "End"]:
+        page.keyboard.press(key)
+        keys.append([selected_tab(page), page.evaluate("() => document.activeElement.id")])
+    check(keys == [["tab-timers"] * 2, ["tab-overview"] * 2, ["tab-system"] * 2, ["tab-overview"] * 2,
+                   ["tab-overview"] * 2, ["tab-system"] * 2], "keyboard: " + repr(keys))
+    page.keyboard.press("Tab")
+    check(not page.evaluate("() => !!document.activeElement.closest('#tabs')"), "only the tab shown is in the tab order")
+    check(page.evaluate("() => location.hash") == "", "switching does not change the address")
+    # Refresh: off and "Lädt …" while loading, keeps the tab
+    calls = len(mock(page, "calls"))
+    page.click("#tab-timers")
+    check(len(mock(page, "calls")) == calls, "switching loads nothing")
+    page.click("#reload")
+    wait_js(page, "document.querySelector('#reload').disabled")
+    loading_state = page.evaluate("""() => { const b = document.querySelector('#reload');
+        return [b.innerText.trim(), b.getAttribute('aria-busy'), b.firstElementChild.matches('svg.az-icon')]; }""")
+    check(loading_state == ["Lädt …", "true", True], "Refresh while loading: " + repr(loading_state))
+    wait_idle(page)
+    check(page.inner_text("#reload").strip() == "Aktualisieren" and page.get_attribute("#reload", "aria-busy") == "false",
+          "Refresh after loading")
+    check(selected_tab(page) == "tab-timers", "Refresh keeps the tab")
+    # messages for the whole page are visible in every tab: a notice, an alert, the system read error
+    page.evaluate("() => { window.__mock.failSystem = true; }")
+    page.click("#reload")
+    wait_idle(page)
+    page.evaluate("() => { window.__mock.failSystem = false; }")
+    for name in ["overview", "timers", "system"]:
+        show_tab(page, name)
+        visible = page.evaluate("""() => ['notices', 'sys-alerts'].map(id => {
+            const el = document.getElementById(id); return !!el.offsetParent && el.innerText.trim().length > 0; })""")
+        check(visible == [True, True], f"notice and error visible in {name}: " + repr(visible))
+    show_tab(page, "overview")
+    row(page, 1).locator(".az-switch").click()
+    wait_idle(page)
+    for name in ["timers", "system", "overview"]:
+        show_tab(page, name)
+        check(page.locator("#alerts").is_visible() and "ausgeschaltet" in page.inner_text("#alerts"), f"alert visible in {name}")
+    check(not page.problems, "no console problems (tabs): " + repr(page.problems))
+    page.context.close()
+
+    # focus that goes back to something in another tab shows that tab first: a switch is
+    # turned off, and while it saves the System tab is opened
+    page = open_page(browser, "delay=300")
+    row(page, 1).locator(".az-switch").click()
+    show_tab(page, "system")
+    wait_idle(page)
+    check(selected_tab(page) == "tab-overview" and focused_key(page) == "toggle:25",
+          "focus back on the switch, in its tab: " + repr([selected_tab(page), focused_key(page)]))
+    page.context.close()
 
     # ---------- switching, editing, adding, deleting ----------
     page = open_page(browser)
@@ -824,6 +933,7 @@ with sync_playwright() as p:
                       and f not in tl, f"{flavor}: {f} skipped ({reason}): {row_info!r}")
         check(got["link-broken"]["cells"].count("—") == 3, f"{flavor}: a file without jobs shows dashes: {got['link-broken']!r}")
         if flavor == "debian":
+            show_tab(page, "system")
             page.locator("#crond-card").scroll_into_view_if_needed()
             shot(page, "de-light-crond", full=False)
         check(not page.problems, f"no console problems (cron.d, {flavor}): " + repr(page.problems))
@@ -837,13 +947,18 @@ with sync_playwright() as p:
     page = open_page(browser, "su=none")
     check("Administrativer Zugriff nötig" in page.inner_text("#root-body"), "denied state")
     check(page.locator("#add").is_hidden(), "no add button when denied")
-    check(page.locator("#users-card").is_hidden(), "users card hidden without admin")
     check(page.locator("#orphans").is_hidden(), "no leftover runs without admin")
-    check(not page.locator("#etc-card").is_hidden() and not page.locator("#tl-card").is_hidden(), "system crontabs and timeline without admin")
+    check(not page.locator("#tl-card").is_hidden(), "timeline without admin")
+    show_tab(page, "system")
+    check(page.locator("#users-card").is_hidden(), "users card hidden without admin")
+    check(not page.locator("#etc-card").is_hidden(), "system crontabs without admin")
+    show_tab(page, "timers")
     check(not page.locator("#timers-card").is_hidden(), "timers without admin")
+    show_tab(page, "overview")
     shot(page, "de-light-denied")
     page.evaluate("() => window.__mock.setSuperuser('sudo')")
     wait_js(page, "document.querySelectorAll('#root-body tbody tr').length === 5")
+    show_tab(page, "system")
     check(not page.locator("#users-card").is_hidden(), "users card after admin")
     page.context.close()
 
@@ -866,7 +981,9 @@ with sync_playwright() as p:
     # ---------- English, server in Berlin ----------
     page = open_page(browser, "lang=en&tz=Europe/Berlin")
     t = page.inner_text("body")
-    check("View and manage scheduled jobs on public-host." in t, "en desc")
+    check(page.inner_text("#reload").strip() == "Refresh" and page.locator(".az-page-desc").count() == 0, "en header: Refresh, no description")
+    check([page.inner_text("#tab-" + n).strip() for n in ("overview", "timers", "system")] == ["Overview", "systemd timers", "System"],
+          "en tabs")
     check("On day 2 of every month at 03:00" in t, "en describe")
     check("Server time Europe/Berlin" in t, "en tz")
     check("The next 24 hours" in t and "systemd timers" in t and "Last run" in t, "en sections")
@@ -880,19 +997,19 @@ with sync_playwright() as p:
 
     # ---------- language like Cockpit ----------
     page = open_page(browser, "nopo=1")
-    check("View and manage scheduled jobs" in page.inner_text("body"), "fallback English without po.js and cookie")
+    check(page.inner_text("#tabs").startswith("Overview"), "fallback English without po.js and cookie")
     page.context.close()
     page = open_page(browser, "nopo=1", cookie="de-de")
-    check("Geplante Aufgaben" in page.inner_text("body"), "German from CockpitLang cookie")
+    check(page.inner_text("#tabs").startswith("Übersicht"), "German from CockpitLang cookie")
     page.context.close()
     page = open_page(browser, "lang=en", cookie="de-de")
-    check("Geplante Aufgaben" in page.inner_text("body"), "cookie (Cockpit menu choice) wins")
+    check(page.inner_text("#tabs").startswith("Übersicht"), "cookie (Cockpit menu choice) wins")
     page.context.close()
     page = open_page(browser, "nopo=1", storage_lang="de")
-    check("Geplante Aufgaben" in page.inner_text("body"), "German from localStorage cockpit.lang")
+    check(page.inner_text("#tabs").startswith("Übersicht"), "German from localStorage cockpit.lang")
     page.context.close()
     page = open_page(browser, "lang=fr")
-    check("View and manage scheduled jobs" in page.inner_text("body"), "other languages fall back to English")
+    check(page.inner_text("#tabs").startswith("Overview"), "other languages fall back to English")
     page.context.close()
 
     # ---------- server situations ----------
@@ -912,8 +1029,11 @@ with sync_playwright() as p:
     page.context.close()
 
     page = open_page(browser, "systemd=no")
-    check(page.locator("#timers-card").is_hidden(), "no timers card without systemd")
     check(not page.locator("#tl-card").is_hidden(), "timeline without systemd")
+    show_tab(page, "timers")
+    check(page.locator("#timers-card").is_hidden() and page.locator("#timers-none").is_visible() and
+          "keine systemd-Timer" in page.inner_text("#timers-none"), "the timers tab says there are none")
+    show_tab(page, "overview")
     row(page, 1).locator("[data-key^=more]").click()
     check("umwandeln" not in page.inner_text("#row-menu"), "no conversion without systemd")
     check(not page.problems, "no console problems (no systemd): " + repr(page.problems))

@@ -21,96 +21,107 @@
 <div class="az-page" id="page">
 
   <header class="az-page-header">
-    <div>
-      <h1 class="az-page-title" id="page-title" tabindex="-1">Cron Jobs</h1>
-      <p class="az-page-desc" id="page-desc"></p>
-    </div>
+    <h1 class="az-page-title" id="page-title" tabindex="-1">Cron Jobs</h1>
     <div class="az-page-actions">
       <span class="az-meta" id="meta"></span>
-      <button class="az-btn az-btn--secondary" type="button" id="reload" data-key="reload"><span data-icon="sync-alt"></span><span data-t="reload">Reload</span></button>
+      <button class="az-btn az-btn--primary" type="button" id="reload" data-key="reload"><span data-icon="sync-alt"></span><span id="reload-label" data-t="refresh">Refresh</span></button>
     </div>
   </header>
+
+  <nav class="az-tabs" role="tablist" id="tabs" data-t-label="tabsLabel" aria-label="Sections">
+    <button class="az-tab" role="tab" type="button" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-t="tabOverview">Overview</button>
+    <button class="az-tab" role="tab" type="button" id="tab-timers" aria-controls="panel-timers" aria-selected="false" tabindex="-1" data-t="tabTimers">systemd timers</button>
+    <button class="az-tab" role="tab" type="button" id="tab-system" aria-controls="panel-system" aria-selected="false" tabindex="-1" data-t="tabSystem">System</button>
+  </nav>
 
   <div class="cron-alerts" id="notices"></div>
   <div class="cron-alerts" id="alerts" aria-live="polite"></div>
   <div class="cron-alerts" id="sys-alerts"></div>
 
-  <section class="az-card" id="tl-card" aria-labelledby="tl-title" hidden>
-    <div class="az-card__header cron-tl-header">
-      <div>
-        <h2 class="az-card__title" id="tl-title" data-t="tlTitle">The next 24 hours</h2>
-        <p class="az-card__desc" data-t="tlDesc"></p>
+  <section class="cron-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+    <section class="az-card" id="tl-card" aria-labelledby="tl-title" hidden>
+      <div class="az-card__header cron-tl-header">
+        <div>
+          <h2 class="az-card__title" id="tl-title" data-t="tlTitle">The next 24 hours</h2>
+          <p class="az-card__desc" data-t="tlDesc"></p>
+        </div>
+        <div class="cron-tl-legend" aria-hidden="true">
+          <span><span class="cron-tl-mark is-legend"></span><span data-t="legendCron">Cron job</span></span>
+          <span><span class="cron-tl-mark is-timer is-legend"></span><span data-t="legendTimer">systemd timer</span></span>
+        </div>
       </div>
-      <div class="cron-tl-legend" aria-hidden="true">
-        <span><span class="cron-tl-mark is-legend"></span><span data-t="legendCron">Cron job</span></span>
-        <span><span class="cron-tl-mark is-timer is-legend"></span><span data-t="legendTimer">systemd timer</span></span>
+      <div class="cron-tl" id="tl-body"></div>
+    </section>
+
+    <section class="az-card" aria-labelledby="root-title">
+      <div class="az-card__header">
+        <div>
+          <h2 class="az-card__title" id="root-title" data-t="rootTitle">root crontab</h2>
+          <p class="az-card__desc" data-t="rootDesc"></p>
+        </div>
+        <div class="az-card__actions">
+          <button class="az-btn az-btn--secondary az-btn--sm" type="button" id="add" data-key="add" hidden><span data-icon="plus"></span><span data-t="add">Add job</span></button>
+        </div>
       </div>
-    </div>
-    <div class="cron-tl" id="tl-body"></div>
+      <div id="root-body"><p class="cron-state" data-t="loading">Loading …</p></div>
+      <div class="cron-orphans" id="orphans" hidden></div>
+    </section>
   </section>
 
-  <section class="az-card" aria-labelledby="root-title">
-    <div class="az-card__header">
-      <div>
-        <h2 class="az-card__title" id="root-title" data-t="rootTitle">root crontab</h2>
-        <p class="az-card__desc" data-t="rootDesc"></p>
+  <section class="cron-panel" id="panel-timers" role="tabpanel" aria-labelledby="tab-timers" hidden>
+    <p class="cron-state" id="timers-none" data-t="timersNone" hidden>This server has no systemd timers.</p>
+
+    <section class="az-card" id="timers-card" aria-labelledby="timers-title" hidden>
+      <div class="az-card__header">
+        <div>
+          <div class="cron-title-row"><h2 class="az-card__title" id="timers-title" data-t="timersTitle">systemd timers</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+          <p class="az-card__desc" data-t="timersDesc"></p>
+        </div>
       </div>
-      <div class="az-card__actions">
-        <button class="az-btn az-btn--primary az-btn--sm" type="button" id="add" data-key="add" hidden><span data-icon="plus"></span><span data-t="add">Add job</span></button>
-      </div>
-    </div>
-    <div id="root-body"><p class="cron-state" data-t="loading">Loading …</p></div>
-    <div class="cron-orphans" id="orphans" hidden></div>
+      <div id="timers-body"></div>
+    </section>
   </section>
 
-  <section class="az-card" id="timers-card" aria-labelledby="timers-title" hidden>
-    <div class="az-card__header">
-      <div>
-        <div class="cron-title-row"><h2 class="az-card__title" id="timers-title" data-t="timersTitle">systemd timers</h2><span class="az-label" data-t="readOnly">Read only</span></div>
-        <p class="az-card__desc" data-t="timersDesc"></p>
+  <section class="cron-panel" id="panel-system" role="tabpanel" aria-labelledby="tab-system" hidden>
+    <section class="az-card" id="etc-card" aria-labelledby="etc-title" hidden>
+      <div class="az-card__header">
+        <div>
+          <div class="cron-title-row"><h2 class="az-card__title" id="etc-title">/etc/crontab</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+          <p class="az-card__desc" data-t="etcDesc"></p>
+        </div>
       </div>
-    </div>
-    <div id="timers-body"></div>
-  </section>
+      <div id="etc-body"></div>
+    </section>
 
-  <section class="az-card" id="etc-card" aria-labelledby="etc-title" hidden>
-    <div class="az-card__header">
-      <div>
-        <div class="cron-title-row"><h2 class="az-card__title" id="etc-title">/etc/crontab</h2><span class="az-label" data-t="readOnly">Read only</span></div>
-        <p class="az-card__desc" data-t="etcDesc"></p>
+    <section class="az-card" id="crond-card" aria-labelledby="crond-title" hidden>
+      <div class="az-card__header">
+        <div>
+          <div class="cron-title-row"><h2 class="az-card__title" id="crond-title">/etc/cron.d</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+          <p class="az-card__desc" data-t="crondDesc"></p>
+        </div>
       </div>
-    </div>
-    <div id="etc-body"></div>
-  </section>
+      <div id="crond-body"></div>
+    </section>
 
-  <section class="az-card" id="crond-card" aria-labelledby="crond-title" hidden>
-    <div class="az-card__header">
-      <div>
-        <div class="cron-title-row"><h2 class="az-card__title" id="crond-title">/etc/cron.d</h2><span class="az-label" data-t="readOnly">Read only</span></div>
-        <p class="az-card__desc" data-t="crondDesc"></p>
+    <section class="az-card" id="users-card" aria-labelledby="users-title" hidden>
+      <div class="az-card__header">
+        <div>
+          <div class="cron-title-row"><h2 class="az-card__title" id="users-title" data-t="usersTitle">Other users</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+          <p class="az-card__desc" data-t="usersDesc"></p>
+        </div>
       </div>
-    </div>
-    <div id="crond-body"></div>
-  </section>
+      <div id="users-body"></div>
+    </section>
 
-  <section class="az-card" id="users-card" aria-labelledby="users-title" hidden>
-    <div class="az-card__header">
-      <div>
-        <div class="cron-title-row"><h2 class="az-card__title" id="users-title" data-t="usersTitle">Other users</h2><span class="az-label" data-t="readOnly">Read only</span></div>
-        <p class="az-card__desc" data-t="usersDesc"></p>
+    <section class="az-card" id="periodic-card" aria-labelledby="periodic-title" hidden>
+      <div class="az-card__header">
+        <div>
+          <div class="cron-title-row"><h2 class="az-card__title" id="periodic-title" data-t="periodicTitle">Periodic scripts</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+          <p class="az-card__desc" data-t="periodicDesc"></p>
+        </div>
       </div>
-    </div>
-    <div id="users-body"></div>
-  </section>
-
-  <section class="az-card" id="periodic-card" aria-labelledby="periodic-title" hidden>
-    <div class="az-card__header">
-      <div>
-        <div class="cron-title-row"><h2 class="az-card__title" id="periodic-title" data-t="periodicTitle">Periodic scripts</h2><span class="az-label" data-t="readOnly">Read only</span></div>
-        <p class="az-card__desc" data-t="periodicDesc"></p>
-      </div>
-    </div>
-    <div id="periodic-body"></div>
+      <div id="periodic-body"></div>
+    </section>
   </section>
 
   <footer class="az-signature cron-footer">
