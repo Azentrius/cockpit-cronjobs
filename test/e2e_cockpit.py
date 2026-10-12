@@ -78,6 +78,8 @@ with sync_playwright() as p:
     problems = []
     page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: problems.append("pageerror: " + str(e)))
+    # The console names the status of a failed load, not the file.
+    page.on("response", lambda r: problems.append(f"HTTP {r.status} {r.url}") if r.status >= 400 else None)
     page.goto(URL)
     wait_js(page, "document.querySelector('#meta').textContent.includes('Serverzeit')")
     wait_idle(page)
