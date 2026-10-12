@@ -1,0 +1,15 @@
+# Dependabot version updates for the GitHub Actions used in .github/workflows.
+# The page itself has no package dependencies.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
