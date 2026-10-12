@@ -5,11 +5,14 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 PKGDIR = $(DESTDIR)$(PREFIX)/share/cockpit/cronjobs
 VERSION := $(shell sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
+# Reproducible archives: file times from the last commit.
+SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
+PACKAGE = cockpit-cronjobs-$(VERSION).tar.gz
 
-.PHONY: all install uninstall devel-install devel-uninstall check check-ui dist
+.PHONY: all install uninstall devel-install devel-uninstall check check-ui dist package
 
 all:
-	@echo "Nothing to build. Try: make install, make check, make check-ui, make dist"
+	@echo "Nothing to build. Try: make install, make check, make check-ui, make package"
 
 install:
 	install -d $(PKGDIR) $(PKGDIR)/lib $(PKGDIR)/i18n
@@ -40,6 +43,22 @@ check:
 check-ui:
 	python3 test/ui_test.py
 
+# Source archive of the last commit.
 dist:
-	git archive --format=tar.gz --prefix=cockpit-cronjobs-$(VERSION)/ -o cockpit-cronjobs-$(VERSION).tar.gz HEAD
-	@echo cockpit-cronjobs-$(VERSION).tar.gz
+	git archive --format=tar.gz --prefix=cockpit-cronjobs-$(VERSION)/ -o cockpit-cronjobs-$(VERSION)-source.tar.gz HEAD
+	@echo cockpit-cronjobs-$(VERSION)-source.tar.gz
+
+# Ready-to-install package: a directory "cronjobs" for /usr/share/cockpit or
+# /usr/local/share/cockpit, plus SHA256SUMS.
+package:
+	rm -rf build && mkdir -p build/cronjobs
+	cp -R src/. build/cronjobs/
+	find build/cronjobs -type d -exec chmod 755 {} +
+	find build/cronjobs -type f -exec chmod 644 {} +
+	chmod 755 build/cronjobs/cockpit-cronjobs-run
+	cd build && tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@$(SOURCE_DATE_EPOCH) \
+		-cf - cronjobs | gzip -9n > ../$(PACKAGE)
+	sha256sum $(PACKAGE) > SHA256SUMS
+	cd build/cronjobs && find . -type f | sort | xargs sha256sum | sed 's|  \./|  cronjobs/|' >> ../../SHA256SUMS
+	rm -rf build
+	@cat SHA256SUMS
