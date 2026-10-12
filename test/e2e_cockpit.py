@@ -212,8 +212,30 @@ with sync_playwright() as p:
     check("* * * * * echo hello-from-cron; echo to-stderr >&2; date +\\%F" in crontab(), "unwrapped again")
     check(not os.path.exists(f"{STATE}/runs/{job_id}"), "runs deleted")
 
+    # a recorded line removed by hand leaves its runs behind; they are offered and removed on request,
+    # but not while another crontab still mentions the ID
+    sh("crontab -u root -", input="".join(l + "\n" for l in crontab().rstrip("\n").split("\n") if f" {rec_id} " not in l))
+    with open("/etc/cron.d/cronjobs-e2e", "w") as f:
+        f.write(f"# {rec_id} is kept while this file mentions it\n")
+    page.click("#reload")
+    wait_idle(page)
+    check(page.locator("#orphans").is_hidden(), "an ID mentioned in /etc/cron.d is not offered")
+    os.remove("/etc/cron.d/cronjobs-e2e")
+    page.click("#reload")
+    wait_idle(page)
+    check(page.locator("#orphans").is_visible(), "leftover runs offered")
+    page.click("[data-key=orphans]")
+    check(rec_id in page.inner_text("#orph-body") and "KB" in page.inner_text("#orph-body"),
+          "leftover job listed with its size: " + page.inner_text("#orph-body"))
+    page.screenshot(path=os.path.join(SHOTS, "e2e-orphans.png"))
+    page.click(f"[data-key='orph:{rec_id}']")
+    wait_js(page, "document.querySelector('#orph-dlg').hidden")
+    wait_idle(page)
+    check(not os.path.exists(f"{STATE}/runs/{rec_id}"), "leftover runs removed")
+    check(page.locator("#orphans").is_hidden(), "no leftover line any more")
+
     # delete everything we added
-    for text in ["hello-from-cron", "sleep 307", "tr a-z A-Z", "printf"]:
+    for text in ["hello-from-cron", "sleep 307", "tr a-z A-Z"]:
         row_of(page, text).locator("[data-key^='more:']").click()
         page.locator(".cron-menu__item", has_text="Löschen").click()
         page.click("#del-confirm")

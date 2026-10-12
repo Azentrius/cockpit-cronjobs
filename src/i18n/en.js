@@ -241,6 +241,26 @@
         runsEmpty: "No runs recorded yet.",
         runsNote: (n, path) => `The last ${n} runs are kept, with up to 64 KB of output each, in \`${path}\`.`,
 
+        /* leftover runs */
+        orphansLine: n => n === 1 ? "The recorded runs of 1 job are still kept, but no crontab uses them any more."
+            : `The recorded runs of ${n} jobs are still kept, but no crontab uses them any more.`,
+        orphansShow: "Review",
+        orphansTitle: "Leftover runs",
+        orphansIntro: "No crontab uses these recorded runs any more, for example because their line was changed " +
+                      "or removed outside this page.",
+        colJobId: "Job ID",
+        colRuns: "Runs",
+        colSize: "Size",
+        orphansNote: path => `Removing deletes the recorded results and output in \`${path}\`. No crontab is changed.`,
+        orphansRemove: id => `Remove the runs of ${id}`,
+        orphansRemoveAll: "Remove all",
+        removing: "Removing …",
+        orphansNone: "No leftover runs.",
+        okOrphansRemoved: n => n === 1 ? "Leftover runs of 1 job removed" : `Leftover runs of ${n} jobs removed`,
+        orphansKeptTitle: "Some runs were kept",
+        orphansKept: ids => `A crontab uses them again, or a run is going on: ${ids}.`,
+        orphansFailed: "Removing failed",
+
         /* convert */
         convTitle: "Convert to systemd timer",
         convIntro: "The job then runs as a systemd timer instead of through cron. Its status, log and errors " +

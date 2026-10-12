@@ -242,6 +242,26 @@
         runsEmpty: "Noch keine Läufe erfasst.",
         runsNote: (n, path) => `Aufbewahrt werden die letzten ${n} Läufe mit je bis zu 64 KB Ausgabe, unter \`${path}\`.`,
 
+        /* Übrig gebliebene Läufe */
+        orphansLine: n => n === 1 ? "Die erfassten Läufe von 1 Job sind noch gespeichert, aber keine Crontab verwendet sie mehr."
+            : `Die erfassten Läufe von ${n} Jobs sind noch gespeichert, aber keine Crontab verwendet sie mehr.`,
+        orphansShow: "Ansehen",
+        orphansTitle: "Übrig gebliebene Läufe",
+        orphansIntro: "Keine Crontab verwendet diese erfassten Läufe mehr, etwa weil ihre Zeile außerhalb dieser Seite " +
+                      "geändert oder entfernt wurde.",
+        colJobId: "Job-ID",
+        colRuns: "Läufe",
+        colSize: "Größe",
+        orphansNote: path => `Entfernen löscht die erfassten Ergebnisse und Ausgaben in \`${path}\`. Keine Crontab wird geändert.`,
+        orphansRemove: id => `Läufe von ${id} entfernen`,
+        orphansRemoveAll: "Alle entfernen",
+        removing: "Wird entfernt …",
+        orphansNone: "Keine übrig gebliebenen Läufe.",
+        okOrphansRemoved: n => n === 1 ? "Übrig gebliebene Läufe von 1 Job entfernt" : `Übrig gebliebene Läufe von ${n} Jobs entfernt`,
+        orphansKeptTitle: "Einige Läufe wurden behalten",
+        orphansKept: ids => `Eine Crontab verwendet sie wieder, oder ein Lauf ist noch nicht beendet: ${ids}.`,
+        orphansFailed: "Entfernen fehlgeschlagen",
+
         /* Umwandeln */
         convTitle: "In systemd-Timer umwandeln",
         convIntro: "Der Job läuft danach als systemd-Timer statt über cron. Status, Protokoll und Fehler sehen Sie " +

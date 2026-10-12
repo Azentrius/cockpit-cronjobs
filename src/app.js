@@ -381,15 +381,19 @@ exit 0
        so that nobody can fake a section with a line in their own crontab. Read as bytes,
        so that a file in another encoding does not take everything else down with it.
        cron.d sections carry owner and mode: cron skips files that are not root's or
-       that others can write to. */
+       that others can write to. uid tells whether it ran as root (other users'
+       crontabs need that); /etc/anacrontab is only read to see which recorded jobs
+       are still mentioned somewhere. */
     const SYSTEM_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
 show() { tr -d '\\036' < "$1" 2>/dev/null; echo; }
 name() { printf '%s' "$1" | tr -d '\\036\\n'; }
+sec uid; id -u
 sec etc; show /etc/crontab
 for f in /etc/cron.d/*; do
   [ -f "$f" ] || continue
   sec "d:$(stat -L -c '%u:%a' "$f" 2>/dev/null):$(name "\${f##*/}")"; show "$f"
 done
+if [ -f /etc/anacrontab ]; then sec anacron; show /etc/anacrontab; fi
 spool=
 for d in /var/spool/cron/crontabs /var/spool/cron/tabs /var/spool/cron; do
   if [ -d "$d" ]; then spool=$d; break; fi
@@ -427,10 +431,14 @@ exit 0
             .then(out => parseSystem(decode(out), flavor));
     }
 
+    /* sys.texts: every crontab as read, for finding the recorded jobs no line uses
+       any more (see orphanList). */
     function parseSystem(out, flavor) {
-        const sys = { etc: [], crond: [], users: [], periodic: [] };
+        const sys = { etc: [], crond: [], users: [], periodic: [], root: false, texts: [] };
         sections(out).forEach(({ name, body }) => {
-            if (name === "etc") sys.etc = C.parseSystemCrontab(body);
+            if (name === "etc" || name === "anacron" || /^[du]:/.test(name)) sys.texts.push(body);
+            if (name === "uid") sys.root = body.trim() === "0";
+            else if (name === "etc") sys.etc = C.parseSystemCrontab(body);
             else if (name.startsWith("d:")) {
                 const m = /^d:(\d*):([0-7]*):(.*)$/.exec(name);
                 if (!m) return;
@@ -457,13 +465,14 @@ exit 0
         return sys;
     }
 
-    /* Recorded runs of all jobs (see lib/runs.js). A run marker whose process is gone
-       is reported with ALIVE 0. */
+    /* Recorded runs of all jobs (see lib/runs.js), with the disk use of each
+       directory in KB. A run marker whose process is gone is reported with ALIVE 0. */
     const RUNS_SCRIPT = `base='${RUNS_DIR}'
 [ -d "$base" ] || exit 0
 for d in "$base"/*; do
   [ -d "$d" ] || continue
   printf '\\036%s\\n' "\${d##*/}"
+  printf 'size %s\\n' "$(du -sk "$d" 2>/dev/null | cut -f1)"
   tail -n ${KEEP_RUNS} "$d/runs.jsonl" 2>/dev/null
   for r in "$d"/*.running; do
     [ -f "$r" ] || continue
@@ -502,6 +511,69 @@ exit 0
     function removeRunsIfUnused(id) {
         if (state.root.status !== "ok" || takenIds(state.root.entries).has(id)) return Promise.resolve();
         return removeRuns(id).catch(() => {});
+    }
+
+    /* Removes the run directories of recorded jobs that no crontab uses any more. Under
+       the crontab lock, every ID is checked again: a directory stays when its ID
+       appears as a word anywhere in the root crontab, /etc/crontab, /etc/anacrontab,
+       /etc/cron.d or another user's crontab ("used"), or while a run is going on
+       ("running"). If one of these files cannot be read, nothing is removed.
+       Arguments: the IDs. Output: "removed|gone|used|running ID" for each.
+       Exit 4 = locked, else an error. */
+    const REMOVE_ORPHANS_SCRIPT = `set -u
+trap '' TERM HUP INT
+umask 077
+base='${RUNS_DIR}'
+[ -d "$base" ] || exit 0
+exec 9>'${STATE_DIR}/.crontab.lock'
+flock -w 10 9 || exit 4
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+if ! crontab -l -u root > "$tmp/all" 2> "$tmp/err"; then
+  grep -q "no crontab for" "$tmp/err" || { cat "$tmp/err" >&2; exit 1; }
+  : > "$tmp/all"
+fi
+for f in /etc/crontab /etc/anacrontab /etc/cron.d/* /var/spool/cron/crontabs/* /var/spool/cron/tabs/* /var/spool/cron/*; do
+  [ -f "$f" ] || continue
+  { cat -- "$f" && echo; } >> "$tmp/all" || exit 1
+done
+for id in "$@"; do
+  case $id in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+  [ \${#id} -le 64 ] || continue
+  d=$base/$id
+  if [ ! -d "$d" ]; then echo "gone $id"; continue; fi
+  grep -qE "(^|[^A-Za-z0-9_-])$id([^A-Za-z0-9_-]|\\$)" "$tmp/all"
+  case $? in
+    0) echo "used $id"; continue ;;
+    1) ;;
+    *) exit 1 ;;
+  esac
+  alive=0
+  for r in "$d"/*.running; do
+    [ -f "$r" ] || continue
+    pid=$(sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$r" | head -n 1)
+    if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] && tr '\\000' ' ' < "/proc/$pid/cmdline" | grep -q cockpit-cronjobs-run; then
+      alive=1
+    fi
+  done
+  if [ "$alive" = 1 ]; then echo "running $id"; continue; fi
+  rm -rf -- "$d" || exit 1
+  echo "removed $id"
+done
+exit 0
+`;
+
+    /* Result: { removed: [ID…], kept: [ID…] }; "gone" counts as removed. */
+    function removeOrphans(ids) {
+        const args = ["sh", "-c", REMOVE_ORPHANS_SCRIPT, "cockpit-cronjobs"].concat(ids.filter(id => R.ID_RE.test(id)));
+        return spawn(args, SPAWN_ROOT).then(out => {
+            const res = { removed: [], kept: [] };
+            String(out || "").split("\n").forEach(line => {
+                const m = /^(removed|gone|used|running) ([A-Za-z0-9_-]{1,64})$/.exec(line);
+                if (m) (m[1] === "removed" || m[1] === "gone" ? res.removed : res.kept).push(m[2]);
+            });
+            return res;
+        });
     }
 
     /* Installs the run recorder that comes with this page: written next to the target
@@ -674,14 +746,20 @@ exit 0
         sys: null,
         sysError: null,
         basics: { mta: null, crontab: true, flavor: "debian", systemd: false, cron: null, wrapper: null },
-        runs: { status: "none", byId: {} },     /* none | ok | denied | error */
+        runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setRoot */
         timers: { status: "none", list: [] },   /* none | ok | error */
         suAtLoad: undefined,
     };
 
+    /* Counts the versions of the root crontab the page has seen. Runs read before the
+       current version may still hold the runs of a line the page just removed, so
+       leftover runs are only shown from runs read since (see orphanList). */
+    let rootVersion = 0;
+
     /* read: { text, utf8 } from readRoot. A crontab that is not UTF-8, or would not be
        written back exactly, is shown read-only. */
     function setRoot(read) {
+        rootVersion++;
         const content = read.text;
         const entries = C.parseUserCrontab(content);
         const notUtf8 = !read.utf8;
@@ -786,7 +864,7 @@ exit 0
             state.sys = null;
             state.sysError = errText(sys.reason);
         }
-        if (runs.status === "fulfilled") state.runs = { status: "ok", byId: runs.value };
+        if (runs.status === "fulfilled") state.runs = { status: "ok", byId: runs.value, rootVersion };
         else state.runs = { status: isDenied(runs.reason) ? "denied" : "error", byId: {} };
         if (timers.status === "fulfilled") state.timers = timers.value ? { status: "ok", list: timers.value } : { status: "none", list: [] };
         else state.timers = { status: "error", list: [], message: errText(timers.reason) };
@@ -798,14 +876,17 @@ exit 0
     function refreshRuns() {
         if (runsLoading || state.root.status !== "ok") return Promise.resolve();
         runsLoading = true;
+        const version = rootVersion;
         return readRuns().then(byId => {
-            state.runs = { status: "ok", byId };
+            if (state.runs.status === "ok" && state.runs.rootVersion > version) return;   /* a reload was faster */
+            state.runs = { status: "ok", byId, rootVersion: version };
         }, ex => {
             if (isDenied(ex)) state.runs = { status: "denied", byId: {} };
         }).finally(() => {
             runsLoading = false;
             updateLastRuns();
             if (dialog && dialog.kind === "runs") renderRunsDialog();
+            if (dialog && dialog.kind === "orphans") renderOrphansDialog();
         });
     }
 
@@ -893,6 +974,7 @@ exit 0
             return copy;
         }, enabled ? T.okEnabled : T.okDisabled);
         reportResult(res);
+        if (res.ok) refreshRuns();
         restoreFocus("toggle:" + i);
     }
 
@@ -987,8 +1069,10 @@ exit 0
         renderNotices();
         renderTimeline();
         renderRoot();
+        renderOrphans();
         renderTimers();
         renderSystem();
+        renderOrphansDialog();
     }
 
     function renderHeader() {
@@ -1184,6 +1268,7 @@ exit 0
             const e = r.entries[i];
             if (e && e.kind === "job") fill(td, lastCell(e, i, editable, false));
         });
+        renderOrphans();
         if (focused && !document.activeElement.isConnected) restoreFocus(focused);
         renderNotices();
     }
@@ -1773,6 +1858,7 @@ exit 0
         $("del-cancel").disabled = false;
         $("del-close").disabled = false;
         if (res.ok && capture) await removeRunsIfUnused(capture.id);
+        if (res.ok) refreshRuns();
         if (res.ok || res.conflict) {
             const jobs = rootJobs();
             const first = noteIndex !== null ? noteIndex : index;
@@ -2086,6 +2172,142 @@ exit "$rc"
         else fallback();
     }
 
+    /* ---------- leftover runs ---------- */
+
+    /* Recorded jobs that no crontab uses any more (see lib/runs.js). Only when the root
+       crontab, all other crontabs (read as root) and the runs are known, and the runs
+       were read since the root crontab shown. */
+    function orphanList() {
+        if (state.root.status !== "ok" || state.runs.status !== "ok" || state.runs.rootVersion !== rootVersion ||
+            !state.sys || !state.sys.root) return [];
+        return R.orphans(state.runs.byId, [state.root.text].concat(state.sys.texts).join("\n"));
+    }
+
+    /* "12 KB", "3.4 MB" */
+    function fmtSize(kb) {
+        if (typeof kb !== "number") return "—";
+        if (kb < 1024) return kb + " KB";
+        return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 }).format(kb / 1024) + " MB";
+    }
+
+    /* A line under the root crontab while there are leftover runs. Only redrawn when
+       something changed, so that focus stays on its button. */
+    function renderOrphans() {
+        const box = $("orphans");
+        const list = orphanList();
+        const frozen = state.busy || loading;
+        const sig = list.map(o => o.id).join(" ") + (frozen ? " !" : "");
+        if (box.dataset.sig === sig) return;
+        box.dataset.sig = sig;
+        box.hidden = list.length === 0;
+        fill(box, list.length === 0 ? null : [
+            icon("history"),
+            h("span", null, T.orphansLine(list.length)),
+            h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", "data-key": "orphans",
+                          disabled: frozen, onclick: () => openOrphans("orphans") }, T.orphansShow),
+        ]);
+    }
+
+    function openOrphans(openerKey) {
+        if (state.busy || loading || orphanList().length === 0) return;
+        dialogError("orph-alert", null);
+        openDialog($("orph-dlg"), openerKey, { kind: "orphans" }, $("orph-close-btn"));
+        renderOrphansDialog();
+    }
+
+    function renderOrphansDialog() {
+        const d = dialog;
+        if (!d || d.kind !== "orphans") return;
+        const list = orphanList();
+        const body = $("orph-body");
+        const focusedKey = document.activeElement && body.contains(document.activeElement)
+            ? document.activeElement.dataset.key : null;
+        fill($("orph-note"), rich(T.orphansNote(RUNS_DIR + "/")));
+        $("orph-all").hidden = list.length < 2;
+        if (list.length === 0) {
+            fill(body, h("p", { class: "cron-state" }, T.orphansNone));
+            return;
+        }
+        const rows = list.map(o => {
+            const l = o.last ? runLabel(o.last) : null;
+            return h("tr", null,
+                h("td", { "data-label": T.colJobId }, h("span", { class: "az-mono" }, o.id)),
+                h("td", { class: "az-nowrap", "data-label": T.colLast }, l
+                    ? h("div", { class: "cron-cell" },
+                        h("span", null, labelEl(l.kind, l.icon, l.text)),
+                        h("span", { class: "az-cell-sub" }, fmtShort(o.last.start * 1000)))
+                    : h("span", { class: "cron-muted" }, T.noRunYet)),
+                h("td", { class: "az-nowrap", "data-label": T.colRuns }, String(o.count)),
+                h("td", { class: "az-nowrap", "data-label": T.colSize }, fmtSize(o.kb)),
+                h("td", { class: "az-cell-actions" },
+                    h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "data-key": "orph:" + o.id,
+                                  "aria-label": T.orphansRemove(o.id), title: T.orphansRemove(o.id), disabled: !!d.locked,
+                                  onclick: () => removeOrphanRuns([o.id]) }, icon("trash"))));
+        });
+        fill(body, h("div", { class: "cron-runs-table" },
+            h("table", { class: "az-table az-table--stack" },
+                h("thead", null, h("tr", null,
+                    h("th", { scope: "col" }, T.colJobId),
+                    h("th", { scope: "col" }, T.colLast),
+                    h("th", { scope: "col" }, T.colRuns),
+                    h("th", { scope: "col" }, T.colSize),
+                    h("th", { scope: "col" }, h("span", { class: "az-sr" }, T.colActions)))),
+                h("tbody", null, rows))));
+        if (focusedKey) {
+            const el = body.querySelector('[data-key="' + focusedKey + '"]');
+            if (el && !el.disabled) el.focus();
+        }
+    }
+
+    /* Removes the runs of the given jobs; the root script checks each one again. Jobs
+       it keeps (used again, or running) are reported, and the page reloads, since a
+       crontab changed outside the page. */
+    async function removeOrphanRuns(ids) {
+        const d = dialog;
+        if (!d || d.kind !== "orphans" || d.locked || state.busy || loading || ids.length === 0) return;
+        const buttons = [$("orph-close"), $("orph-close-btn")];
+        d.locked = true;
+        state.busy = true;
+        dialogError("orph-alert", null);
+        setBusyButton($("orph-all"), true, T.removing);
+        buttons.forEach(b => { b.disabled = true; });
+        renderOrphansDialog();
+        let res = null;
+        let error = null;
+        try {
+            res = await removeOrphans(ids);
+        } catch (ex) {
+            error = ex && ex.exit_status === 4 ? T.lockBusy : errText(ex);
+        }
+        state.busy = false;
+        d.locked = false;
+        setBusyButton($("orph-all"), false, T.removing);
+        buttons.forEach(b => { b.disabled = false; });
+        if (res) res.removed.forEach(id => { delete state.runs.byId[id]; });
+        renderOrphans();
+        if (error) {
+            renderOrphansDialog();
+            dialogError("orph-alert", error, T.orphansFailed);
+            $("orph-close-btn").focus();
+        } else if (res.kept.length) {
+            closeDialog("orphans");
+            showAlert("warning", T.orphansKeptTitle,
+                      (res.removed.length ? T.okOrphansRemoved(res.removed.length) + ". " : "") +
+                      T.orphansKept(joinList(res.kept.map(id => "`" + id + "`"))));
+            loadPending = true;
+        } else {
+            if (res.removed.length) showAlert("success", T.okOrphansRemoved(res.removed.length));
+            if (orphanList().length === 0) {
+                closeDialog("orphans");
+            } else {
+                renderOrphansDialog();
+                (d.el.querySelector("[data-key^='orph:']") || $("orph-close-btn")).focus();
+            }
+        }
+        if (loadPending) { loadPending = false; requestLoad(); }
+        else refreshRuns();
+    }
+
     /* ---------- convert to systemd timer ---------- */
 
     function convertBlocker(e, info, i) {
@@ -2365,6 +2587,10 @@ systemctl daemon-reload
             closeDialog();
             openCaptureOff(d.index, key);
         });
+
+        $("orph-all").addEventListener("click", () => removeOrphanRuns(orphanList().map(o => o.id)));
+        $("orph-close").addEventListener("click", () => closeDialog());
+        $("orph-close-btn").addEventListener("click", () => closeDialog());
 
         $("conv-form").addEventListener("submit", submitConvert);
         $("conv-cancel").addEventListener("click", () => closeDialog());
