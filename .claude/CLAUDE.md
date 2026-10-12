@@ -58,7 +58,8 @@ The same in every Azentrius repository; keep it when changing the repository or 
 
 Here: check tools in `test/requirements.txt` (pip); lint is `make lint` (`shellcheck --severity=warning`
 for the shell scripts, `ruff check` with the rules in `ruff.toml`); the artifact is `make package`,
-which takes only `src/`.
+which takes only `src/`. Ruleset `main` requires the check `e2e` as well (the end-to-end test, see
+“Commands”), so a pull request is merged only when `test` and `e2e` are green.
 
 ## Layout
 
@@ -91,8 +92,8 @@ make package              # cockpit-cronjobs-VERSION.tar.gz + SHA256SUMS, reprod
 CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py   # only on a throwaway machine, see the file
 ```
 
-CI runs the end-to-end test as job `e2e` on the runner's VM, set up as below; the screenshots are kept
-as the artifact `e2e-screenshots`.
+CI runs the end-to-end test as job `e2e` on the runner's VM, set up as below; it is a required check
+next to `test`. The screenshots are kept as the artifact `e2e-screenshots`.
 
 A real Cockpit for testing (in a container, as root): install `cockpit-ws cockpit-bridge cockpit-system
 cron`, link `src` to `/usr/share/cockpit/cronjobs`, start `cron` and
