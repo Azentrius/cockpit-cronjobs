@@ -292,6 +292,28 @@
         convRandomDelay: "Not while the crontab sets RANDOM_DELAY.",
         okConverted: name => `Converted to systemd timer \`${name}.timer\``,
         okConvertedBody: "The crontab line is turned off and has a note.",
+        convertedTo: "Converted to systemd timer",
+
+        /* back to cron */
+        backToCron: "Back to cron",
+        backTitle: "Back to cron?",
+        backIntro: "The job then runs through cron again, as before the conversion. In one step:",
+        backLineIntro: "This line of the root crontab is turned on, and the note above it is removed:",
+        backUnits: name => `\`${name}.timer\` is stopped and turned off; \`${name}.service\` and \`${name}.timer\` ` +
+            "are removed from /etc/systemd/system.",
+        backChecking: "Checking the units …",
+        backUnitsOk: "Both units were created by Cron Jobs.",
+        backUnitsMissing: name => `There is no \`${name}.timer\` any more, so only the line is turned back on.`,
+        backUnitsForeign: name => `\`${name}.service\` or \`${name}.timer\` was changed, or was not created by Cron Jobs. ` +
+            "To be safe, nothing is changed here.",
+        backCheckFailed: err => `The units could not be checked. ${err}`,
+        backing: "Going back …",
+        backFailed: "Going back failed",
+        backRolledBack: "The crontab was put back as it was; the timer keeps running.",
+        backUnitsChanged: "They were changed in the meantime.",
+        okBack: "The job runs through cron again",
+        okBackBody: name => `\`${name}.timer\` is stopped and removed.`,
+        okBackUnitsLeft: name => `The job runs through cron again; \`${name}.timer\` is stopped, but its unit files were left`,
     };
 
     const schedule = {

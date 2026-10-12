@@ -2,7 +2,7 @@
  *
  *  - Turns a cron schedule into OnCalendar= expressions with the same runs.
  *  - Writes .service and .timer units for a converted job, quoted the way systemd
- *    reads them.
+ *    reads them, and the note the conversion leaves in the crontab.
  *  - Reads the output of `systemd-analyze calendar --iterations=N`.
  *  - Describes timers (calendar and monotonic) in words.
  *
@@ -239,16 +239,21 @@
         return env;
     }
 
+    /* How the units of a converted job begin and describe themselves. Back to cron only
+       removes units that carry both (see UNITS_SCRIPT in app.js). */
+    const UNIT_HEADER = "# Created by Cockpit Cron Jobs from this line of the root crontab:";
+    const unitDescription = name => name + " (from the root crontab)";
+
     /* opts: { name, line, shell, command, env: {NAME: value}, workdir } -> text of
        name.service. cron starts jobs in $HOME; WorkingDirectory=~ is root's home. */
     function serviceUnit(opts) {
         const env = opts.env || {};
         const workdir = opts.workdir && /^\//.test(opts.workdir) ? opts.workdir.replace(/%/g, "%%") : "~";
         const lines = [
-            "# Created by Cockpit Cron Jobs from this line of the root crontab:",
+            UNIT_HEADER,
             "#   " + String(opts.line || "").replace(/[\r\n]+/g, " "),
             "[Unit]",
-            "Description=" + opts.name + " (from the root crontab)",
+            "Description=" + unitDescription(opts.name),
             "Documentation=" + DOC_URL,
             "",
             "[Service]",
@@ -266,7 +271,7 @@
     function timerUnit(opts) {
         const lines = [
             "[Unit]",
-            "Description=" + opts.name + " (from the root crontab)",
+            "Description=" + unitDescription(opts.name),
             "Documentation=" + DOC_URL,
             "",
             "[Timer]",
@@ -283,11 +288,28 @@
         return [shell || "/bin/sh", "-c", command];
     }
 
+    /* ---------- the note in the crontab ---------- */
+
+    /* The comment a conversion puts right above the line it switches off. A format:
+       older and newer versions read it. date: "YYYY-MM-DD" in server time. */
+    function convertNote(name, date) {
+        return "# Converted to systemd timer " + name + ".timer by Cockpit Cron Jobs on " + date +
+            "; the line below is no longer used.";
+    }
+
+    const NOTE_RE = /^# Converted to systemd timer ([A-Za-z0-9][A-Za-z0-9_.-]{0,62})\.timer by Cockpit Cron Jobs on (\d{4}-\d\d-\d\d); the line below is no longer used\.$/;
+
+    /* A line of the crontab -> { name, date } when it is that note, else null. */
+    function parseConvertNote(line) {
+        const m = NOTE_RE.exec(String(line || ""));
+        return m && validUnitName(m[1]) ? { name: m[1], date: m[2] } : null;
+    }
+
     return {
-        DOC_URL,
+        DOC_URL, UNIT_HEADER,
         calField, calendarFromCron, calendarToCron, describeCalendar, describeTimer,
         formatSpan, parseAnalyzeCalendar,
         validUnitName, suggestUnitName, execWord, envLine, jobEnvironment, serviceEnvironment,
-        serviceUnit, timerUnit, expectedArgv,
+        serviceUnit, timerUnit, expectedArgv, convertNote, parseConvertNote,
     };
 }));

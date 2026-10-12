@@ -39,6 +39,7 @@ check:
 	node test/systemd.test.js
 	node test/wrapper.test.js
 	node test/orphans.test.js
+	node test/units.test.js
 	node test/i18n.test.js
 
 check-ui:

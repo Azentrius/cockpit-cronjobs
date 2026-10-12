@@ -206,6 +206,24 @@ t("timer unit", () => {
         "[Timer]\nOnCalendar=*-*-01 00:00:00\nOnCalendar=Mon *-*-* 00:00:00\nAccuracySec=1s\nPersistent=false\n\n" +
         "[Install]\nWantedBy=timers.target\n");
 });
+t("units start the way back to cron recognises them", () => {
+    const service = SD.serviceUnit({ name: "x", line: "0 1 * * * true", shell: "/bin/sh", command: "true", env: {} }).split("\n");
+    assert.strictEqual(service[0], SD.UNIT_HEADER);
+    assert.ok(service.includes("Description=x (from the root crontab)"));
+    assert.ok(SD.timerUnit({ name: "x", specs: ["*-*-* 01:00:00"], persistent: false }).split("\n")
+        .includes("Description=x (from the root crontab)"));
+});
+t("conversion note", () => {
+    const note = SD.convertNote("backup-db", "2026-10-12");
+    /* The text since 2.1.0: older and newer versions read it. */
+    assert.strictEqual(note, "# Converted to systemd timer backup-db.timer by Cockpit Cron Jobs on 2026-10-12; " +
+                             "the line below is no longer used.");
+    assert.deepStrictEqual(SD.parseConvertNote(note), { name: "backup-db", date: "2026-10-12" });
+    assert.deepStrictEqual(SD.parseConvertNote(SD.convertNote("db.v2", "2026-01-02")), { name: "db.v2", date: "2026-01-02" });
+    [note + " ", " " + note, "#" + note, note.replace("backup-db", "-x"), note.replace("backup-db", "x.timer"),
+     note.replace("backup-db", "a b"), note.replace("2026-10-12", "12.10.2026"), "# backup-db", "", null]
+        .forEach(line => assert.strictEqual(SD.parseConvertNote(line), null, String(line)));
+});
 if (haveAnalyze) {
     const fs = require("fs");
     const os = require("os");

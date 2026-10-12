@@ -105,8 +105,10 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
    `%`/`\%`, umask, `$SHELL`, `CRON_TZ` with cronie). Prove it with tests against the real tools.
 4. **Show first, stop early, undo whole.** Anything that can fail stops before the change. A change of
    crontab and systemd together is undone together.
-5. **Formats are contracts.** `runs.jsonl`, `*.running`, the wrapper's command line and the crontab
-   markers (`#[cronjobs:off]`, still reading `#[cronctl:off]`) are read by older and newer versions.
+5. **Formats are contracts.** `runs.jsonl`, `*.running`, the wrapper's command line, the crontab
+   markers (`#[cronjobs:off]`, still reading `#[cronctl:off]`), the conversion note
+   (`SD.convertNote`) and the first line and description of converted units (back to cron looks for
+   them) are read by older and newer versions.
    When `cockpit-cronjobs-run` changes, raise `CRONJOBS_RUN_VERSION` there and `WRAPPER_VERSION` in
    `src/lib/cron.js`.
 6. **Browser without network.** No CDNs, no external fonts or images, no inline scripts or styles,
