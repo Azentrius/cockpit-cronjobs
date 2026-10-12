@@ -65,6 +65,9 @@ package:
 
 # As in CI: shell scripts with shellcheck, Python with ruff
 # (the tools: pip install -r test/requirements.txt).
+# CRONJOBS_RUN_VERSION in the run recorder is read by the page (sed), not by the
+# script itself, so "unused variable" (SC2034) is off for that file only.
 lint:
-	shellcheck --severity=warning src/cockpit-cronjobs-run tools/*.sh
+	shellcheck --severity=warning --exclude=SC2034 src/cockpit-cronjobs-run
+	shellcheck --severity=warning tools/*.sh
 	ruff check .
