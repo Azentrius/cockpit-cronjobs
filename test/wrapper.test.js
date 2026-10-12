@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /* Tests for the run recorder (src/cockpit-cronjobs-run) with dash and bash,
- * and for lib/runs.js — run with: node test/wrapper.test.js */
+ * and for lib/runs.js. Run with: node test/wrapper.test.js */
 "use strict";
 const assert = require("assert");
 const fs = require("fs");

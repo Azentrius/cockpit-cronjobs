@@ -40,7 +40,7 @@ and turns cron jobs into systemd timers.
 
 - Cockpit (tested with 360 and 362)
 - cron: `cron` on Debian and Ubuntu, or `cronie` (Fedora, RHEL and its rebuilds, Arch, openSUSE)
-- coreutils, util-linux (`flock`, `setsid`), `sed`, `grep` — present on any normal installation
+- coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`: present on any normal installation
 - systemd, optionally: for the timers, the timeline entries of timers and the conversion
 
 With cronie, `CRON_TZ` is taken into account for next runs, the timeline and the conversion.

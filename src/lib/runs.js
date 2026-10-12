@@ -1,4 +1,4 @@
-/* Cron Jobs — recorded runs (no DOM, no Cockpit).
+/* Cron Jobs: recorded runs (no DOM, no Cockpit).
  *
  * cockpit-cronjobs-run keeps, per job ID, under /var/lib/cockpit-cronjobs/runs/ID/:
  *   runs.jsonl      one JSON object per finished run, newest last (at most 20):

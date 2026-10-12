@@ -1,4 +1,4 @@
-/* Cron Jobs — the tabs under the page header (WAI-ARIA tabs pattern): Overview,
+/* Cron Jobs: the tabs under the page header (WAI-ARIA tabs pattern): Overview,
  * systemd timers, System. Switching only shows another panel; it loads nothing and
  * does not change the address, and a reload keeps the tab that is shown.
  *

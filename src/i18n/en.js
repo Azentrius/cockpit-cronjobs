@@ -1,4 +1,4 @@
-/* Cron Jobs — English texts (also the fallback for every other language).
+/* Cron Jobs: English texts (also the fallback for every other language).
  *
  * `…` in a text is shown as code. Texts that take values are functions.
  * To add a language, copy this file to i18n/<code>.js, translate it, register it

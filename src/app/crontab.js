@@ -1,4 +1,4 @@
-/* Cron Jobs — the root crontab as the page shows it: what is known about its jobs,
+/* Cron Jobs: the root crontab as the page shows it: what is known about its jobs,
  * loading everything, saving a change in one locked step, and administrative access.
  *
  * SPDX-License-Identifier: Apache-2.0

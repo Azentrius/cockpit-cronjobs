@@ -1,4 +1,4 @@
-/* Cron Jobs — systemd helpers (no DOM, no Cockpit).
+/* Cron Jobs: systemd helpers (no DOM, no Cockpit).
  *
  *  - Turns a cron schedule into OnCalendar= expressions with the same runs.
  *  - Writes .service and .timer units for a converted job, quoted the way systemd

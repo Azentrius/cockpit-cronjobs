@@ -1,4 +1,4 @@
-/* Cron Jobs — everything that runs on the server: spawn, reading the crontabs, the
+/* Cron Jobs: everything that runs on the server: spawn, reading the crontabs, the
  * runs and systemd, and every script that runs as root. Root scripts are constants;
  * values reach them as arguments or standard input, never pasted into shell code.
  *

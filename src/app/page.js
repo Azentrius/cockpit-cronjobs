@@ -1,4 +1,4 @@
-/* Cron Jobs — the page itself: alerts and notices, the root crontab, systemd timers
+/* Cron Jobs: the page itself: alerts and notices, the root crontab, systemd timers
  * and the read-only crontabs, focus, and the row menu.
  *
  * SPDX-License-Identifier: Apache-2.0

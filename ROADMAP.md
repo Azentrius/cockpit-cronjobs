@@ -7,7 +7,7 @@ order is the recommendation; stages after 1.1 are proposals until they are decid
 
 - **Byte for byte:** lines of a crontab that a change does not touch stay exactly as they were. Every
   write is one locked root step: checksum of the version shown, verified backup, write, read back.
-- **Like cron:** whatever the page runs or converts behaves as cron would — environment, `%` and `\%`,
+- **Like cron:** whatever the page runs or converts behaves as cron would: environment, `%` and `\%`,
   umask, `CRON_TZ`. Tests compare against the real tools (`systemd-analyze`, dash and bash, real cron).
 - **Show first:** a change shows what it will do before it does it. Whatever can fail stops before
   anything changes; a step that changes two things (crontab and systemd) is undone as a whole.
@@ -115,4 +115,4 @@ minute of the run.
 
 1. Stage 3: should other users' crontabs become editable at all, or stay read-only?
 2. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
-3. Stage 5: packages and the listing in Cockpit's Applications page — worth the upkeep?
+3. Stage 5: packages and the listing in Cockpit's Applications page: worth the upkeep?

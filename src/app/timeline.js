@@ -1,4 +1,4 @@
-/* Cron Jobs — the timeline of the next 24 hours: when the jobs and timers run, and
+/* Cron Jobs: the timeline of the next 24 hours: when the jobs and timers run, and
  * which start in the same minute.
  *
  * SPDX-License-Identifier: Apache-2.0

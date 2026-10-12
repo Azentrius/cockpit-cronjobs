@@ -1,4 +1,4 @@
-/* Cron Jobs — Cockpit page.
+/* Cron Jobs: Cockpit page.
  *
  * The root crontab is read and written through `crontab -u root`. Saving happens in
  * one locked step (SAVE_SCRIPT): only if the crontab is still the one shown (cksum),

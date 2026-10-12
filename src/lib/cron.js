@@ -1,4 +1,4 @@
-/* Cron Jobs — crontab logic (no DOM, no Cockpit).
+/* Cron Jobs: crontab logic (no DOM, no Cockpit).
  *
  *  - Parses a user crontab into entries without losing anything: every line
  *    that is not touched is written back byte for byte.

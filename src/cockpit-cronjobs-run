@@ -1,5 +1,5 @@
 #!/bin/sh
-# cockpit-cronjobs-run — records start, end, exit code and output of a cron job
+# cockpit-cronjobs-run: records start, end, exit code and output of a cron job
 # for Cockpit Cron Jobs (https://github.com/Azentrius/cockpit-cronjobs).
 #
 # Usage: cockpit-cronjobs-run ID COMMAND

@@ -1,4 +1,4 @@
-/* Cron Jobs — what every part uses: the libraries (lib/*.js, loaded before as
+/* Cron Jobs: what every part uses: the libraries (lib/*.js, loaded before as
  * plain scripts), constants, the texts in Cockpit's language, DOM helpers, times in
  * the server's time zone, and the state of the page.
  *
@@ -120,7 +120,7 @@ export function weekdayShort(ms, tz) {
     return new Intl.DateTimeFormat(LOCALE, { timeZone: tz, weekday: "short" }).format(ms).replace(/\.$/, "");
 }
 
-/* "today", "tomorrow", "yesterday", "Sun, 18.10." — in the server's time zone */
+/* "today", "tomorrow", "yesterday", "Sun, 18.10.", in the server's time zone */
 function dayLabel(ms) {
     const tz = state.tz;
     const w = C.wallParts(ms, tz);

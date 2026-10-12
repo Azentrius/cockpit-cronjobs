@@ -1,4 +1,4 @@
-/* Cron Jobs — converting a job to a systemd timer, and going back to cron.
+/* Cron Jobs: converting a job to a systemd timer, and going back to cron.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
