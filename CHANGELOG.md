@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.1 – 2026-10-12
+
+Maintenance release: the page is unchanged, the release is verifiable.
+
+- **Build provenance:** the release archive comes with a signed build provenance;
+  `gh attestation verify cockpit-cronjobs-2.1.1.tar.gz --repo Azentrius/cockpit-cronjobs` checks
+  that it was built by the release workflow from this repository.
+- **Security policy:** `SECURITY.md` describes private vulnerability reporting.
+- **CI:** workflow actions pinned by commit SHA and kept current by Dependabot; checkouts keep no
+  token.
+
 ## 2.1.0 – 2026-10-12
 
 First public version.

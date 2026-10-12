@@ -9,6 +9,8 @@ os.makedirs(SHOTS, exist_ok=True)
 PORT = int(os.environ.get("PORT", "8772"))
 BASE = f"http://127.0.0.1:{PORT}/pkg/cronjobs/index.html"
 WRAP = "/usr/local/libexec/cockpit-cronjobs-run"
+with open(os.path.join(here, "..", "src", "app.js"), encoding="utf-8") as f:
+    VERSION = re.search(r'const VERSION = "([^"]+)";', f.read()).group(1)
 
 srv = subprocess.Popen([sys.executable, os.path.join(here, "serve.py"), str(PORT)])
 atexit.register(srv.terminate)
@@ -125,7 +127,7 @@ with sync_playwright() as p:
     check("/home/eve/run.sh" not in page.inner_text("#tl-card"), "skipped cron.d file not in timeline")
     check(not page.locator("#users-card").is_hidden() and "www-data" in page.inner_text("#users-body"), "users card")
     check("logrotate" in page.inner_text("#periodic-body") and "keine" in page.inner_text("#periodic-body"), "periodic scripts")
-    check("Cron Jobs 2.1.0" in page.inner_text("footer"), "signature version")
+    check(f"Cron Jobs {VERSION}" in page.inner_text("footer"), "signature version")
     check(re.search(r"Ortszeit", page.inner_text("#root-body")) is not None, "local time hint (browser Berlin, server UTC)")
     check(page.inner_text("#notices").strip() == "", "no notices on a healthy server")
     # timeline

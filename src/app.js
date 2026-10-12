@@ -18,7 +18,7 @@
     const SD = window.CronSystemd;
     const R = window.CronRuns;
     const ICONS = window.AzIcons;
-    const VERSION = "2.1.0";
+    const VERSION = "2.1.1";
     const STATE_DIR = "/var/lib/cockpit-cronjobs";
     const BACKUP_DIR = STATE_DIR + "/backups";
     const RUNS_DIR = STATE_DIR + "/runs";
