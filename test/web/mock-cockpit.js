@@ -227,10 +227,11 @@
         if (/echo "removed /.test(script)) {
             if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
             const all = [M.root || "", M.sys.etc].concat(Object.values(M.sys.crond), Object.values(M.sys.users)).join("\n");
+            const words = new Set(all.split(/[^A-Za-z0-9_-]+/));
             M.orphanCalls.push(args.slice(4));
             return args.slice(4).map(id => {
                 if (!M.runs[id]) return "gone " + id;
-                if (new RegExp("(^|[^A-Za-z0-9_-])" + id + "($|[^A-Za-z0-9_-])", "m").test(all)) return "used " + id;
+                if (words.has(id)) return "used " + id;
                 if (M.runs[id].running.some(r => r.alive !== false)) return "running " + id;
                 delete M.runs[id];
                 M.removedRuns.push(id);

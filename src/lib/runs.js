@@ -87,12 +87,16 @@
         return r.end !== null && r.end >= r.start ? r.end - r.start : null;
     }
 
+    /* The words of a text: runs of the characters an ID is made of. */
+    function words(text) {
+        return new Set(String(text || "").split(/[^A-Za-z0-9_-]+/));
+    }
+
     /* Whether the ID appears as a word anywhere in the text, comments included. Wider
        than the run recorder's command line on purpose: an ID that a crontab still
        mentions is never offered for removal. */
     function mentioned(text, id) {
-        if (!ID_RE.test(id)) return false;
-        return new RegExp("(^|[^A-Za-z0-9_-])" + id + "($|[^A-Za-z0-9_-])", "m").test(String(text || ""));
+        return ID_RE.test(id) && words(text).has(id);
     }
 
     /* Recorded jobs that no crontab mentions any more (lines changed or removed by
@@ -100,8 +104,9 @@
        run going on is never one of them.
        byId: from parseRuns; text: all crontabs together. */
     function orphans(byId, text) {
+        const used = words(text);
         return Object.keys(byId)
-            .filter(id => byId[id].running.length === 0 && !mentioned(text, id))
+            .filter(id => byId[id].running.length === 0 && !used.has(id))
             .map(id => ({ id, count: byId[id].runs.length, last: byId[id].runs[0] || null, kb: byId[id].kb }))
             .sort((a, b) => (b.last ? b.last.start : 0) - (a.last ? a.last.start : 0) || a.id.localeCompare(b.id));
     }
