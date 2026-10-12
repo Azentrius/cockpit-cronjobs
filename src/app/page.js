@@ -16,6 +16,7 @@ import { renderTimeline } from "./timeline.js";
 import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
 import { openRun, openRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
 import { convertBlocker, openBack, openConvert } from "./convert.js";
+import { hiddenBesidesTabs, showTabOf } from "./tabs.js";
 
 /* ---------- alerts ---------- */
 
@@ -52,11 +53,11 @@ export function renderNotices() {
     if (capturedJobs.length && b.wrapper === "missing") {
         out.push(alertEl("danger", T.wrapperMissingTitle, T.wrapperMissingBody(capturedJobs.length, C.WRAPPER_PATH),
             h("button", { class: "az-btn az-btn--secondary", type: "button", id: "wrapper-install",
-                          disabled: state.busy || loading, onclick: () => repairWrapper() }, T.install)));
+                          disabled: state.busy || loading, onclick: () => repairWrapper() }, icon("plus"), T.install)));
     } else if (typeof b.wrapper === "number" && b.wrapper < C.WRAPPER_VERSION) {
         out.push(alertEl("warning", T.wrapperOldTitle, T.wrapperOldBody(C.WRAPPER_PATH),
             h("button", { class: "az-btn az-btn--secondary", type: "button", id: "wrapper-install",
-                          disabled: state.busy || loading, onclick: () => repairWrapper() }, T.update)));
+                          disabled: state.busy || loading, onclick: () => repairWrapper() }, icon("sync-alt"), T.update)));
     }
     if (b.mta === false && state.root.status === "ok" && !state.root.mailto) {
         out.push(alertEl("info", T.noMtaTitle, T.noMtaBody));
@@ -89,8 +90,8 @@ export function renderAll() {
     renderOrphansDialog();
 }
 
+/* "Refresh" is off while the page loads (and says so) or saves. */
 function renderHeader() {
-    fill($("page-desc"), T.pageDesc(state.host));
     $("sig-host").textContent = state.host;
     $("sig-host").hidden = !state.host;
     const meta = [];
@@ -98,6 +99,8 @@ function renderHeader() {
     if (state.sys) meta.push(T.serverTz(tzLabel(state.tz)));
     $("meta").textContent = meta.join(" · ");
     $("reload").disabled = state.busy || loading;
+    $("reload").setAttribute("aria-busy", loading ? "true" : "false");
+    $("reload-label").textContent = loading ? T.refreshing : T.refresh;
 }
 
 export function describe(schedule) {
@@ -207,7 +210,7 @@ export function renderRoot() {
             h("h3", { class: "az-empty__title" }, T.emptyTitle),
             h("p", { class: "az-empty__body" }, T.emptyBody),
             editable ? h("div", { class: "az-empty__actions" },
-                h("button", { class: "az-btn az-btn--primary", type: "button", "data-key": "add-empty",
+                h("button", { class: "az-btn az-btn--secondary az-btn--sm", type: "button", "data-key": "add-empty",
                               disabled: frozen, onclick: () => openEdit(null, "add-empty") },
                   icon("plus"), T.add)) : null));
         return;
@@ -321,6 +324,8 @@ function renderTimers() {
     const card = $("timers-card");
     const tm = state.timers;
     card.hidden = tm.status === "none" || (tm.status === "ok" && tm.list.length === 0);
+    /* Without systemd or without timers the tab says so, once the page has loaded. */
+    $("timers-none").hidden = !card.hidden || !state.loadedAt;
     if (card.hidden) return;
     if (tm.status === "error") {
         fill($("timers-body"), h("div", { class: "cron-card-alert" }, alertEl("warning", T.timersErrorTitle, tm.message)));
@@ -417,17 +422,21 @@ function renderSystem() {
 
 /* ---------- focus ---------- */
 
+/* Focus on the element with this data-key (or a fallback); its tab is shown first. */
 export function restoreFocus(key) {
     let el = key ? document.querySelector('[data-key="' + key + '"]') : null;
-    if (!el || el.disabled || el.closest("[hidden]")) {
+    if (!el || el.disabled || hiddenBesidesTabs(el)) {
         const m = key ? /^[a-z-]+:(\d+)$/.exec(key) : null;
         if (m) el = document.querySelector('[data-key="more:' + m[1] + '"]');
     }
-    if (!el || el.disabled || el.closest("[hidden]")) {
+    if (!el || el.disabled || hiddenBesidesTabs(el)) {
         el = [$("add"), document.querySelector('[data-key="add-empty"]'), $("page-title")]
-            .find(x => x && !x.disabled && !x.closest("[hidden]"));
+            .find(x => x && !x.disabled && !hiddenBesidesTabs(x));
     }
-    if (el) el.focus();
+    if (el) {
+        showTabOf(el);
+        el.focus();
+    }
 }
 
 /* ---------- row menu ---------- */

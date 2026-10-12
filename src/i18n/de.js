@@ -9,11 +9,14 @@
     "use strict";
 
     const ui = {
-        pageDesc: host => host ? `Geplante Aufgaben auf ${host} anzeigen und verwalten.`
-                               : "Geplante Aufgaben anzeigen und verwalten.",
         loadedAt: t => `Geladen um ${t}`,
         serverTz: tz => `Serverzeit ${tz}`,
-        reload: "Neu laden",
+        refresh: "Aktualisieren",
+        refreshing: "Lädt …",
+        tabsLabel: "Bereiche",
+        tabOverview: "Übersicht",
+        tabTimers: "systemd-Timer",
+        tabSystem: "System",
         close: "Schließen",
         cancel: "Abbrechen",
         retry: "Erneut versuchen",
@@ -120,6 +123,7 @@
         timersTitle: "systemd-Timer",
         timersDesc: "Dienste, die systemd nach Zeitplan startet. Status und Protokoll stehen in Cockpit unter Dienste.",
         timersErrorTitle: "Die systemd-Timer ließen sich nicht lesen",
+        timersNone: "Auf diesem Server gibt es keine systemd-Timer.",
         timerInactive: "Nicht aktiv",
         fromCrontab: "aus der root-Crontab übernommen",
         randomUpTo: span => `bis ${span} später`,

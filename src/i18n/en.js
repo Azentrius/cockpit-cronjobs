@@ -10,10 +10,14 @@
     "use strict";
 
     const ui = {
-        pageDesc: host => host ? `View and manage scheduled jobs on ${host}.` : "View and manage scheduled jobs.",
         loadedAt: t => `Loaded at ${t}`,
         serverTz: tz => `Server time ${tz}`,
-        reload: "Reload",
+        refresh: "Refresh",
+        refreshing: "Loading …",
+        tabsLabel: "Sections",
+        tabOverview: "Overview",
+        tabTimers: "systemd timers",
+        tabSystem: "System",
         close: "Close",
         cancel: "Cancel",
         retry: "Try again",
@@ -120,6 +124,7 @@
         timersTitle: "systemd timers",
         timersDesc: "Services that systemd starts on a schedule. Their status and log are in Cockpit under Services.",
         timersErrorTitle: "Could not read the systemd timers",
+        timersNone: "This server has no systemd timers.",
         timerInactive: "Not active",
         fromCrontab: "converted from the root crontab",
         randomUpTo: span => `up to ${span} later`,

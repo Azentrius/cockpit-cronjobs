@@ -30,7 +30,9 @@ timers, English and German.
 
 ---
 
-## Stage 1.1 – Polish (small, next)
+## Stage 1.1 – Polish ✅
+
+Done in 2.2.0 (see [CHANGELOG](CHANGELOG.md)), together with the shared Azentrius page frame.
 
 | # | Topic | Scope | Done when … |
 |---|---|---|---|
@@ -97,8 +99,6 @@ minute of the run.
 
 | Topic | Proposal |
 |---|---|
-| `src/app.js` in one file | see 1.1 #5 |
-| The browser tests use a stand-in for Cockpit | keep it, but run the end-to-end test against real Cockpit in CI (1.1 #4) |
 | Upgrading the run recorder | when `cockpit-cronjobs-run` changes, raise `CRONJOBS_RUN_VERSION` (the page then offers the update); old records must stay readable |
 | Shared design files (`azentrius.css`, `azentrius-theme.js`, `icons.js`, fonts) are copies | keep them byte-identical with the other Azentrius add-ons; change them only together |
 

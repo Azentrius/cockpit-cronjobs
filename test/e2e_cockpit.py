@@ -128,6 +128,8 @@ with sync_playwright() as p:
 
     check("Sonntags um 01:30" in page.inner_text("#root-body") and "Disk trim" in page.inner_text("#root-body"), "real crontab shown")
     check(page.locator("#root-body tbody tr").count() == 1, "one job")
+    check(page.inner_text("#reload").strip() == "Aktualisieren" and page.inner_text("#tabs").startswith("Übersicht"),
+          "page frame under real Cockpit: Refresh and tabs")
 
     # add a recorded job that runs every minute: installs the run recorder first
     page.click("#add")
@@ -332,6 +334,7 @@ with sync_playwright() as p:
         why = shown.get(name, "not listed")
         good = why is None if reason is None else (why not in (None, "not listed") and why_text[reason] in why)
         check(good, f"cron.d {name}: page shows {why!r}, cron's reason is {reason}")
+    page.click("#tab-system")
     page.locator("#crond-card").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-crond.png"))
 
@@ -356,6 +359,7 @@ with sync_playwright() as p:
             check(not any(m in line for line in said for _, m in expected), f"cron reads {name}: {said!r}")
     sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
 
+    page.click("#tab-overview")
     page.screenshot(path=os.path.join(SHOTS, "e2e-end.png"), full_page=True)
     check(not problems, "no console errors: " + repr(problems))
     browser.close()
