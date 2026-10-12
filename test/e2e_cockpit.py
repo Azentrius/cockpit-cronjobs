@@ -9,7 +9,8 @@ DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
     /usr/lib/cockpit/cockpit-ws --no-tls --port 9091 --address 127.0.0.1 --local-session=cockpit-bridge &
     CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py
 
-Runs as root (the local session is root's)."""
+Runs as root (the local session is root's). CI runs it the same way on the runner's
+throwaway VM (job e2e in .github/workflows/test.yml)."""
 import json, os, re, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
@@ -77,6 +78,8 @@ with sync_playwright() as p:
     problems = []
     page.on("console", lambda m: problems.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: problems.append("pageerror: " + str(e)))
+    # The console names the status of a failed load, not the file.
+    page.on("response", lambda r: problems.append(f"HTTP {r.status} {r.url}") if r.status >= 400 else None)
     page.goto(URL)
     wait_js(page, "document.querySelector('#meta').textContent.includes('Serverzeit')")
     wait_idle(page)

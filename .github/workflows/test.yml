@@ -41,3 +41,58 @@ jobs:
         with:
           name: screenshots
           path: test/shots/
+
+  # The main flows against a real Cockpit, root's real crontab and a running cron daemon.
+  # Destructive, which is what the runner's throwaway VM is for (see test/e2e_cockpit.py).
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # Cockpit from the backports, as Cockpit recommends for Ubuntu (the release itself has an old one).
+      - name: Install Cockpit and cron
+        run: |
+          . /etc/os-release
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -t "$VERSION_CODENAME-backports" cockpit-ws cockpit-bridge cockpit-system
+          sudo apt-get install -y --no-install-recommends cron
+          sudo systemctl start cron
+          sudo ln -sfn "$GITHUB_WORKSPACE/src" /usr/share/cockpit/cronjobs
+          dpkg-query -W cockpit-ws cockpit-bridge cron
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+          echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
+      - name: Start Cockpit as root, without login
+        run: |
+          sudo /usr/lib/cockpit/cockpit-ws --no-tls --port 9091 --address 127.0.0.1 --local-session=cockpit-bridge \
+            > "$RUNNER_TEMP/cockpit-ws.log" 2>&1 &
+          for i in $(seq 100); do
+            if (exec 3<>/dev/tcp/127.0.0.1/9091) 2>/dev/null; then exit 0; fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/cockpit-ws.log"
+          exit 1
+      - name: End-to-end test (as root)
+        run: |
+          sudo env PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" CRONJOBS_E2E_DESTRUCTIVE=1 \
+            "$(command -v python)" test/e2e_cockpit.py
+      - name: Logs
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/cockpit-ws.log" || true
+          sudo journalctl -u cron --no-pager -n 50 || true
+          sudo crontab -l -u root || true
+          sudo ls -laR /var/lib/cockpit-cronjobs || true
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-screenshots
+          path: test/shots/

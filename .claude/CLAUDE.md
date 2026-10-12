@@ -73,7 +73,7 @@ src/                      the Cockpit package (installed as /usr/share/cockpit/c
 test/                     unit tests (node), browser tests (Playwright against test/web/mock-cockpit.js),
                           test/e2e_cockpit.py (real Cockpit and cron, destructive)
 tools/release-notes.sh    notes for a release from CHANGELOG.md
-.github/workflows/        test (every push and PR), release (on request)
+.github/workflows/        test with jobs test and e2e (every push and PR), release (on request)
 ```
 
 ## Commands
@@ -84,6 +84,9 @@ make check-ui             # browser tests (needs Python Playwright with Chromium
 make package              # cockpit-cronjobs-VERSION.tar.gz + SHA256SUMS, reproducible
 CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py   # only on a throwaway machine, see the file
 ```
+
+CI runs the end-to-end test as job `e2e` on the runner's VM, set up as below; the screenshots are kept
+as the artifact `e2e-screenshots`.
 
 A real Cockpit for testing (in a container, as root): install `cockpit-ws cockpit-bridge cockpit-system
 cron`, link `src` to `/usr/share/cockpit/cronjobs`, start `cron` and
