@@ -88,6 +88,9 @@ from cron keeps working. It keeps the last 20 runs, each with up to 64 KiB of ou
 
 - Commands with an unescaped `%` cannot be recorded (cron passes the text after `%` as input).
 - Turning recording off restores the plain line and deletes the recorded runs.
+- When a recorded line is changed or removed outside Cron Jobs, its runs are left over. They are listed
+  under the root crontab and can be removed there. A job whose ID any crontab still mentions, even in a
+  comment, is never offered, and the check is repeated as root right before anything is removed.
 - The command keeps its environment and umask. Mail from cron and the `CMD` line in the system log show
   the wrapper call instead of the plain command; adjust filters that match on them.
 - Jobs that record their runs need the script. Before you remove Cron Jobs, turn recording off, or leave
@@ -132,7 +135,7 @@ Cockpit uses that language. `node test/i18n.test.js` checks that every text exis
 ## Development
 
 ```sh
-make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder (dash, bash), texts
+make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder and removal of leftover runs (dash, bash), texts
 make check-ui     # browser tests against a stand-in for Cockpit (needs Python Playwright with Chromium)
 ```
 

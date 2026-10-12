@@ -404,6 +404,76 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (menu): " + repr(page.problems))
     page.context.close()
 
+    # ---------- leftover runs ----------
+    page = open_page(browser)
+    check(page.locator("#orphans").is_visible() and "Die erfassten Läufe von 1 Job " in page.inner_text("#orphans"),
+          "leftover line under the root crontab: " + repr(page.inner_text("#orphans")))
+    page.click("[data-key=orphans]")
+    check(page.locator("#orph-dlg").is_visible(), "leftover dialog")
+    check(page.evaluate("() => document.activeElement.id") == "orph-close-btn", "focus on close in the leftover dialog")
+    ot = page.inner_text("#orph-body")
+    check("gone-0000" in ot and "update-geoip-1a2b" not in ot, "only the job no line uses: " + ot)
+    check("8 KB" in ot and "OK" in ot and page.locator("#orph-body tbody tr").count() == 1, "size and last run: " + ot)
+    check(page.locator("#orph-all").is_hidden(), "no 'remove all' for one job")
+    check("/var/lib/cockpit-cronjobs/runs/" in page.inner_text("#orph-note"), "leftover note names the directory")
+    shot(page, "de-light-orphans", full=False)
+    # a crontab mentions the ID again meanwhile: the root script keeps it, the page reloads
+    page.evaluate("() => { window.__mock.root += '# gone-0000 is coming back\\n'; }")
+    page.click("[data-key='orph:gone-0000']")
+    wait_js(page, "document.querySelector('#orph-dlg').hidden")
+    wait_idle(page)
+    check("behalten" in page.inner_text("#alerts") and "gone-0000" in page.inner_text("#alerts"),
+          "kept job reported: " + page.inner_text("#alerts"))
+    check(mock(page, "removedRuns") == [] and mock(page, "orphanCalls") == [["gone-0000"]], "nothing removed while mentioned")
+    check(page.locator("#orphans").is_hidden(), "a comment that mentions the ID keeps it")
+    reload_with_root(page, root_text(page).replace("# gone-0000 is coming back\n", "# not-gone-00001\n"))
+    check(page.locator("#orphans").is_visible(), "a longer word is no mention")
+    # mentioned in /etc/cron.d, or a run going on: not offered
+    page.evaluate("() => { window.__mock.sys.crond.keep = '0 1 * * * root " + WRAP + " gone-0000 true\\n'; }")
+    page.click("#reload")
+    wait_idle(page)
+    check(page.locator("#orphans").is_hidden(), "mentioned in /etc/cron.d: not offered")
+    page.evaluate("""() => { delete window.__mock.sys.crond.keep;
+                             window.__mock.runs['gone-0000'].running = [{ start: Math.floor(Date.now() / 1000) - 5 }]; }""")
+    page.click("#reload")
+    wait_idle(page)
+    check(page.locator("#orphans").is_hidden(), "a run going on: not offered")
+    # three leftovers: remove one, then the rest
+    page.evaluate("""() => {
+        const now = Math.floor(Date.now() / 1000);
+        window.__mock.runs['gone-0000'].running = [];
+        window.__mock.runs['old-1111'] = { runs: [{ start: now - 86400, end: now - 86390, rc: 2, trigger: 'schedule',
+                                                    bytes: 0, truncated: false, out: '' }], running: [], kb: 2048 };
+        window.__mock.runs['older-2222'] = { runs: [], running: [], kb: 4 };
+    }""")
+    page.click("#reload")
+    wait_idle(page)
+    check("Die erfassten Läufe von 3 Jobs " in page.inner_text("#orphans"), "three leftovers")
+    page.click("[data-key=orphans]")
+    ids = page.locator("#orph-body tbody tr td:first-child").all_inner_texts()
+    check(ids == ["gone-0000", "old-1111", "older-2222"], "newest last run first: " + repr(ids))
+    ot = page.inner_text("#orph-body")
+    check("2 MB" in ot and "Fehler · Exit 2" in ot and "Noch kein Lauf" in ot, "sizes and results: " + ot)
+    check(page.locator("#orph-all").is_visible(), "'remove all' for several jobs")
+    page.click("[data-key='orph:old-1111']")
+    wait_js(page, "document.querySelectorAll('#orph-body tbody tr').length === 2")
+    check(page.locator("#orph-dlg").is_visible() and mock(page, "removedRuns") == ["old-1111"], "one removed, dialog stays")
+    check((focused_key(page) or "").startswith("orph:"), "focus on the next remove button: " + repr(focused_key(page)))
+    page.evaluate("() => { window.__mock.lockBusy = true; }")
+    page.click("#orph-all")
+    wait_js(page, "!document.querySelector('#orph-alert').hidden")
+    check("an anderer Stelle" in page.inner_text("#orph-alert") and page.locator("#orph-dlg").is_visible(),
+          "lock busy shown in the dialog")
+    page.evaluate("() => { window.__mock.lockBusy = false; }")
+    page.click("#orph-all")
+    wait_js(page, "document.querySelector('#orph-dlg').hidden")
+    wait_idle(page)
+    check(mock(page, "removedRuns") == ["old-1111", "gone-0000", "older-2222"], "all removed: " + repr(mock(page, "removedRuns")))
+    check("von 2 Jobs entfernt" in page.inner_text("#alerts"), "removed alert: " + page.inner_text("#alerts"))
+    check(page.locator("#orphans").is_hidden(), "no leftover line any more")
+    check(not page.problems, "no console problems (leftovers): " + repr(page.problems))
+    page.context.close()
+
     # ---------- run now ----------
     page = open_page(browser)
     extra = ("PATH=/usr/local/bin:/usr/bin:/bin\n0 4 * * * /opt/fail.sh\n0 6 * * * sleep 600\n"
@@ -598,6 +668,8 @@ with sync_playwright() as p:
     check(root_text(page) == changed, "stale edit refused")
     # deleting a recorded job takes its note and its runs
     before = root_text(page)
+    page.evaluate("""() => { window.__seen = new Set();
+        window.__seenTimer = setInterval(() => window.__seen.add(document.querySelector('#orphans').innerText), 5); }""")
     row(page, 0).locator("[data-key^=more]").click()
     page.locator(".cron-menu__item", has_text="Löschen").click()
     check("Kommentar" in page.inner_text("#del-intro") and "# GeoIP" in page.inner_text("#del-line"), "delete dialog shows note")
@@ -610,6 +682,9 @@ with sync_playwright() as p:
     check(gone == ["# GeoIP database for Plausible", "0 3 2 * *\t" + WRAP + " update-geoip-1a2b '/opt/plausible/update-geoip.sh'"],
           "job and note removed: " + repr(gone))
     check(mock(page, "removedRuns") == ["update-geoip-1a2b"], "runs removed with job")
+    wait_js(page, "document.querySelector('#orphans').innerText.includes('von 1 Job ')")
+    seen = page.evaluate("() => { clearInterval(window.__seenTimer); return Array.from(window.__seen); }")
+    check(not any("2 Jobs" in s for s in seen), "a job deleted here never shows up as leftover: " + repr(seen))
     check("MAILTO" in root_text(page), "MAILTO kept")
     page.evaluate("() => { window.__mock.lockBusy = true; }")
     row(page, 0).locator(".az-switch").click()
@@ -655,6 +730,7 @@ with sync_playwright() as p:
     check("Administrativer Zugriff nötig" in page.inner_text("#root-body"), "denied state")
     check(page.locator("#add").is_hidden(), "no add button when denied")
     check(page.locator("#users-card").is_hidden(), "users card hidden without admin")
+    check(page.locator("#orphans").is_hidden(), "no leftover runs without admin")
     check(not page.locator("#etc-card").is_hidden() and not page.locator("#tl-card").is_hidden(), "system crontabs and timeline without admin")
     check(not page.locator("#timers-card").is_hidden(), "timers without admin")
     shot(page, "de-light-denied")
@@ -688,6 +764,7 @@ with sync_playwright() as p:
     check("The next 24 hours" in t and "systemd timers" in t and "Last run" in t, "en sections")
     check("your time" not in page.inner_text("#root-body"), "no local hint when tz equal")
     check(page.evaluate("() => document.documentElement.lang") == "en", "html lang en")
+    check("no crontab uses them any more" in page.inner_text("#orphans"), "en leftover line")
     shot(page, "en-light-1280")
     row(page, 0).locator("[data-key^=more]").click()
     check("Stop recording" in page.inner_text("#row-menu"), "en menu")

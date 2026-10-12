@@ -60,6 +60,7 @@
       </div>
     </div>
     <div id="root-body"><p class="cron-state" data-t="loading">Loading …</p></div>
+    <div class="cron-orphans" id="orphans" hidden></div>
   </section>
 
   <section class="az-card" id="timers-card" aria-labelledby="timers-title" hidden>
@@ -243,6 +244,26 @@
     <div class="az-modal__footer">
       <button class="az-btn az-btn--primary" type="button" id="runs-close-btn" data-t="close">Close</button>
       <button class="az-btn az-btn--link" type="button" id="runs-capture-off" data-t="captureOff">Stop recording</button>
+    </div>
+  </div>
+</div>
+
+<!-- Leftover runs -->
+<div class="az-backdrop" id="orph-dlg" hidden>
+  <div class="az-modal cron-modal-wide" role="dialog" aria-modal="true" aria-labelledby="orph-title" aria-describedby="orph-intro">
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="orph-title" data-t="orphansTitle">Leftover runs</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="orph-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div class="cron-dialog-alert" id="orph-alert" hidden></div>
+      <p id="orph-intro" data-t="orphansIntro"></p>
+      <div id="orph-body"></div>
+      <p class="cron-muted cron-small" id="orph-note"></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--danger" type="button" id="orph-all" data-t="orphansRemoveAll" hidden>Remove all</button>
+      <button class="az-btn az-btn--link" type="button" id="orph-close-btn" data-t="close">Close</button>
     </div>
   </div>
 </div>

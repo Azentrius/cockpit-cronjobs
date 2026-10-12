@@ -232,11 +232,49 @@ t("parse runs", () => {
     assert.deepStrictEqual(j.running, [{ start: 300, pid: 42, trigger: "schedule" }]);
     assert.deepStrictEqual(j.runs.map(x => [x.start, R.outcome(x), R.duration(x)]), [[250, "aborted", null], [200, "failed", 12], [100, "ok", 3]]);
     assert.strictEqual(j.runs[1].trigger, "manual");
-    assert.deepStrictEqual(r.empty, { runs: [], running: [] });
+    assert.deepStrictEqual(r.empty, { runs: [], running: [], kb: null });
 });
 t("parse runs: bad output names are dropped", () => {
     const r = R.parseRuns('\x1ea\n{"start":1,"end":2,"rc":0,"out":"../../etc/shadow"}\n');
     assert.strictEqual(r.a.runs[0].out, "");
+});
+t("parse runs: disk use of the directory", () => {
+    const r = R.parseRuns("\x1ea\nsize 24\n\x1eb\nsize \n\x1ec\nsize 1x\n");
+    assert.strictEqual(r.a.kb, 24);
+    assert.strictEqual(r.b.kb, null);
+    assert.strictEqual(r.c.kb, null);
+});
+
+t("mentioned: the ID as a word, anywhere", () => {
+    assert.ok(R.mentioned("0 1 * * *\t/usr/local/libexec/cockpit-cronjobs-run job-1a2b 'x'", "job-1a2b"));
+    assert.ok(R.mentioned("# job-1a2b, converted", "job-1a2b"));
+    assert.ok(R.mentioned("job-1a2b", "job-1a2b"));
+    assert.ok(R.mentioned("a\njob-1a2b\nb", "job-1a2b"));
+    assert.ok(!R.mentioned("old-job-1a2b", "job-1a2b"));
+    assert.ok(!R.mentioned("job-1a2b3 job-1a2b_x xjob-1a2b", "job-1a2b"));
+    assert.ok(!R.mentioned("", "job-1a2b"));
+    assert.ok(!R.mentioned("a.b", "a.b"), "only valid IDs");
+});
+t("orphans: recorded jobs that no crontab mentions, not while running", () => {
+    const byId = R.parseRuns(
+        "\x1eused-0001\nsize 8\n" + '{"start":500,"end":501,"rc":0}\n' +
+        "\x1ecomment-0002\n" +
+        "\x1egone-0003\nsize 12\n" + '{"start":300,"end":301,"rc":1}\n' +
+        "\x1egone-0004\n" + '{"start":100,"end":101,"rc":0}\n{"start":200,"end":201,"rc":0}\n' +
+        "\x1erunning-0005\n" + 'running 1 {"start":400,"pid":7}\n' +
+        "\x1edead-0006\n" + 'running 0 {"start":50,"pid":8}\n' +
+        "\x1enever-0007\n");
+    const text = "0 1 * * * /usr/local/libexec/cockpit-cronjobs-run used-0001 'x'\n" +
+                 "# comment-0002 was here\n" +
+                 "0 2 * * * root echo xgone-0004 gone-00041 gone-0004x\n";
+    const o = R.orphans(byId, text);
+    assert.deepStrictEqual(o.map(x => x.id), ["gone-0003", "gone-0004", "dead-0006", "never-0007"]);
+    assert.deepStrictEqual(o[0], { id: "gone-0003", count: 1, last: byId["gone-0003"].runs[0], kb: 12 });
+    assert.strictEqual(o[1].count, 2);
+    assert.strictEqual(o[1].last.start, 200);
+    assert.strictEqual(o[2].last.aborted, true);
+    assert.strictEqual(o[3].last, null);
+    assert.deepStrictEqual(R.orphans({}, text), []);
 });
 
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);

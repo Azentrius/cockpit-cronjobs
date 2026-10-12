@@ -70,8 +70,11 @@
                 { start: now() - 7200, end: now() - 7188, rc: 1, trigger: "schedule", bytes: 120, truncated: true, out: "20261012T010000Z-202" },
             ],
             running: [],
+            kb: 16,
         },
-        "gone-0000": { runs: [{ start: now() - 600, end: now() - 590, rc: 0, trigger: "schedule", bytes: 0, truncated: false, out: "" }], running: [] },
+        /* No line uses this one any more: a leftover. */
+        "gone-0000": { runs: [{ start: now() - 600, end: now() - 590, rc: 0, trigger: "schedule", bytes: 0, truncated: false, out: "" }],
+                       running: [], kb: 8 },
     };
     const OUTPUTS = {
         "update-geoip-1a2b/20261009T030000Z-101": "GeoLite2-City.mmdb aktualisiert\n",
@@ -100,6 +103,7 @@
         wrapper: wrapperParam === "missing" ? null : { version: wrapperParam === "0" ? 0 : 1 },
         wrapperInstalls: [],
         removedRuns: [],
+        orphanCalls: [],
         units: {},
         enabled: [],
         failEnable: null,
@@ -128,6 +132,7 @@
     function systemOutput(privileged) {
         const out = [];
         const sec = n => out.push("\x1e" + n + "\n");
+        sec("uid"); out.push((privileged ? "0" : "1000") + "\n");
         sec("etc"); out.push(M.sys.etc + "\n");
         Object.keys(M.sys.crond).forEach(f => { sec("d:" + (M.sys.crondMeta[f] || "0:644") + ":" + f); out.push(M.sys.crond[f] + "\n"); });
         if (privileged) Object.keys(M.sys.users).forEach(u => { sec("u:" + u); out.push(M.sys.users[u] + "\n"); });
@@ -142,6 +147,7 @@
         const out = [];
         Object.keys(M.runs).forEach(id => {
             out.push("\x1e" + id + "\n");
+            out.push("size " + (M.runs[id].kb || 4) + "\n");
             M.runs[id].runs.slice().reverse().forEach(r => out.push(JSON.stringify(r) + "\n"));
             M.runs[id].running.forEach(r => out.push("running " + (r.alive === false ? 0 : 1) + " " +
                 JSON.stringify({ start: r.start, pid: r.pid || 4242, trigger: r.trigger || "schedule" }) + "\n"));
@@ -216,6 +222,21 @@
             if (M.root === null) fail({ exit_status: 1, problem: null, message: "no crontab for root\n" });
             const bytes = new TextEncoder().encode(M.root);
             return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
+        }
+        /* Removing leftover runs: the script checks every ID again against all crontabs. */
+        if (/echo "removed /.test(script)) {
+            if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
+            const all = [M.root || "", M.sys.etc].concat(Object.values(M.sys.crond), Object.values(M.sys.users)).join("\n");
+            const words = new Set(all.split(/[^A-Za-z0-9_-]+/));
+            M.orphanCalls.push(args.slice(4));
+            return args.slice(4).map(id => {
+                if (!M.runs[id]) return "gone " + id;
+                if (words.has(id)) return "used " + id;
+                if (M.runs[id].running.some(r => r.alive !== false)) return "running " + id;
+                delete M.runs[id];
+                M.removedRuns.push(id);
+                return "removed " + id;
+            }).join("\n") + "\n";
         }
         if (/flock -w 10 9/.test(script)) {
             if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });

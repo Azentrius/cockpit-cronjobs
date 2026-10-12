@@ -21,6 +21,23 @@ html { background: var(--bg-page); }
 .cron-card-alert { margin: var(--space-md) var(--space-lg) var(--space-lg); }
 .cron-card-alert + .az-table-wrap { margin-block-start: calc(-1 * var(--space-sm)); }
 
+/* Leftover runs, under the root crontab */
+.cron-orphans {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  border-block-start: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-subtle);
+}
+.cron-orphans .az-icon { flex: none; color: var(--status-info); }
+@media (max-width: 640px) {
+  .cron-orphans { padding-inline: var(--space-md); }
+  .cron-orphans > span { flex: 1 1 0; min-width: 0; }
+}
+
 /* Tables */
 .az-table th.cron-col-toggle { inline-size: 72px; }
 .cron-cell { min-width: 0; }

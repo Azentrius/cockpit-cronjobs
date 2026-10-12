@@ -5,7 +5,8 @@
  *                   { start, end, rc, trigger, bytes, truncated, out [, aborted] }
  *   STAMP.out       the last 64 KiB of that run's output (stdout and stderr)
  *   STAMP.running   { start, pid, trigger } while a run is going on
- * The page reads all of it with one script (see readRuns in app.js); this parses it.
+ * The page reads all of it with one script (see readRuns in app.js); this parses it
+ * and finds the jobs that no crontab uses any more.
  *
  * Loaded in the browser as window.CronRuns and in Node via require().
  *
@@ -42,22 +43,25 @@
         try { return JSON.parse(text); } catch (_) { return null; }
     }
 
-    /* Script output -> { ID: { runs: [newest first], running: [{ start, pid, trigger }] } }.
-       Sections start with "\x1eID"; lines are records ("{…}") or
-       "running ALIVE {…}" for a run marker (ALIVE 0: the run died without finishing). */
+    /* Script output -> { ID: { runs: [newest first], running: [{ start, pid, trigger }], kb } }.
+       Sections start with "\x1eID"; lines are records ("{…}"), "size KB" (disk use of
+       the directory, kb null when missing) or "running ALIVE {…}" for a run marker
+       (ALIVE 0: the run died without finishing). */
     function parseRuns(text) {
         const out = {};
         String(text || "").split("\x1e").slice(1).forEach(chunk => {
             const lines = chunk.split("\n");
             const id = lines.shift().trim();
             if (!ID_RE.test(id)) return;
-            const job = { runs: [], running: [] };
+            const job = { runs: [], running: [], kb: null };
             lines.forEach(line => {
                 if (line.charAt(0) === "{") {
                     const r = record(parseJson(line));
                     if (r) job.runs.push(r);
                     return;
                 }
+                const s = /^size (\d+)\s*$/.exec(line);
+                if (s) { job.kb = parseInt(s[1], 10); return; }
                 const m = /^running ([01]) (\{.*\})\s*$/.exec(line);
                 if (!m) return;
                 const o = parseJson(m[2]);
@@ -83,5 +87,29 @@
         return r.end !== null && r.end >= r.start ? r.end - r.start : null;
     }
 
-    return { ID_RE, OUT_RE, parseRuns, outcome, duration };
+    /* The words of a text: runs of the characters an ID is made of. */
+    function words(text) {
+        return new Set(String(text || "").split(/[^A-Za-z0-9_-]+/));
+    }
+
+    /* Whether the ID appears as a word anywhere in the text, comments included. Wider
+       than the run recorder's command line on purpose: an ID that a crontab still
+       mentions is never offered for removal. */
+    function mentioned(text, id) {
+        return ID_RE.test(id) && words(text).has(id);
+    }
+
+    /* Recorded jobs that no crontab mentions any more (lines changed or removed by
+       hand): [{ id, count, last, kb }], the most recent last run first. A job with a
+       run going on is never one of them.
+       byId: from parseRuns; text: all crontabs together. */
+    function orphans(byId, text) {
+        const used = words(text);
+        return Object.keys(byId)
+            .filter(id => byId[id].running.length === 0 && !used.has(id))
+            .map(id => ({ id, count: byId[id].runs.length, last: byId[id].runs[0] || null, kb: byId[id].kb }))
+            .sort((a, b) => (b.last ? b.last.start : 0) - (a.last ? a.last.start : 0) || a.id.localeCompare(b.id));
+    }
+
+    return { ID_RE, OUT_RE, parseRuns, outcome, duration, mentioned, orphans };
 }));
