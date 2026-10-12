@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Serves src/ like Cockpit does: /pkg/cronjobs/…, the mock cockpit.js and po.js under
 /pkg/base1/, Cockpit's fonts under /static/fonts/ (a stand-in when Cockpit is not
 installed), with Cockpit's CSP."""

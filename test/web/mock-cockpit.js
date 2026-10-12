@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Stand-in for cockpit.js in the browser tests of Cron Jobs.
  * Behaves like a Debian/Ubuntu server with cron, systemd and a few timers.
  * Query parameters: su, root=none, tz, tzmode=fallback, mta, systemd=no, cron=inactive,

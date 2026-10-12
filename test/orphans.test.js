@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Tests for the root script that removes leftover runs (REMOVE_ORPHANS_SCRIPT in
  * src/app.js), with dash and bash, against a fake state directory and fake crontabs.
  * Run with: node test/orphans.test.js */

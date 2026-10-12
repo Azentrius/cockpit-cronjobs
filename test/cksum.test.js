@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* cksum() must match coreutils `cksum < file` byte for byte. */
 const C = require("../src/lib/cron.js");
 const { execFileSync } = require("child_process");

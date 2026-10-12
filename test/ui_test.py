@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Browser tests for Cron Jobs against the mock Cockpit (with Cockpit's strict CSP).
 Run: python3 test/ui_test.py   (needs Playwright with Chromium)"""
 import atexit, os, re, subprocess, sys, time
