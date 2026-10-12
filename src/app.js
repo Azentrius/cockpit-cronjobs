@@ -385,18 +385,23 @@ exit 0
        Sections start with RS (\\036) and their name; RS is removed from all file contents,
        so that nobody can fake a section with a line in their own crontab. Read as bytes,
        so that a file in another encoding does not take everything else down with it.
-       cron.d sections carry owner and mode: cron skips files that are not root's or
-       that others can write to. uid tells whether it ran as root (other users'
-       crontabs need that); /etc/anacrontab is only read to see which recorded jobs
-       are still mentioned somewhere. */
+       Every entry of /etc/cron.d gets a section "d:LMODE:LUID:MODE:UID:NLINK:NAME":
+       raw mode (hex) and owner of the entry itself, then of what opening it gives
+       (a link followed; empty for a link to nothing), for C.cronDSkip. Only regular
+       files are read. uid tells whether it ran as root (other users' crontabs need
+       that); /etc/anacrontab is only read to see which recorded jobs are still
+       mentioned somewhere. */
     const SYSTEM_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
 show() { tr -d '\\036' < "$1" 2>/dev/null; echo; }
 name() { printf '%s' "$1" | tr -d '\\036\\n'; }
 sec uid; id -u
 sec etc; show /etc/crontab
 for f in /etc/cron.d/*; do
-  [ -f "$f" ] || continue
-  sec "d:$(stat -L -c '%u:%a' "$f" 2>/dev/null):$(name "\${f##*/}")"; show "$f"
+  [ -e "$f" ] || [ -L "$f" ] || continue
+  self=$(stat -c '%f:%u' "$f" 2>/dev/null) || self=:
+  target=$(stat -L -c '%f:%u:%h' "$f" 2>/dev/null) || target=::
+  sec "d:$self:$target:$(name "\${f##*/}")"
+  if [ -f "$f" ]; then show "$f"; fi
 done
 if [ -f /etc/anacrontab ]; then sec anacron; show /etc/anacrontab; fi
 spool=
@@ -431,6 +436,11 @@ exit 0
     /* Names run-parts of cronie (Fedora, RHEL, …) skips. */
     const CRONIE_SKIP_RE = /(~|,|\.rpm(save|orig|new)|\.swp|\.cfsaved|\.dpkg-[a-z]+)$/;
 
+    /* File types in st_mode, as stat's %f prints it. */
+    const S_IFMT = 0o170000;
+    const S_IFREG = 0o100000;
+    const S_IFLNK = 0o120000;
+
     function readSystem(flavor) {
         return spawn(["sh", "-c", SYSTEM_SCRIPT], { superuser: "try", err: "ignore", binary: true, environ: ["LC_ALL=C"] })
             .then(out => parseSystem(decode(out), flavor));
@@ -445,13 +455,21 @@ exit 0
             if (name === "uid") sys.root = body.trim() === "0";
             else if (name === "etc") sys.etc = C.parseSystemCrontab(body);
             else if (name.startsWith("d:")) {
-                const m = /^d:(\d*):([0-7]*):(.*)$/.exec(name);
+                const m = /^d:([0-9a-f]*):(\d*):([0-9a-f]*):(\d*):(\d*):(.*)$/.exec(name);
                 if (!m) return;
-                const file = m[3];
-                const badName = !C.cronDNameValid(file, flavor !== "cronie");
-                const badOwner = (m[1] !== "" && m[1] !== "0") || (m[2] !== "" && (parseInt(m[2], 8) & 0o022) !== 0);
-                const ignored = badName ? "name" : badOwner ? "owner" : null;
-                C.parseSystemCrontab(body).forEach(j => sys.crond.push(Object.assign({ file, ignored }, j)));
+                const file = m[6];
+                const self = parseInt(m[1], 16);
+                const mode = parseInt(m[3], 16);
+                const ignored = C.cronDSkip({
+                    name: file,
+                    link: m[1] && (self & S_IFMT) === S_IFLNK ? { uid: +m[2] } : null,
+                    target: m[3] && m[4] && m[5] ? { regular: (mode & S_IFMT) === S_IFREG, mode: mode & 0o7777, uid: +m[4], nlink: +m[5] }
+                        : null,
+                }, flavor !== "cronie");
+                const jobs = C.parseSystemCrontab(body);
+                jobs.forEach(j => sys.crond.push(Object.assign({ file, ignored }, j)));
+                /* Skipped and nothing to show (a link to nothing, a directory): the file alone. */
+                if (!jobs.length && ignored) sys.crond.push({ file, ignored, schedule: null, user: null, command: null });
             } else if (name.startsWith("u:")) {
                 const user = name.slice(2);
                 const entries = C.parseUserCrontab(body);
@@ -1497,14 +1515,17 @@ exit 0
         fill($("crond-body"), sys.crond.length === 0 ? emptyState() : readOnlyTable(
             [T.colFile, T.colSchedule, T.colUser, T.colCommand],
             sys.crond.map(j => h("tr", { class: j.ignored ? "is-off" : null },
-                h("td", { class: "az-nowrap", "data-label": T.colFile },
-                    h("div", { class: "cron-title-row" },
-                        h("span", { class: "az-mono" }, j.file),
-                        j.ignored ? h("span", { class: "az-label az-label--warning",
-                                                title: j.ignored === "name" ? T.ignoredHint : T.ignoredOwner }, T.ignored) : null)),
-                h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule)),
-                h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
-                h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
+                h("td", { "data-label": T.colFile },
+                    h("div", { class: "cron-cell" },
+                        h("div", { class: "cron-title-row" },
+                            h("span", { class: "az-mono" }, j.file),
+                            j.ignored ? h("span", { class: "az-label az-label--warning", title: T.ignoredWhy[j.ignored] }, T.ignored) : null),
+                        j.ignored ? h("span", { class: "az-cell-sub cron-ignored-why" }, T.ignoredWhy[j.ignored]) : null)),
+                h("td", { class: "az-nowrap", "data-label": T.colSchedule },
+                    j.schedule ? scheduleCell(j.schedule) : h("span", { class: "cron-muted" }, "—")),
+                h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user || h("span", { class: "cron-muted" }, "—")),
+                h("td", { "data-label": T.colCommand },
+                    j.command ? h("span", { class: "az-mono" }, j.command) : h("span", { class: "cron-muted" }, "—"))))));
 
         $("users-card").hidden = sys.users.length === 0;
         fill($("users-body"), readOnlyTable(

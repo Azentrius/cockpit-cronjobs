@@ -268,6 +268,39 @@
         return !/^[.#]/.test(name) && !/~$/.test(name) && !/\.(rpmnew|rpmorig|rpmsave)$/.test(name);
     }
 
+    /* Why cron skips an entry of /etc/cron.d, or null when it reads it; the checks
+       of database.c in their order, so the reason is the one cron logs.
+         Debian/Ubuntu cron: name; a symbolic link must belong to root ("WRONG
+           SYMLINK OWNER"); then the file it opens (a link is followed) must belong
+           to root, be a regular file, not be writable by group or others, and have
+           exactly one hard link.
+         cronie: name; the file it opens (a link is followed, the link itself is not
+           checked) must be a regular file, have mode bits (mode & 07533) == 0400
+           (readable by its owner, not executable, no setuid/setgid/sticky, not
+           writable or executable by group or others), and belong to root.
+       entry: { name, link: { uid } for a symbolic link, else null,
+                target: { regular, mode, uid, nlink } of what open() gets, or null when
+                it cannot be opened (a link to nothing) }
+       Reasons: name, linkOwner, broken, owner, notFile, writable, mode, links. */
+    function cronDSkip(entry, debian) {
+        if (!cronDNameValid(entry.name, debian)) return "name";
+        const t = entry.target;
+        if (debian) {
+            if (entry.link && entry.link.uid !== 0) return "linkOwner";
+            if (!t) return "broken";
+            if (t.uid !== 0) return "owner";
+            if (!t.regular) return "notFile";
+            if (t.mode & 0o022) return "writable";
+            if (t.nlink !== 1) return "links";
+            return null;
+        }
+        if (!t) return "broken";
+        if (!t.regular) return "notFile";
+        if ((t.mode & 0o7533) !== 0o400) return t.mode & 0o022 ? "writable" : "mode";
+        if (t.uid !== 0) return "owner";
+        return null;
+    }
+
     /* What cron hands to the shell, exactly as cron's do_command does it: the command
        up to the first unescaped "%" ("\%" becomes "%", other backslashes stay), and the
        rest as standard input with "%" as line breaks (stdin null when there is none). */
@@ -665,7 +698,7 @@
         parseField, parseSchedule, isFull, splitJob,
         parseUserCrontab, serializeUserCrontab, roundTrips, normalizeText, templateEnd,
         setEnabled, setJob, newJob, rawLine, entryLine,
-        parseSystemCrontab, cronDNameValid, hasUnescapedPercent, cronCommand,
+        parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
         parseEnvLine, envBefore,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, jobName, slug,
         cksum,

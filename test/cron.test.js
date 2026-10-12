@@ -279,6 +279,45 @@ t("cron.d names: cronie", () => {
     assert.ok(!C.cronDNameValid("job~", false));
     assert.ok(!C.cronDNameValid("raid-check.rpmnew", false));
 });
+
+/* What cron reads in /etc/cron.d, as in database.c of Debian's cron and of cronie. */
+const FILE = { regular: true, mode: 0o644, uid: 0, nlink: 1 };
+const entry = (o, t) => Object.assign({ name: "job", link: null, target: t === null ? null : Object.assign({}, FILE, t) }, o);
+const skip = (debian, o, t) => C.cronDSkip(entry(o, t || {}), debian);
+t("cron.d, Debian: a plain file of root, 0644, one link is read", () => assert.strictEqual(skip(true, {}), null));
+t("cron.d, Debian: name", () => assert.strictEqual(skip(true, { name: "job.sh" }), "name"));
+t("cron.d, Debian: a link of root to such a file is read", () => assert.strictEqual(skip(true, { link: { uid: 0 } }), null));
+t("cron.d, Debian: a link not owned by root", () => assert.strictEqual(skip(true, { link: { uid: 1000 } }), "linkOwner"));
+t("cron.d, Debian: the link's owner comes first", () =>
+    assert.strictEqual(C.cronDSkip(entry({ link: { uid: 1000 } }, null), true), "linkOwner"));
+t("cron.d, Debian: a link to nothing", () => assert.strictEqual(C.cronDSkip(entry({ link: { uid: 0 } }, null), true), "broken"));
+t("cron.d, Debian: not owned by root", () => assert.strictEqual(skip(true, {}, { uid: 1000 }), "owner"));
+t("cron.d, Debian: the owner comes before the type", () =>
+    assert.strictEqual(skip(true, {}, { uid: 1000, regular: false }), "owner"));
+t("cron.d, Debian: not a regular file", () => assert.strictEqual(skip(true, { link: { uid: 0 } }, { regular: false }), "notFile"));
+t("cron.d, Debian: writable by group", () => assert.strictEqual(skip(true, {}, { mode: 0o664 }), "writable"));
+t("cron.d, Debian: writable by others", () => assert.strictEqual(skip(true, {}, { mode: 0o646 }), "writable"));
+t("cron.d, Debian: more than one hard link", () => assert.strictEqual(skip(true, {}, { nlink: 2 }), "links"));
+t("cron.d, Debian: executable or 0600 is fine", () => {
+    assert.strictEqual(skip(true, {}, { mode: 0o755 }), null);
+    assert.strictEqual(skip(true, {}, { mode: 0o600 }), null);
+});
+t("cron.d, cronie: a plain file of root, 0644 is read", () => assert.strictEqual(skip(false, {}), null));
+t("cron.d, cronie: name", () => assert.strictEqual(skip(false, { name: "job~" }), "name"));
+t("cron.d, cronie: the link itself is not checked", () => assert.strictEqual(skip(false, { link: { uid: 1000 } }), null));
+t("cron.d, cronie: a link to nothing", () => assert.strictEqual(C.cronDSkip(entry({ link: { uid: 1000 } }, null), false), "broken"));
+t("cron.d, cronie: not a regular file", () => assert.strictEqual(skip(false, {}, { regular: false, uid: 1000 }), "notFile"));
+t("cron.d, cronie: writable by group or others", () => {
+    assert.strictEqual(skip(false, {}, { mode: 0o664 }), "writable");
+    assert.strictEqual(skip(false, {}, { mode: 0o602 }), "writable");
+});
+t("cron.d, cronie: executable, setuid, sticky or not readable by the owner", () => {
+    [0o755, 0o744, 0o654, 0o4644, 0o1644, 0o244, 0o645].forEach(mode => assert.strictEqual(skip(false, {}, { mode }), "mode", mode.toString(8)));
+    [0o644, 0o600, 0o400, 0o640, 0o444].forEach(mode => assert.strictEqual(skip(false, {}, { mode }), null, mode.toString(8)));
+});
+t("cron.d, cronie: the mode comes before the owner", () => assert.strictEqual(skip(false, {}, { mode: 0o755, uid: 1000 }), "mode"));
+t("cron.d, cronie: not owned by root", () => assert.strictEqual(skip(false, {}, { uid: 1000 }), "owner"));
+t("cron.d, cronie: hard links do not matter", () => assert.strictEqual(skip(false, {}, { nlink: 3 }), null));
 t("system crontab parsing", () => {
     const s = "SHELL=/bin/sh\n17 *\t* * *\troot\tcd / && run-parts --report /etc/cron.hourly\n" +
               "@reboot www-data /x\n# 1 2 3 4 5 root no\n";

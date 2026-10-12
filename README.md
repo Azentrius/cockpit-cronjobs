@@ -11,6 +11,8 @@ and turns cron jobs into systemd timers.
 - **Everything that runs, in one place.** The root crontab, `/etc/crontab`, `/etc/cron.d`, the crontabs of
   other users, the scripts in `/etc/cron.hourly` … `/etc/cron.monthly`, and systemd timers. Schedules are
   written out in words; next runs are shown in server time, and in your own time when that differs.
+  Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links) are marked
+  with the reason, by the rules of the cron that is installed.
 - **The next 24 hours.** A timeline of all cron jobs and timers. Jobs that start in the same minute are
   pointed out.
 - **Safe changes to the root crontab.** Add, edit, switch off and on, delete. Lines you do not touch stay

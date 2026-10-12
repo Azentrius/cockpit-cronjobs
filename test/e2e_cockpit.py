@@ -70,6 +70,47 @@ sh("crontab -u root -", input="MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fs
 if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
     sys.exit("cron is not running")
 
+# One entry in /etc/cron.d per rule of Debian's cron (see C.cronDSkip), created now so
+# that cron has read them by the end: name -> (reason the page gives, what cron logs).
+CROND_DIR = "/etc/cron.d"
+CROND_SRC = "/etc/cj-e2e"
+CROND = {
+    "cj-e2e-ok": (None, None),
+    "cj-e2e-exec": (None, None),
+    "cj-e2e-link": (None, None),
+    "cj-e2e-linkuser": ("linkOwner", "WRONG SYMLINK OWNER"),
+    "cj-e2e-broken": ("broken", "CAN'T OPEN SYMLINK"),
+    "cj-e2e-owner": ("owner", "WRONG FILE OWNER"),
+    "cj-e2e-dir": ("notFile", "NOT A REGULAR FILE"),
+    "cj-e2e-writable": ("writable", "INSECURE MODE"),
+    "cj-e2e-hard": ("links", "NUMBER OF HARD LINKS > 1"),
+}
+crond_since = int(time.time())
+sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
+os.makedirs(CROND_SRC)
+
+
+def crond_file(path, mode=0o644):
+    with open(path, "w") as f:
+        f.write(f"0 5 1 1 * root true {os.path.basename(path)}\n")
+    os.chmod(path, mode)
+
+
+crond_file(f"{CROND_DIR}/cj-e2e-ok")
+crond_file(f"{CROND_DIR}/cj-e2e-exec", 0o755)
+crond_file(f"{CROND_SRC}/link")
+os.symlink(f"{CROND_SRC}/link", f"{CROND_DIR}/cj-e2e-link")
+crond_file(f"{CROND_SRC}/linkuser")
+os.symlink(f"{CROND_SRC}/linkuser", f"{CROND_DIR}/cj-e2e-linkuser")
+os.lchown(f"{CROND_DIR}/cj-e2e-linkuser", 65534, 65534)
+os.symlink(f"{CROND_SRC}/missing", f"{CROND_DIR}/cj-e2e-broken")
+crond_file(f"{CROND_DIR}/cj-e2e-owner")
+os.chown(f"{CROND_DIR}/cj-e2e-owner", 65534, 65534)
+os.mkdir(f"{CROND_DIR}/cj-e2e-dir")
+crond_file(f"{CROND_DIR}/cj-e2e-writable", 0o664)
+crond_file(f"{CROND_DIR}/cj-e2e-hard")
+os.link(f"{CROND_DIR}/cj-e2e-hard", f"{CROND_SRC}/hard")
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     ctx = browser.new_context(viewport={"width": 1280, "height": 900})
@@ -278,6 +319,42 @@ with sync_playwright() as p:
     check(crontab() == "MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fstrim -a\n", "back to the start: " + repr(crontab()))
     check(len(os.listdir(STATE + "/backups")) == 10, "ten backups kept: " + repr(len(os.listdir(STATE + "/backups"))))
     check(os.path.exists(STATE + "/.crontab.lock"), "lock in the state dir")
+
+    # /etc/cron.d: the page marks exactly what cron skips, with cron's reason, and cron's log agrees
+    page.click("#reload")
+    wait_idle(page)
+    why_text = {"linkOwner": "Link ist, der nicht root gehört", "broken": "Link ins Leere", "owner": "weil sie nicht root gehört",
+                "notFile": "keine normale Datei", "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink"}
+    shown = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
+        tr.querySelector('.az-mono').textContent, (tr.querySelector('.cron-ignored-why') || {}).textContent || null]))""")
+    for name, (reason, _) in CROND.items():
+        why = shown.get(name, "not listed")
+        good = why is None if reason is None else (why not in (None, "not listed") and why_text[reason] in why)
+        check(good, f"cron.d {name}: page shows {why!r}, cron's reason is {reason}")
+    page.locator("#crond-card").scroll_into_view_if_needed()
+    page.screenshot(path=os.path.join(SHOTS, "e2e-crond.png"))
+
+    def cron_says(name, log):
+        path = re.compile(re.escape(f"{CROND_DIR}/{name}") + r"(\)|\s|$)")
+        return [line for line in log.split("\n") if path.search(line)]
+
+    def cron_log():
+        return sh(f"journalctl -u cron --no-pager -o cat --since @{crond_since}").stdout
+
+    expected = [(name, msg) for name, (_, msg) in CROND.items() if msg]
+    deadline = time.time() + 75
+    log = cron_log()
+    while time.time() < deadline and not all(any(msg in line for line in cron_says(name, log)) for name, msg in expected):
+        time.sleep(3)
+        log = cron_log()
+    for name, (reason, msg) in CROND.items():
+        said = cron_says(name, log)
+        if msg:
+            check(any(msg in line for line in said), f"cron logs {msg!r} for {name}: {said!r}")
+        else:
+            check(not any(m in line for line in said for _, m in expected), f"cron reads {name}: {said!r}")
+    sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
+
     page.screenshot(path=os.path.join(SHOTS, "e2e-end.png"), full_page=True)
     check(not problems, "no console errors: " + repr(problems))
     browser.close()
