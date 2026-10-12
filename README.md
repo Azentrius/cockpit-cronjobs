@@ -44,14 +44,25 @@ the system crontabs and timers.
 
 ## Installation
 
+From a [release](https://github.com/Azentrius/cockpit-cronjobs/releases) (replace the version):
+
+```sh
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.0/cockpit-cronjobs-2.1.0.tar.gz
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.0/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+sudo tar -xzf cockpit-cronjobs-2.1.0.tar.gz -C /usr/share/cockpit
+```
+
+Or from the source:
+
 ```sh
 git clone https://github.com/Azentrius/cockpit-cronjobs.git
 cd cockpit-cronjobs
 sudo make install          # to /usr/local/share/cockpit/cronjobs
 ```
 
-Or copy the `src` directory to `/usr/share/cockpit/cronjobs`. Log in to Cockpit again; **Cron Jobs**
-appears in the menu.
+Log in to Cockpit again; **Cron Jobs** appears in the menu. To update, install the new version the
+same way.
 
 For development, `make devel-install` links `src` to `~/.local/share/cockpit/cronjobs`.
 
@@ -126,6 +137,15 @@ make check-ui     # browser tests against a stand-in for Cockpit (needs Python P
 
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
 crontab, so only use it on a throwaway machine or container (see the top of the file).
+
+## Releasing
+
+1. Set the new version in `src/app.js` (`const VERSION`) and add a section for it to `CHANGELOG.md`.
+2. Merge to `main`.
+3. On GitHub: Actions › **release** › Run workflow (branch `main`). The workflow checks that the version
+   is new and matches `src/app.js`, runs all tests, builds `cockpit-cronjobs-VERSION.tar.gz` with
+   `SHA256SUMS` (`make package`, reproducible) and creates the tag `vVERSION` with a release whose
+   notes come from `CHANGELOG.md`.
 
 ## License
 
