@@ -1,0 +1,87 @@
+/* Cron Jobs — recorded runs (no DOM, no Cockpit).
+ *
+ * cockpit-cronjobs-run keeps, per job ID, under /var/lib/cockpit-cronjobs/runs/ID/:
+ *   runs.jsonl      one JSON object per finished run, newest last (at most 20):
+ *                   { start, end, rc, trigger, bytes, truncated, out [, aborted] }
+ *   STAMP.out       the last 64 KiB of that run's output (stdout and stderr)
+ *   STAMP.running   { start, pid, trigger } while a run is going on
+ * The page reads all of it with one script (see readRuns in app.js); this parses it.
+ *
+ * Loaded in the browser as window.CronRuns and in Node via require().
+ *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+(function (root, factory) {
+    "use strict";
+    if (typeof module === "object" && module.exports) module.exports = factory();
+    else root.CronRuns = factory();
+}(typeof self !== "undefined" ? self : this, function () {
+    "use strict";
+
+    const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+    const OUT_RE = /^[0-9A-Za-z_-]{1,64}$/;
+    const num = v => (typeof v === "number" && isFinite(v) ? v : null);
+
+    function record(o) {
+        if (!o || typeof o !== "object") return null;
+        const start = num(o.start);
+        if (start === null) return null;
+        return {
+            start,
+            end: num(o.end),
+            rc: num(o.rc),
+            trigger: o.trigger === "manual" ? "manual" : "schedule",
+            bytes: num(o.bytes) || 0,
+            truncated: o.truncated === true,
+            out: typeof o.out === "string" && OUT_RE.test(o.out) ? o.out : "",
+            aborted: o.aborted === true,
+        };
+    }
+
+    function parseJson(text) {
+        try { return JSON.parse(text); } catch (_) { return null; }
+    }
+
+    /* Script output -> { ID: { runs: [newest first], running: [{ start, pid, trigger }] } }.
+       Sections start with "\x1eID"; lines are records ("{…}") or
+       "running ALIVE {…}" for a run marker (ALIVE 0: the run died without finishing). */
+    function parseRuns(text) {
+        const out = {};
+        String(text || "").split("\x1e").slice(1).forEach(chunk => {
+            const lines = chunk.split("\n");
+            const id = lines.shift().trim();
+            if (!ID_RE.test(id)) return;
+            const job = { runs: [], running: [] };
+            lines.forEach(line => {
+                if (line.charAt(0) === "{") {
+                    const r = record(parseJson(line));
+                    if (r) job.runs.push(r);
+                    return;
+                }
+                const m = /^running ([01]) (\{.*\})\s*$/.exec(line);
+                if (!m) return;
+                const o = parseJson(m[2]);
+                const r = record(o);
+                if (!r) return;
+                if (m[1] === "1") job.running.push({ start: r.start, pid: num(o.pid), trigger: r.trigger });
+                else job.runs.push(Object.assign(r, { aborted: true, end: null, rc: null, out: "" }));
+            });
+            job.runs.sort((a, b) => b.start - a.start);
+            out[id] = job;
+        });
+        return out;
+    }
+
+    /* "ok" | "failed" | "aborted" for a finished run. */
+    function outcome(r) {
+        if (r.aborted || r.rc === null) return "aborted";
+        return r.rc === 0 ? "ok" : "failed";
+    }
+
+    /* Seconds a run took, or null. */
+    function duration(r) {
+        return r.end !== null && r.end >= r.start ? r.end - r.start : null;
+    }
+
+    return { ID_RE, OUT_RE, parseRuns, outcome, duration };
+}));

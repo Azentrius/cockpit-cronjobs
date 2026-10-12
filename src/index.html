@@ -1,0 +1,295 @@
+<!doctype html>
+<!-- Cron Jobs for Cockpit · SPDX-License-Identifier: LGPL-2.1-or-later -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cron Jobs</title>
+<script src="azentrius-theme.js"></script>
+<link rel="stylesheet" href="azentrius.css">
+<link rel="stylesheet" href="app.css">
+<script src="../base1/cockpit.js"></script>
+<script src="../base1/po.js"></script>
+<script src="icons.js"></script>
+<script src="i18n/en.js"></script>
+<script src="i18n/de.js"></script>
+<script src="lib/cron.js"></script>
+<script src="lib/systemd.js"></script>
+<script src="lib/runs.js"></script>
+</head>
+<body>
+<div class="az-page" id="page">
+
+  <header class="az-page-header">
+    <div>
+      <h1 class="az-page-title" id="page-title" tabindex="-1">Cron Jobs</h1>
+      <p class="az-page-desc" id="page-desc"></p>
+    </div>
+    <div class="az-page-actions">
+      <span class="az-meta" id="meta"></span>
+      <button class="az-btn az-btn--secondary" type="button" id="reload" data-key="reload"><span data-icon="sync-alt"></span><span data-t="reload">Reload</span></button>
+    </div>
+  </header>
+
+  <div class="cron-alerts" id="notices"></div>
+  <div class="cron-alerts" id="alerts" aria-live="polite"></div>
+  <div class="cron-alerts" id="sys-alerts"></div>
+
+  <section class="az-card" id="tl-card" aria-labelledby="tl-title" hidden>
+    <div class="az-card__header cron-tl-header">
+      <div>
+        <h2 class="az-card__title" id="tl-title" data-t="tlTitle">The next 24 hours</h2>
+        <p class="az-card__desc" data-t="tlDesc"></p>
+      </div>
+      <div class="cron-tl-legend" aria-hidden="true">
+        <span><span class="cron-tl-mark is-legend"></span><span data-t="legendCron">Cron job</span></span>
+        <span><span class="cron-tl-mark is-timer is-legend"></span><span data-t="legendTimer">systemd timer</span></span>
+      </div>
+    </div>
+    <div class="cron-tl" id="tl-body"></div>
+  </section>
+
+  <section class="az-card" aria-labelledby="root-title">
+    <div class="az-card__header">
+      <div>
+        <h2 class="az-card__title" id="root-title" data-t="rootTitle">root crontab</h2>
+        <p class="az-card__desc" data-t="rootDesc"></p>
+      </div>
+      <div class="az-card__actions">
+        <button class="az-btn az-btn--primary az-btn--sm" type="button" id="add" data-key="add" hidden><span data-icon="plus"></span><span data-t="add">Add job</span></button>
+      </div>
+    </div>
+    <div id="root-body"><p class="cron-state" data-t="loading">Loading …</p></div>
+  </section>
+
+  <section class="az-card" id="timers-card" aria-labelledby="timers-title" hidden>
+    <div class="az-card__header">
+      <div>
+        <div class="cron-title-row"><h2 class="az-card__title" id="timers-title" data-t="timersTitle">systemd timers</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+        <p class="az-card__desc" data-t="timersDesc"></p>
+      </div>
+    </div>
+    <div id="timers-body"></div>
+  </section>
+
+  <section class="az-card" id="etc-card" aria-labelledby="etc-title" hidden>
+    <div class="az-card__header">
+      <div>
+        <div class="cron-title-row"><h2 class="az-card__title" id="etc-title">/etc/crontab</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+        <p class="az-card__desc" data-t="etcDesc"></p>
+      </div>
+    </div>
+    <div id="etc-body"></div>
+  </section>
+
+  <section class="az-card" id="crond-card" aria-labelledby="crond-title" hidden>
+    <div class="az-card__header">
+      <div>
+        <div class="cron-title-row"><h2 class="az-card__title" id="crond-title">/etc/cron.d</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+        <p class="az-card__desc" data-t="crondDesc"></p>
+      </div>
+    </div>
+    <div id="crond-body"></div>
+  </section>
+
+  <section class="az-card" id="users-card" aria-labelledby="users-title" hidden>
+    <div class="az-card__header">
+      <div>
+        <div class="cron-title-row"><h2 class="az-card__title" id="users-title" data-t="usersTitle">Other users</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+        <p class="az-card__desc" data-t="usersDesc"></p>
+      </div>
+    </div>
+    <div id="users-body"></div>
+  </section>
+
+  <section class="az-card" id="periodic-card" aria-labelledby="periodic-title" hidden>
+    <div class="az-card__header">
+      <div>
+        <div class="cron-title-row"><h2 class="az-card__title" id="periodic-title" data-t="periodicTitle">Periodic scripts</h2><span class="az-label" data-t="readOnly">Read only</span></div>
+        <p class="az-card__desc" data-t="periodicDesc"></p>
+      </div>
+    </div>
+    <div id="periodic-body"></div>
+  </section>
+
+  <footer class="az-signature cron-footer">
+    <a class="az-signature__mark" href="https://github.com/Azentrius/cockpit-cronjobs" target="_blank" rel="noopener noreferrer">Azentrius</a>
+    <span class="az-signature__meta"><span id="sig-version">Cron Jobs</span><span id="sig-host"></span></span>
+  </footer>
+</div>
+
+<!-- Edit / add -->
+<div class="az-backdrop" id="edit-dlg" hidden>
+  <form class="az-modal" id="edit-form" role="dialog" aria-modal="true" aria-labelledby="edit-title" novalidate>
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="edit-title">Edit job</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="edit-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div class="cron-dialog-alert" id="edit-alert" hidden></div>
+      <div class="az-field">
+        <label class="az-field__label" for="f-schedule" data-t="fSchedule">Schedule</label>
+        <input class="az-input az-mono" id="f-schedule" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="f-schedule-help">
+        <p class="az-field__help" id="f-schedule-help"></p>
+      </div>
+      <div class="az-field">
+        <label class="az-field__label" for="f-command" data-t="fCommand">Command</label>
+        <input class="az-input az-mono" id="f-command" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="f-command-help f-command-warn">
+        <p class="az-field__help" id="f-command-help"></p>
+        <p class="cron-field-warn" id="f-command-warn" hidden></p>
+      </div>
+      <div class="az-field">
+        <label class="az-switch"><input type="checkbox" role="switch" id="f-capture" aria-describedby="f-capture-help"><span class="az-switch__track"></span><span class="az-switch__label" data-t="fCapture">Record result and output</span></label>
+        <p class="az-field__help" id="f-capture-help"></p>
+      </div>
+      <label class="az-switch"><input type="checkbox" role="switch" id="f-active"><span class="az-switch__track"></span><span class="az-switch__label" data-t="fActive">Job is active</span></label>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--primary" type="submit" id="edit-save" data-t="save">Save</button>
+      <button class="az-btn az-btn--link" type="button" id="edit-cancel" data-t="cancel">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<!-- Delete -->
+<div class="az-backdrop" id="del-dlg" hidden>
+  <div class="az-modal" role="dialog" aria-modal="true" aria-labelledby="del-title" aria-describedby="del-intro">
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="del-title" data-t="delTitle">Delete job?</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="del-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div class="cron-dialog-alert" id="del-alert" hidden></div>
+      <p id="del-intro"></p>
+      <p class="az-mono cron-codebox" id="del-line"></p>
+      <p class="cron-muted" id="del-backup"></p>
+      <p class="cron-muted" id="del-runs" hidden></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--danger" type="button" id="del-confirm" data-t="delConfirm">Delete job</button>
+      <button class="az-btn az-btn--link" type="button" id="del-cancel" data-t="cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm (turn recording off) -->
+<div class="az-backdrop" id="confirm-dlg" hidden>
+  <div class="az-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="confirm-title"></h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="confirm-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <p id="confirm-body"></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--primary" type="button" id="confirm-ok"></button>
+      <button class="az-btn az-btn--link" type="button" id="confirm-cancel" data-t="cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Run now -->
+<div class="az-backdrop" id="run-dlg" hidden>
+  <div class="az-modal cron-modal-wide" role="dialog" aria-modal="true" aria-labelledby="run-title">
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="run-title" data-t="runTitle">Run now</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="run-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <p id="run-intro" data-t="runIntro"></p>
+      <p class="az-mono cron-codebox" id="run-cmd"></p>
+      <p class="cron-muted cron-small" id="run-env"></p>
+      <p class="cron-muted cron-small" id="run-keep" data-t="runKeepOpen"></p>
+      <div class="cron-run-status" id="run-status" hidden aria-live="polite">
+        <span id="run-label"></span>
+        <span class="cron-muted" id="run-time"></span>
+      </div>
+      <div id="run-log-wrap" hidden>
+        <pre class="cron-log az-mono" id="run-log" role="log" tabindex="0" data-t-label="runOutput" aria-label="Output"></pre>
+        <p class="cron-muted cron-small" id="run-cut" data-t="runOutputCut" hidden></p>
+      </div>
+    </div>
+    <div class="az-modal__footer">
+      <div class="cron-actions" id="run-confirm-actions">
+        <button class="az-btn az-btn--primary" type="button" id="run-start"><span data-icon="play"></span><span data-t="runStart">Run</span></button>
+        <button class="az-btn az-btn--link" type="button" id="run-cancel" data-t="cancel">Cancel</button>
+      </div>
+      <div class="cron-actions" id="run-running-actions" hidden>
+        <button class="az-btn az-btn--secondary" type="button" id="run-stop" data-t="runStop">Stop</button>
+      </div>
+      <div class="cron-actions" id="run-done-actions" hidden>
+        <button class="az-btn az-btn--primary" type="button" id="run-close-btn" data-t="close">Close</button>
+        <button class="az-btn az-btn--link" type="button" id="run-again"><span data-icon="redo"></span><span data-t="runAgain">Run again</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recorded runs -->
+<div class="az-backdrop" id="runs-dlg" hidden>
+  <div class="az-modal cron-modal-wide" role="dialog" aria-modal="true" aria-labelledby="runs-title" aria-describedby="runs-cmd">
+    <div class="az-modal__header">
+      <div class="cron-modal-heading">
+        <h2 class="az-modal__title" id="runs-title" data-t="runsTitle">Runs</h2>
+        <p class="az-mono cron-modal-sub" id="runs-cmd"></p>
+      </div>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="runs-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div id="runs-body"></div>
+      <p class="cron-muted cron-small" id="runs-note"></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--primary" type="button" id="runs-close-btn" data-t="close">Close</button>
+      <button class="az-btn az-btn--link" type="button" id="runs-capture-off" data-t="captureOff">Stop recording</button>
+    </div>
+  </div>
+</div>
+
+<!-- Convert to systemd timer -->
+<div class="az-backdrop" id="conv-dlg" hidden>
+  <form class="az-modal cron-modal-wide" id="conv-form" role="dialog" aria-modal="true" aria-labelledby="conv-title" novalidate>
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="conv-title" data-t="convTitle">Convert to systemd timer</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="conv-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div class="cron-dialog-alert" id="conv-alert" hidden></div>
+      <p data-t="convIntro"></p>
+      <div class="az-field">
+        <label class="az-field__label" for="conv-name" data-t="convName">Name</label>
+        <input class="az-input az-mono" id="conv-name" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="conv-name-help">
+        <p class="az-field__help" id="conv-name-help"></p>
+      </div>
+      <div class="az-field">
+        <span class="az-field__label" data-t="fSchedule">Schedule</span>
+        <div class="cron-conv-grid">
+          <span class="cron-muted">cron</span><span class="az-mono" id="conv-cron"></span>
+          <span class="cron-muted">systemd</span><span class="az-mono" id="conv-cal"></span>
+        </div>
+        <p class="az-field__help" id="conv-check" aria-live="polite"></p>
+      </div>
+      <div class="az-field">
+        <label class="az-switch"><input type="checkbox" role="switch" id="conv-persistent" aria-describedby="conv-persistent-help"><span class="az-switch__track"></span><span class="az-switch__label" data-t="convPersistent">Catch up on missed runs</span></label>
+        <p class="az-field__help" id="conv-persistent-help" data-t="convPersistentHelp"></p>
+      </div>
+      <div>
+        <button class="az-btn az-btn--link az-btn--sm cron-disclosure" type="button" id="conv-units-toggle" aria-expanded="false" aria-controls="conv-units"><span data-icon="angle-right"></span><span data-t="convShowUnits">Show units</span></button>
+        <div class="cron-units" id="conv-units" hidden>
+          <pre class="cron-log az-mono" id="conv-service"></pre>
+          <pre class="cron-log az-mono" id="conv-timer"></pre>
+        </div>
+      </div>
+      <p class="cron-muted cron-small" data-t="convAfter"></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--primary" type="submit" id="conv-ok" data-t="convConfirm">Convert</button>
+      <button class="az-btn az-btn--link" type="button" id="conv-cancel" data-t="cancel">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
