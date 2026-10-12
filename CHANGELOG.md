@@ -2,7 +2,7 @@
 
 ## 2.2.0 – 2026-10-12
 
-The shared Azentrius page frame, and the polish of stage 1.1 of the roadmap.
+The shared Azentrius page frame, the polish of stage 1.1 of the roadmap, and a new license.
 
 - **Page frame:** a one-line header without a description; “Refresh” is the only filled button on the
   page, with the time of the data next to it, and says “Loading …” while it loads. Tabs right under the
@@ -20,6 +20,8 @@ The shared Azentrius page frame, and the polish of stage 1.1 of the roadmap.
   into ES modules, still without a build step.
 - Shared design files as in the design system: `azentrius.css` (page header, tabs) and `icons.js`
   (`check`, `arrow-circle-up` for the other add-ons).
+- **License:** the Apache License 2.0. Versions up to and including 2.1.1 were released under the GNU
+  Lesser General Public License, version 2.1 or later.
 
 ## 2.1.1 – 2026-10-12
 
