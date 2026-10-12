@@ -1,5 +1,6 @@
 """Serves src/ like Cockpit does: /pkg/cronjobs/…, the mock cockpit.js and po.js under
-/pkg/base1/, Cockpit's fonts under /static/fonts/ (when available), with Cockpit's CSP."""
+/pkg/base1/, Cockpit's fonts under /static/fonts/ (a stand-in when Cockpit is not
+installed), with Cockpit's CSP."""
 import http.server, os, sys
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +34,9 @@ class H(http.server.BaseHTTPRequestHandler):
                     import gzip
                     data = gzip.open(fn + ".gz").read()
                     return self.send(data, os.path.splitext(fn)[1])
+        if path.startswith("/static/fonts/") and path.endswith(".woff2") and (not fn or not os.path.isfile(fn)):
+            # Without Cockpit installed (e.g. in CI) a stand-in, so that the page sees a font.
+            fn = os.path.join(SRC, "DMSans.woff2")
         if not fn or not os.path.isfile(fn):
             self.send_response(404)
             self.end_headers()
