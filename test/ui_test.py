@@ -105,8 +105,8 @@ with sync_playwright() as p:
     check("Montags um 05:00" in body, "disabled job shown (old marker)")
     check("Alle 10 Minuten" in body, "describe every 10 minutes")
     check("Beim Systemstart" in body and "Beim nächsten Start" in body, "@reboot")
-    check("GeoIP-Datenbank für Plausible" in body, "comment note shown")
-    check(page.locator("b").count() == 0 and "<b>nicht fett</b>" in body, "command is escaped")
+    check("GeoIP database for Plausible" in body, "comment note shown")
+    check(page.locator("b").count() == 0 and "<b>not bold</b>" in body, "command is escaped")
     check("Serverzeit UTC" in page.inner_text("#meta"), "server tz in meta")
     check(page.locator("#root-body tbody tr").count() == 5, "5 root jobs")
     check(page.locator("#root-body tr.is-off").count() == 1, "1 disabled row")
@@ -143,7 +143,7 @@ with sync_playwright() as p:
     check("Fehler · Exit 32" in tm and "Läuft" in tm and "Nicht aktiv" in tm, "timer states")
     check("Täglich um 06:00 und 18:00, zufällig verzögert" in tm, "timer described")
     check("15min nach dem Systemstart" in tm, "monotonic timer described")
-    page.locator("#timers-body tbody tr").nth(0).locator("button").click()
+    page.locator("#timers-body tbody tr", has_text="apt-daily.timer").locator("button").click()
     check(mock(page, "jumps[0][0]") == "/system/services#/apt-daily.timer", "open timer in Cockpit")
     fonts = page.evaluate("() => document.fonts.check('15px \"DM Sans\"') && document.fonts.check('16px \"DM Serif Display\"')")
     check(fonts, "fonts available")
@@ -283,7 +283,7 @@ with sync_playwright() as p:
     row(page, 3).locator("[data-key^=more]").click()
     page.locator(".cron-menu__item", has_text="Löschen").click()
     check(page.locator("#del-dlg").is_visible(), "delete dialog")
-    check("echo '<b>nicht fett</b>'" in page.inner_text("#del-line"), "delete shows line")
+    check("echo '<b>not bold</b>'" in page.inner_text("#del-line"), "delete shows line")
     check("/var/lib/cockpit-cronjobs/backups/" in page.inner_text("#del-backup"), "delete shows backup dir")
     check(page.locator("#del-runs").is_hidden(), "no runs note for unrecorded job")
     check(page.evaluate("() => document.activeElement.id") == "del-cancel", "focus on cancel in delete dialog")
@@ -295,17 +295,17 @@ with sync_playwright() as p:
     wait_js(page, "document.querySelector('#del-dlg').hidden")
     wait_idle(page)
     removed = [l for l in before_del.split("\n") if l not in root_text(page).split("\n")]
-    check(removed == ["*/10 * * * * test -x /opt/x && echo '<b>nicht fett</b>' > /dev/null"], "deleted one line: " + repr(removed))
+    check(removed == ["*/10 * * * * test -x /opt/x && echo '<b>not bold</b>' > /dev/null"], "deleted one line: " + repr(removed))
     check("Job gelöscht" in page.inner_text("#alerts"), "delete alert")
 
     # conflict: someone changes the crontab elsewhere
-    page.evaluate("() => { window.__mock.conflictNext = window.__mock.root + '0 4 * * * /usr/bin/fremd\\n'; }")
+    page.evaluate("() => { window.__mock.conflictNext = window.__mock.root + '0 4 * * * /usr/bin/other\\n'; }")
     writes = mock(page, "writes")
     row(page, 0).locator(".az-switch").click()
     wait_idle(page)
     check(mock(page, "writes") == writes, "conflict: no write")
     check("inzwischen geändert" in page.inner_text("#alerts"), "conflict alert")
-    check("/usr/bin/fremd" in page.inner_text("#root-body"), "conflict: fresh state shown")
+    check("/usr/bin/other" in page.inner_text("#root-body"), "conflict: fresh state shown")
     check(row(page, 0).locator("input[type=checkbox]").is_checked(), "conflict: switch reset")
 
     # errors stay in the dialog
@@ -372,7 +372,7 @@ with sync_playwright() as p:
     check("Manuell" in rt and "Zeitplan" in rt and "Fehler · Exit 1" in rt and "4 min 12 s" in rt, "runs content: " + rt[:200])
     check("/var/lib/cockpit-cronjobs/runs/" in page.inner_text("#runs-note"), "runs note")
     page.locator("#runs-body [data-key^='out:']").first.click()
-    wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('fehlgeschlagen')")
+    wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('download failed')")
     check("letzten 64 KB" in page.inner_text("#runs-body"), "truncated note")
     check(page.locator("#runs-body [data-key^='copy:']").count() == 1, "copy button")
     check(page.locator("#runs-body [data-key^='out:']").first.get_attribute("aria-expanded") == "true", "aria-expanded on output toggle")
@@ -413,7 +413,7 @@ with sync_playwright() as p:
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
     rt = page.inner_text("#run-dlg")
-    check("OK" in page.inner_text("#run-label") and "Lade 12 Feeds" in page.inner_text("#run-log") and "nach" in rt, "run done: " + rt)
+    check("OK" in page.inner_text("#run-label") and "Loading 12 feeds" in page.inner_text("#run-log") and "nach" in rt, "run done: " + rt)
     started = mock(page, "runs_started[0]")
     check("PATH=/usr/bin:/bin" in started["env"] and "HOME=/root" in started["env"] and "SHELL=/bin/sh" in started["env"]
           and not any(e.startswith("CRONJOBS_TRIGGER") for e in started["env"]), "manual run environment: " + repr(started["env"]))
@@ -582,7 +582,7 @@ with sync_playwright() as p:
     check("inzwischen geändert" in page.inner_text("#alerts"), "stale delete reports conflict")
     row(page, 1).locator("[data-key^=edit]").click()
     page.fill("#f-command", "/usr/sbin/fstrim -av")
-    page.evaluate("() => { window.__mock.root = '# neu\\n' + window.__mock.root; }")
+    page.evaluate("() => { window.__mock.root = '# new\\n' + window.__mock.root; }")
     page.evaluate("() => window.__mock.setSuperuser('sudo')")
     page.wait_for_timeout(100)
     wait_idle(page)
@@ -602,7 +602,7 @@ with sync_playwright() as p:
     wait_js(page, "document.querySelector('#del-dlg').hidden")
     wait_idle(page)
     gone = [l for l in before.split("\n") if l not in root_text(page).split("\n")]
-    check(gone == ["# GeoIP-Datenbank für Plausible", "0 3 2 * *\t" + WRAP + " update-geoip-1a2b '/opt/plausible/update-geoip.sh'"],
+    check(gone == ["# GeoIP database for Plausible", "0 3 2 * *\t" + WRAP + " update-geoip-1a2b '/opt/plausible/update-geoip.sh'"],
           "job and note removed: " + repr(gone))
     check(mock(page, "removedRuns") == ["update-geoip-1a2b"], "runs removed with job")
     check("MAILTO" in root_text(page), "MAILTO kept")
@@ -611,13 +611,13 @@ with sync_playwright() as p:
     wait_idle(page)
     check("an anderer Stelle" in page.inner_text("#alerts"), "lock busy message")
     check(row(page, 0).locator("input").is_checked(), "switch reset after lock busy")
-    check("M�rz" in page.inner_text("#crond-body"), "latin1 file decoded leniently")
+    check("caf\ufffd" in page.inner_text("#crond-body"), "latin1 file decoded leniently")
     check(not page.problems, "no console problems (races): " + repr(page.problems))
     page.context.close()
 
     # a root crontab that is not UTF-8 opens read-only
     page = open_page(browser)
-    page.evaluate("() => { window.__mock.latin1 = true; window.__mock.root += '# M\\x01rz\\n'; }")
+    page.evaluate("() => { window.__mock.latin1 = true; window.__mock.root += '# caf\\x01\\n'; }")
     page.click("#reload")
     wait_idle(page)
     check("nicht UTF-8" in page.inner_text("#root-body"), "not UTF-8: read-only notice")

@@ -179,7 +179,7 @@ with sync_playwright() as p:
     # output that is not UTF-8 does not end the run
     page.click("#add")
     page.fill("#f-schedule", "0 5 * * *")
-    page.fill("#f-command", "printf 'M\\344rz\\n'; sleep 1; umask; echo after")
+    page.fill("#f-command", "printf 'caf\\351\\n'; sleep 1; umask; echo after")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -187,13 +187,13 @@ with sync_playwright() as p:
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
     log = page.inner_text("#run-log")
-    check("M\ufffdrz" in log and "after" in log and "OK" in page.inner_text("#run-label"), "latin-1 output survives: " + repr(log))
+    check("caf\ufffd" in log and "after" in log and "OK" in page.inner_text("#run-label"), "latin-1 output survives: " + repr(log))
     page.click("#run-close-btn")
     page.wait_for_timeout(800)
     rec_id = re.search(r"cockpit-cronjobs-run (\S+) 'printf", crontab()).group(1)
     out_file = [f for f in os.listdir(f"{STATE}/runs/{rec_id}") if f.endswith(".out")]
     rec_out = open(f"{STATE}/runs/{rec_id}/{out_file[0]}", "rb").read() if out_file else b""
-    check(b"M\xe4rz" in rec_out and b"\n0022\n" in rec_out, "recorded job keeps umask 022 and raw bytes: " + repr(rec_out))
+    check(b"caf\xe9" in rec_out and b"\n0022\n" in rec_out, "recorded job keeps umask 022 and raw bytes: " + repr(rec_out))
 
     # switch off and on: byte-exact
     before = crontab()
