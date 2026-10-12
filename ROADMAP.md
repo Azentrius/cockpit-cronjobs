@@ -11,7 +11,7 @@ order is the recommendation; stages after 1.1 are proposals until they are decid
   umask, `CRON_TZ`. Tests compare against the real tools (`systemd-analyze`, dash and bash, real cron).
 - **Show first:** a change shows what it will do before it does it. Whatever can fail stops before
   anything changes; a step that changes two things (crontab and systemd) is undone as a whole.
-- **Root code:** only the fixed scripts in `src/app.js` and `src/cockpit-cronjobs-run`. Values reach
+- **Root code:** only the fixed scripts in `src/app/system.js` and `src/cockpit-cronjobs-run`. Values reach
   them as arguments or standard input, never pasted into shell code; IDs and names are checked on both
   sides.
 - **Browser:** no build step, no runtime dependencies, no external resources, nothing inline (Cockpit's

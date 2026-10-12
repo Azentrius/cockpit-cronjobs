@@ -15,9 +15,10 @@ all:
 	@echo "Nothing to build. Try: make install, make check, make check-ui, make package"
 
 install:
-	install -d $(PKGDIR) $(PKGDIR)/lib $(PKGDIR)/i18n
+	install -d $(PKGDIR) $(PKGDIR)/app $(PKGDIR)/lib $(PKGDIR)/i18n
 	install -m 644 src/index.html src/manifest.json src/*.js src/*.css src/*.woff2 src/OFL.txt $(PKGDIR)/
 	install -m 755 src/cockpit-cronjobs-run $(PKGDIR)/
+	install -m 644 src/app/*.js $(PKGDIR)/app/
 	install -m 644 src/lib/*.js $(PKGDIR)/lib/
 	install -m 644 src/i18n/*.js $(PKGDIR)/i18n/
 

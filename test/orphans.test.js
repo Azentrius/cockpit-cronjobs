@@ -1,5 +1,5 @@
 /* Tests for the root script that removes leftover runs (REMOVE_ORPHANS_SCRIPT in
- * src/app.js), with dash and bash, against a fake state directory and fake crontabs.
+ * src/app/system.js), with dash and bash, against a fake state directory and fake crontabs.
  * Run with: node test/orphans.test.js */
 "use strict";
 const assert = require("assert");
@@ -8,7 +8,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
-const APP = fs.readFileSync(path.join(__dirname, "..", "src", "app.js"), "utf8");
+const APP = fs.readFileSync(path.join(__dirname, "..", "src", "app", "system.js"), "utf8");
 let passed = 0;
 function t(name, fn) {
     try { fn(); passed++; } catch (e) { console.error("FAIL", name, "\n ", e.stack || e.message); process.exitCode = 1; }
@@ -21,7 +21,7 @@ const HAVE_PROC = fs.existsSync("/proc/self/cmdline");
 /* The script exactly as the page runs it, with its paths moved into a fake root. */
 function script(root) {
     const m = /const REMOVE_ORPHANS_SCRIPT = `([\s\S]*?)`;/.exec(APP);
-    assert.ok(m, "REMOVE_ORPHANS_SCRIPT in app.js");
+    assert.ok(m, "REMOVE_ORPHANS_SCRIPT in app/system.js");
     const text = new Function("RUNS_DIR", "STATE_DIR", "return `" + m[1] + "`;")(root + "/state/runs", root + "/state");
     const moved = text.replace(/(^|\s)\/(etc|var\/spool)\//gm, "$1" + root + "/$2/");
     assert.ok(!/(^|\s)\/(etc|var\/spool)\//m.test(moved), "every crontab path moved");

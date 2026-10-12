@@ -11,7 +11,7 @@ const { spawnSync } = require("child_process");
 const C = require("../src/lib/cron.js");
 const SD = require("../src/lib/systemd.js");
 
-const APP = fs.readFileSync(path.join(__dirname, "..", "src", "app.js"), "utf8");
+const APP = fs.readFileSync(path.join(__dirname, "..", "src", "app", "system.js"), "utf8");
 let passed = 0;
 function t(name, fn) {
     try { fn(); passed++; } catch (e) { console.error("FAIL", name, "\n ", e.stack || e.message); process.exitCode = 1; }
@@ -26,7 +26,7 @@ if (spawnSync("sh", ["-c", "command -v flock"]).status !== 0 || SHELLS.length ==
 /* A root script exactly as the page has it, with the constants it uses. */
 function appScript(name, values) {
     const m = new RegExp("const " + name + " = `([\\s\\S]*?)`;").exec(APP);
-    assert.ok(m, name + " in app.js");
+    assert.ok(m, name + " in app/system.js");
     return new Function(...Object.keys(values), "return `" + m[1] + "`;")(...Object.values(values));
 }
 
