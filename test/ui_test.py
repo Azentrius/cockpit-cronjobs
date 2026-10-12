@@ -25,6 +25,9 @@ def check(cond, msg):
     else:
         failures.append(msg)
         print("FAIL:", msg)
+        if os.environ.get("GITHUB_ACTIONS"):
+            # Shows up as an annotation on the check run, readable without the full log.
+            print("::error title=Browser test::" + msg.replace("\n", " ")[:900])
 
 
 def wait_js(page, expr, timeout=10):
