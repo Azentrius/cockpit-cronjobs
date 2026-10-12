@@ -1,6 +1,6 @@
 /* Azentrius — follows Cockpit's light/dark setting (user menu › Style).
    Loaded in <head> before the stylesheet, so that nothing flashes light.
-   SPDX-License-Identifier: LGPL-2.1-or-later */
+   SPDX-License-Identifier: Apache-2.0 */
 (function () {
     "use strict";
     var media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;

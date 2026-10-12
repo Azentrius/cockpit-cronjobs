@@ -1,5 +1,5 @@
 /* Cron Jobs — only what this page needs on top of azentrius.css.
- * SPDX-License-Identifier: LGPL-2.1-or-later */
+ * SPDX-License-Identifier: Apache-2.0 */
 
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Prints the section of CHANGELOG.md for one version ("## 2.1.0 …" up to the next "## ").
 # Exit 1 when there is none.
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: Apache-2.0
 set -eu
 version=${1:?usage: release-notes.sh VERSION}
 file=${2:-CHANGELOG.md}

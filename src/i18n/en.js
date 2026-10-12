@@ -4,7 +4,7 @@
  * To add a language, copy this file to i18n/<code>.js, translate it, register it
  * under its code and add a <script> line to index.html.
  *
- * SPDX-License-Identifier: LGPL-2.1-or-later
+ * SPDX-License-Identifier: Apache-2.0
  */
 (function (root) {
     "use strict";
