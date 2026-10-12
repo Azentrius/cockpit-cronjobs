@@ -147,7 +147,9 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
 3. On GitHub: Actions › **release** › Run workflow (branch `main`). The workflow checks that the version
    is new and matches `src/app.js`, runs all tests, builds `cockpit-cronjobs-VERSION.tar.gz` with
    `SHA256SUMS` (`make package`, reproducible) and creates the tag `vVERSION` with a release whose
-   notes come from `CHANGELOG.md`.
+   notes come from `CHANGELOG.md`. It also signs a build provenance for the archive; for releases after 2.1.0,
+   `gh attestation verify cockpit-cronjobs-VERSION.tar.gz --repo Azentrius/cockpit-cronjobs` shows
+   that a release archive was built by this workflow from this repository.
 
 ## License
 
