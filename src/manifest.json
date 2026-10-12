@@ -1,0 +1,14 @@
+{
+    "version": 0,
+    "menu": {
+        "index": {
+            "label": "Cron Jobs",
+            "path": "index.html",
+            "order": 112,
+            "keywords": [
+                { "matches": ["cron", "crontab", "schedule", "scheduled", "job", "timer", "systemd timer",
+                              "zeitplan", "aufgabe", "geplante aufgaben"] }
+            ]
+        }
+    }
+}

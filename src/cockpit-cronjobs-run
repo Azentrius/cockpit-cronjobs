@@ -1,0 +1,136 @@
+#!/bin/sh
+# cockpit-cronjobs-run — records start, end, exit code and output of a cron job
+# for Cockpit Cron Jobs (https://github.com/Azentrius/cockpit-cronjobs).
+#
+# Usage: cockpit-cronjobs-run ID COMMAND
+#
+# Runs COMMAND with $SHELL -c, as cron would (same environment, same umask), and
+# passes its output through, so mail from cron still works. Keeps the last 20
+# runs of each job, with up to 64 KiB of output each, in
+# /var/lib/cockpit-cronjobs/runs/ID/. When nothing can be recorded, the command
+# runs anyway.
+#
+# Cockpit Cron Jobs installs this file to /usr/local/libexec/ when you turn on
+# recording for a job. Jobs that use it stop working if it is removed.
+#
+# All variables of this script start with _cj_, so that none of the job's own
+# environment is changed.
+#
+# SPDX-License-Identifier: LGPL-2.1-or-later
+CRONJOBS_RUN_VERSION=1
+
+_cj_sh=${SHELL:-/bin/sh}
+_cj_umask=$(umask)
+if [ $# -ne 2 ] || [ -z "$2" ]; then
+    echo "usage: cockpit-cronjobs-run ID COMMAND" >&2
+    exit 2
+fi
+_cj_id=$1
+_cj_cmd=$2
+case $_cj_id in
+    ''|*[!A-Za-z0-9_-]*) exec "$_cj_sh" -c "$_cj_cmd" ;;
+esac
+case ${CRONJOBS_TRIGGER-} in
+    manual) _cj_trigger=manual ;;
+    *) _cj_trigger=schedule ;;
+esac
+unset CRONJOBS_TRIGGER
+
+_cj_keep=20
+_cj_max=65536
+_cj_dir=${CRONJOBS_STATE_DIR:-/var/lib/cockpit-cronjobs}/runs/$_cj_id
+
+# The command itself, with the umask it was started with.
+_cj_run() {
+    umask "$_cj_umask"
+    exec "$_cj_sh" -c "$_cj_cmd"
+}
+
+umask 077
+{ mkdir -p "$_cj_dir" && [ -w "$_cj_dir" ]; } 2>/dev/null || _cj_run
+
+_cj_stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
+_cj_start=$(date +%s)
+printf '{"start":%s,"pid":%s,"trigger":"%s"}\n' "$_cj_start" "$$" "$_cj_trigger" \
+    > "$_cj_dir/$_cj_stamp.running" 2>/dev/null || _cj_run
+
+# The output goes to our standard output (for cron) and, through a FIFO, to tail,
+# which keeps its last bytes for the record. If tail cannot write, cat drains the
+# FIFO, so the job never sees a broken pipe. The exit code travels through a file
+# because of the pipe.
+_cj_fifo=$_cj_dir/$_cj_stamp.fifo
+if ! mkfifo "$_cj_fifo" 2>/dev/null; then
+    rm -f "$_cj_dir/$_cj_stamp.running"
+    _cj_run
+fi
+{ tail -c $((_cj_max + 1)) > "$_cj_dir/$_cj_stamp.out" 2>/dev/null || cat > /dev/null; } < "$_cj_fifo" &
+_cj_tail=$!
+{ ( _cj_run ) 2>&1; echo $? > "$_cj_dir/$_cj_stamp.rc"; } | tee "$_cj_fifo"
+wait "$_cj_tail"
+rm -f "$_cj_fifo"
+
+_cj_end=$(date +%s)
+_cj_rc=$(cat "$_cj_dir/$_cj_stamp.rc" 2>/dev/null)
+rm -f "$_cj_dir/$_cj_stamp.rc"
+case $_cj_rc in
+    ''|*[!0-9]*) _cj_rc=255 ;;
+esac
+
+_cj_out=$_cj_stamp
+_cj_truncated=false
+_cj_bytes=$(wc -c < "$_cj_dir/$_cj_stamp.out" 2>/dev/null | tr -d ' ')
+case $_cj_bytes in
+    ''|*[!0-9]*) _cj_bytes=0 ;;
+esac
+if [ "$_cj_bytes" -gt "$_cj_max" ]; then
+    if tail -c "$_cj_max" "$_cj_dir/$_cj_stamp.out" > "$_cj_dir/$_cj_stamp.tmp"; then
+        mv -f "$_cj_dir/$_cj_stamp.tmp" "$_cj_dir/$_cj_stamp.out"
+    fi
+    _cj_truncated=true
+    _cj_bytes=$_cj_max
+fi
+if [ "$_cj_bytes" -eq 0 ]; then
+    rm -f "$_cj_dir/$_cj_stamp.out"
+    _cj_out=
+fi
+
+_cj_record=$(printf '{"start":%s,"end":%s,"rc":%s,"trigger":"%s","bytes":%s,"truncated":%s,"out":"%s"}' \
+    "$_cj_start" "$_cj_end" "$_cj_rc" "$_cj_trigger" "$_cj_bytes" "$_cj_truncated" "$_cj_out")
+
+(
+    if command -v flock > /dev/null 2>&1; then
+        flock -w 10 9 2>/dev/null || flock 9 || :
+    fi
+    # Runs that died without finishing (killed, power loss) become "aborted".
+    for _cj_r in "$_cj_dir"/*.running; do
+        [ -f "$_cj_r" ] || continue
+        [ "$_cj_r" = "$_cj_dir/$_cj_stamp.running" ] && continue
+        _cj_pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$_cj_r" | head -n 1)
+        if [ -n "$_cj_pid" ] && [ -r "/proc/$_cj_pid/cmdline" ] &&
+                tr '\000' ' ' < "/proc/$_cj_pid/cmdline" | grep -q cockpit-cronjobs-run; then
+            continue
+        fi
+        _cj_s=$(sed -n 's/.*"start":\([0-9][0-9]*\).*/\1/p' "$_cj_r" | head -n 1)
+        _cj_t=$(sed -n 's/.*"trigger":"\([a-z]*\)".*/\1/p' "$_cj_r" | head -n 1)
+        _cj_old=${_cj_r##*/}
+        _cj_old=${_cj_old%.running}
+        rm -f "$_cj_dir/$_cj_old.rc" "$_cj_dir/$_cj_old.fifo" "$_cj_r"
+        [ -n "$_cj_s" ] || continue
+        printf '{"start":%s,"end":null,"rc":null,"trigger":"%s","bytes":0,"truncated":false,"out":"","aborted":true}\n' \
+            "$_cj_s" "${_cj_t:-schedule}" >> "$_cj_dir/runs.jsonl"
+    done
+    printf '%s\n' "$_cj_record" >> "$_cj_dir/runs.jsonl"
+    rm -f "$_cj_dir/$_cj_stamp.running"
+    if [ "$(wc -l < "$_cj_dir/runs.jsonl")" -gt "$_cj_keep" ]; then
+        tail -n "$_cj_keep" "$_cj_dir/runs.jsonl" > "$_cj_dir/runs.tmp" && mv -f "$_cj_dir/runs.tmp" "$_cj_dir/runs.jsonl"
+    fi
+    for _cj_f in "$_cj_dir"/*.out; do
+        [ -f "$_cj_f" ] || continue
+        _cj_s=${_cj_f##*/}
+        _cj_s=${_cj_s%.out}
+        [ -e "$_cj_dir/$_cj_s.running" ] && continue
+        grep -q "\"out\":\"$_cj_s\"" "$_cj_dir/runs.jsonl" || rm -f "$_cj_f"
+    done
+) 9> "$_cj_dir/.lock"
+
+exit "$_cj_rc"
