@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Stand-in for Cockpit's ../base1/po.js: Cockpit serves the translation that matches the
    session language and it calls cockpit.locale(), which sets cockpit.language. */
 (function () {

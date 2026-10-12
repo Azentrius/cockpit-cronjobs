@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Tests for the root steps of going back to cron, with dash and bash: SAVE_SCRIPT
  * stopping a timer (and putting the crontab back when that fails) and UNITS_SCRIPT,
  * which only removes units Cron Jobs wrote. Fake crontab and systemctl commands, a

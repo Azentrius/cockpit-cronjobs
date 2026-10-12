@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """End-to-end test against a real Cockpit, real crontab and a running cron daemon.
 
 DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Tests for cron.js — run with: node test/cron.test.js */
 "use strict";
 const assert = require("assert");

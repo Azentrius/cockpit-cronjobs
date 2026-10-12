@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Every text the page uses exists in every language, with the same shape.
  * Run with: node test/i18n.test.js */
 "use strict";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /* Fuzz: round trip and toggles never change untouched bytes; nextRun vs brute force. */
 "use strict";
 const assert = require("assert");

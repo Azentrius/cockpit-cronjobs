@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: CC-BY-4.0
 /* Icons: Font Awesome Free 5 (Solid), CC BY 4.0, as shipped by PatternFly.
  * https://fontawesome.com/license/free */
 window.AzIcons = {
