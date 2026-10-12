@@ -9,7 +9,7 @@
  * timers are shown read-only. Jobs can record their runs (cockpit-cronjobs-run), be
  * started right away, and be converted into systemd timers.
  *
- * SPDX-License-Identifier: LGPL-2.1-or-later
+ * SPDX-License-Identifier: Apache-2.0
  */
 (function () {
     "use strict";

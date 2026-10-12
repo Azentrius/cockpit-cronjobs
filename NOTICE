@@ -1,7 +1,8 @@
 Cron Jobs for Cockpit
-Copyright (C) 2026 Azentrius
-Licensed under the GNU Lesser General Public License, version 2.1 or (at your
-option) any later version. See LICENSE.
+Copyright 2026 Azentrius
+Licensed under the Apache License, Version 2.0. See LICENSE.
+Versions up to and including 2.1.1 were released under the GNU Lesser General
+Public License, version 2.1 or later.
 
 This project includes third-party material under its own license:
 

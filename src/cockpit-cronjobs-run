@@ -16,7 +16,7 @@
 # All variables of this script start with _cj_, so that none of the job's own
 # environment is changed.
 #
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: Apache-2.0
 CRONJOBS_RUN_VERSION=1
 
 _cj_sh=${SHELL:-/bin/sh}

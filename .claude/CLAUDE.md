@@ -53,7 +53,8 @@ The same in every Azentrius repository; keep it when changing the repository or 
   version against the code and the existing tags, runs all tests, builds the artifact with
   `SHA256SUMS`, signs a build provenance (`gh attestation verify`) and takes the notes from
   `CHANGELOG.md`. Releases are immutable. Files that are not for users stay out of the artifact.
-- **Licensing.** `LICENSE` in the root; `NOTICE` for third-party material.
+- **Licensing.** Apache-2.0: `LICENSE` in the root, an SPDX header in every source file, `NOTICE`
+  for third-party material.
 
 Here: check tools in `test/requirements.txt` (pip); lint is `make lint` (`shellcheck --severity=warning`
 for the shell scripts, `ruff check` with the rules in `ruff.toml`); the artifact is `make package`,

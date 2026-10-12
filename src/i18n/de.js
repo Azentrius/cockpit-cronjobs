@@ -3,7 +3,7 @@
  * `…` im Text wird als Code gezeigt. Texte mit Werten sind Funktionen.
  * Anrede wie in Cockpit: „Sie“.
  *
- * SPDX-License-Identifier: LGPL-2.1-or-later
+ * SPDX-License-Identifier: Apache-2.0
  */
 (function (root) {
     "use strict";

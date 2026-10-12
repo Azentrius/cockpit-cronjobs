@@ -9,7 +9,7 @@
  *
  * Loaded in the browser as window.CronLogic and in Node via require().
  *
- * SPDX-License-Identifier: LGPL-2.1-or-later
+ * SPDX-License-Identifier: Apache-2.0
  */
 (function (root, factory) {
     "use strict";

@@ -1,7 +1,7 @@
 /* Azentrius design system for Cockpit pages.
    Light = Azentrius light (:root), dark = Azentrius dark (:root.pf-v6-theme-dark);
    azentrius-theme.js sets the class from Cockpit's light/dark setting.
-   SPDX-License-Identifier: LGPL-2.1-or-later */
+   SPDX-License-Identifier: Apache-2.0 */
 
 @font-face { font-family: "DM Sans"; src: url("DMSans.woff2") format("woff2"); font-weight: 400 600; font-style: normal; font-display: swap; }
 @font-face { font-family: "DM Serif Display"; src: url("DMSerifDisplay-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }

@@ -158,8 +158,10 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
 
 ## License
 
-Cron Jobs is licensed under the GNU Lesser General Public License, version 2.1 or later (the license of
-Cockpit itself). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Cron Jobs is licensed under the [Apache License 2.0](LICENSE); see also [NOTICE](NOTICE). Versions up to
+and including 2.1.1 were released under the GNU Lesser General Public License, version 2.1 or later.
+The page contains no code from Cockpit; it uses Cockpit's API `cockpit.js` at runtime, which Cockpit
+itself ships.
 
 The fonts DM Sans and DM Serif Display are licensed under the SIL Open Font License 1.1
 ([src/OFL.txt](src/OFL.txt)); the icons are Font Awesome Free 5, licensed under CC BY 4.0.

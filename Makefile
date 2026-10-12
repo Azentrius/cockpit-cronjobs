@@ -1,5 +1,5 @@
 # Cron Jobs for Cockpit
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: Apache-2.0
 
 PREFIX ?= /usr/local
 DESTDIR ?=
