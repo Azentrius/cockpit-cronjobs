@@ -13,6 +13,9 @@ and turns cron jobs into systemd timers.
   written out in words; next runs are shown in server time, and in your own time when that differs.
   Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links) are marked
   with the reason, by the rules of the cron that is installed.
+- **Three tabs.** Overview (the next 24 hours and the root crontab), systemd timers, and System
+  (`/etc/crontab`, `/etc/cron.d`, other users' crontabs, the periodic scripts). Notices stay visible in
+  every tab; switching tabs loads nothing.
 - **The next 24 hours.** A timeline of all cron jobs and timers. Jobs that start in the same minute are
   pointed out.
 - **Safe changes to the root crontab.** Add, edit, switch off and on, delete. Lines you do not touch stay
@@ -50,11 +53,11 @@ the system crontabs and timers.
 From a [release](https://github.com/Azentrius/cockpit-cronjobs/releases) (replace the version):
 
 ```sh
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.1/cockpit-cronjobs-2.1.1.tar.gz
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.1/SHA256SUMS
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.2.0/cockpit-cronjobs-2.2.0.tar.gz
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.2.0/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
-gh attestation verify cockpit-cronjobs-2.1.1.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
-sudo tar -xzf cockpit-cronjobs-2.1.1.tar.gz -C /usr/share/cockpit
+gh attestation verify cockpit-cronjobs-2.2.0.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
+sudo tar -xzf cockpit-cronjobs-2.2.0.tar.gz -C /usr/share/cockpit
 ```
 
 Or from the source:
@@ -112,7 +115,8 @@ from cron keeps working. It keeps the last 20 runs, each with up to 64 KiB of ou
 ## Uninstall
 
 ```sh
-sudo make uninstall
+sudo rm -rf /usr/share/cockpit/cronjobs   # installed from a release
+sudo make uninstall                       # installed from the source
 # only when no job records its runs any more:
 sudo rm -f /usr/local/libexec/cockpit-cronjobs-run
 sudo rm -rf /var/lib/cockpit-cronjobs
@@ -141,7 +145,7 @@ Cockpit uses that language. `node test/i18n.test.js` checks that every text exis
 ## Development
 
 ```sh
-make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder and removal of leftover runs (dash, bash), texts
+make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs and back to cron (dash, bash), texts
 make check-ui     # browser tests against a stand-in for Cockpit (needs Python Playwright with Chromium)
 ```
 
