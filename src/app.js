@@ -246,7 +246,8 @@
     /* Replaces the root crontab in one step under a lock:
          $1    = cksum of the version the page shows (else exit 3)
          $2    = optional: a systemd timer to enable and start right after (for a
-                 conversion); if that fails, the previous crontab is put back (exit 7)
+                 conversion), or with $3 = stop to stop and disable (back to cron); if
+                 that fails, the previous crontab is put back (exit 7)
          stdin = the new version
        The current version is backed up first (directory 700, files 600, the last ten are
        kept; a version that already is the newest backup is not stored twice).
@@ -260,6 +261,8 @@ trap '' TERM HUP INT
 umask 077
 expect="$1"
 timer="\${2-}"
+verb=enable
+if [ "\${3-}" = stop ]; then verb=disable; fi
 dir='${BACKUP_DIR}'
 install -d -m 700 '${STATE_DIR}' || exit 5
 exec 9>'${STATE_DIR}/.crontab.lock'
@@ -299,7 +302,7 @@ if [ "$have" = 1 ]; then
 fi
 crontab -u root "$tmp/new"
 if [ -n "$timer" ]; then
-  if ! systemctl enable --now "$timer" > /dev/null 2> "$tmp/err"; then
+  if ! systemctl "$verb" --now "$timer" > /dev/null 2> "$tmp/err"; then
     if [ "$have" = 1 ]; then crontab -u root "$tmp/cur"; else crontab -r -u root; fi
     cat "$tmp/err" >&2
     exit 7
@@ -309,9 +312,11 @@ printf '%s\\n' "$f"
 `;
 
     /* expected: the text shown (exactly as crontab -l gave it), next: the new text,
-       timer: optional unit to enable and start once the crontab is written. */
-    function saveRoot(expected, next, timer) {
-        const args = ["sh", "-c", SAVE_SCRIPT, "cockpit-cronjobs", C.cksum(expected)].concat(timer ? [timer] : []);
+       timer: optional unit to enable and start once the crontab is written, or to stop
+       and disable when stop is set. */
+    function saveRoot(expected, next, timer, stop) {
+        const args = ["sh", "-c", SAVE_SCRIPT, "cockpit-cronjobs", C.cksum(expected)]
+            .concat(timer ? [timer].concat(stop ? ["stop"] : []) : []);
         return spawn(args, SPAWN_ROOT, next).then(out => String(out || "").trim());
     }
 
@@ -807,6 +812,15 @@ exit 0
         return m ? m[1].trim() : null;
     }
 
+    /* The timer a job was converted to: its line is off and the conversion's note is
+       right above it (see SD.convertNote). Else null. */
+    function convertedTo(r, i) {
+        const e = r.entries[i];
+        if (!e || e.kind !== "job" || e.enabled || i === 0 || r.entries[i - 1].kind !== "raw") return null;
+        const note = SD.parseConvertNote(r.entries[i - 1].line);
+        return note ? note.name : null;
+    }
+
     /* cronie runs a job in CRON_TZ when the crontab sets it above the job;
        Debian's cron does not know CRON_TZ. */
     function jobTz(entries, index) {
@@ -901,7 +915,8 @@ exit 0
     /* base: the state shown, which the change refers to (kept when a dialog opens or a
        switch is clicked). mutate: entries -> new entries, or null when the line no
        longer fits. opts.quiet: no success message (the caller reports); opts.timer: a
-       systemd timer to enable and start in the same step (see SAVE_SCRIPT).
+       systemd timer to enable and start in the same step, or to stop and disable with
+       opts.stopTimer (see SAVE_SCRIPT).
        Result: { ok, unchanged?, conflict?, error?, timerFailed?, backup?, saved? } */
     async function commit(base, mutate, okTitle, opts) {
         opts = opts || {};
@@ -921,7 +936,7 @@ exit 0
         try {
             let backup;
             try {
-                backup = await saveRoot(base.text, next, opts.timer);
+                backup = await saveRoot(base.text, next, opts.timer, opts.stopTimer);
             } catch (ex) {
                 if (isDenied(ex)) { state.root = { status: "denied" }; return { ok: false, conflict: true }; }
                 if (ex && ex.exit_status === 3) {
@@ -1202,6 +1217,7 @@ exit 0
         const rows = jobs.map(({ e, i }) => {
             const cmdId = "cmd-" + i;
             const note = noteFor(r, i);
+            const timer = convertedTo(r, i);
             const info = jobInfo(e);
             const toggleCell = editable
                 ? h("label", { class: "az-switch" },
@@ -1222,7 +1238,11 @@ exit 0
                 h("td", { "data-label": T.colCommand },
                     h("div", { class: "cron-cell" },
                         h("span", { class: "az-mono", id: cmdId }, info.command),
-                        note ? h("span", { class: "az-cell-sub" }, note) : null)),
+                        timer ? h("span", { class: "az-cell-sub" }, T.convertedTo, " ",
+                            h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", "data-key": "timer:" + i,
+                                          title: T.openInCockpit(timer + ".timer"), onclick: () => jumpToUnit(timer + ".timer") },
+                              timer + ".timer"))
+                            : note ? h("span", { class: "az-cell-sub" }, note) : null)),
                 h("td", { class: "az-cell-actions" },
                     r.notUtf8 ? null : btn("run", T.actRun, "play", () => openRun(i, "run:" + i)),
                     editable ? btn("edit", T.actEdit, "pencil-alt", () => openEdit(i, "edit:" + i)) : null,
@@ -1386,6 +1406,10 @@ exit 0
 
     /* ---------- systemd timers ---------- */
 
+    function jumpToUnit(unit) {
+        cockpit.jump("/system/services#/" + encodeURIComponent(unit), cockpit.transport.host);
+    }
+
     function timerNextCell(t) {
         if (!t.active) return h("span", { class: "cron-muted" }, T.timerInactive);
         if (t.next === null) return h("span", { class: "cron-muted" }, "—");
@@ -1440,7 +1464,7 @@ exit 0
                         h("td", { class: "az-cell-actions" },
                             h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "aria-label": T.openInCockpit(t.name),
                                           title: T.openInCockpit(t.name),
-                                          onclick: () => cockpit.jump("/system/services#/" + encodeURIComponent(t.name), cockpit.transport.host) },
+                                          onclick: () => jumpToUnit(t.name) },
                               icon("external-link-alt"))));
                 })))));
     }
@@ -1545,7 +1569,9 @@ exit 0
                 items.push({ label: T.captureOn, icon: "history", disabled: !can, hint: can ? null : T.cannotCapture,
                              action: () => setCapture(i, true, "more:" + i) });
             }
-            if (state.basics.systemd && state.timers.status === "ok") {
+            if (state.basics.systemd && convertedTo(r, i)) {
+                items.push({ label: T.backToCron, icon: "exchange-alt", action: () => openBack(i, "more:" + i) });
+            } else if (state.basics.systemd && state.timers.status === "ok") {
                 const why = convertBlocker(e, info, i);
                 items.push({ label: T.convert, icon: "exchange-alt", disabled: !!why, hint: why,
                              action: () => openConvert(i, "more:" + i) });
@@ -2445,8 +2471,7 @@ systemctl daemon-reload
 
     function convertNote(name) {
         const w = C.wallParts(Date.now(), state.tz);
-        return "# Converted to systemd timer " + name + ".timer by Cockpit Cron Jobs on " +
-            w.y + "-" + pad2(w.mo) + "-" + pad2(w.d) + "; the line below is no longer used.";
+        return SD.convertNote(name, w.y + "-" + pad2(w.mo) + "-" + pad2(w.d));
     }
 
     async function submitConvert(ev) {
@@ -2513,6 +2538,136 @@ systemctl daemon-reload
         btn.setAttribute("aria-expanded", open ? "true" : "false");
         $("conv-units").hidden = !open;
         fill(btn, icon(open ? "angle-down" : "angle-right"), open ? T.convHideUnits : T.convShowUnits);
+    }
+
+    /* ---------- back to cron ---------- */
+
+    /* The units of a converted job in /etc/systemd/system, only when Cron Jobs wrote
+       them under this name: both are files (no links), the service starts with
+       SD.UNIT_HEADER, and both have the Description= of a conversion.
+         $1 check:  exit 0 when both are ours, 9 when neither exists
+         $1 remove: checks again, then stops, disables and removes them
+         $2 the name
+       Exit 8 = not ours (changed, a link, only one of them, or not written by Cron Jobs). */
+    const UNITS_SCRIPT = `set -u
+n=$2
+case $n in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) exit 2 ;; esac
+d=/etc/systemd/system
+s=$d/$n.service
+t=$d/$n.timer
+if [ ! -e "$s" ] && [ ! -L "$s" ] && [ ! -e "$t" ] && [ ! -L "$t" ]; then exit 9; fi
+if [ -L "$s" ] || [ -L "$t" ] || [ ! -f "$s" ] || [ ! -f "$t" ]; then exit 8; fi
+[ "$(head -n 1 "$s")" = '${SD.UNIT_HEADER}' ] || exit 8
+grep -qxF "Description=$n (from the root crontab)" "$s" || exit 8
+grep -qxF "Description=$n (from the root crontab)" "$t" || exit 8
+case $1 in
+  check) ;;
+  remove)
+    trap '' TERM HUP INT
+    systemctl disable --now "$n.timer" > /dev/null 2>&1 || :
+    rm -f "$s" "$t" || exit 1
+    systemctl daemon-reload
+    systemctl reset-failed "$n.service" "$n.timer" > /dev/null 2>&1 || :
+    ;;
+  *) exit 2 ;;
+esac
+`;
+
+    function unitsStep(step, name) {
+        return spawn(["sh", "-c", UNITS_SCRIPT, "cockpit-cronjobs", step, name], SPAWN_ROOT);
+    }
+
+    /* Shows what going back does, after checking the units: ours, missing (only the
+       line goes back on) or foreign (nothing is done). */
+    function openBack(index, openerKey) {
+        if (state.busy || loading || state.root.status !== "ok" || state.root.locked) return;
+        const base = state.root;
+        const name = convertedTo(base, index);
+        if (!name) return;
+        const e = base.entries[index];
+        $("back-line").textContent = e.schedule + "  " + jobInfo(e).command;
+        fill($("back-units"), rich(T.backUnits(name)));
+        fill($("back-backup"), rich(T.delBackup(BACKUP_DIR + "/")));
+        dialogError("back-alert", null);
+        setBusyButton($("back-ok"), false, T.backing);
+        openDialog($("back-dlg"), openerKey, {
+            kind: "back", index, base, line: e.line, noteLine: base.entries[index - 1].line, name, units: null, why: "",
+        }, $("back-cancel"));
+        renderBack();
+        unitsStep("check", name).then(() => "ours", ex => {
+            if (ex && ex.exit_status === 9) return "missing";
+            if (ex && ex.exit_status === 8) return "foreign";
+            if (dialog && dialog.kind === "back") dialog.why = errText(ex);
+            return "error";
+        }).then(units => {
+            if (!dialog || dialog.kind !== "back" || dialog.name !== name) return;
+            dialog.units = units;
+            renderBack();
+        });
+    }
+
+    function renderBack() {
+        const d = dialog;
+        if (!d || d.kind !== "back") return;
+        const check = $("back-check");
+        const good = d.units === "ours" || d.units === "missing";
+        check.className = "az-field__help cron-check" + (d.units && !good ? " is-bad" : "") + (d.units === "ours" ? " is-good" : "");
+        if (d.units === null) fill(check, T.backChecking);
+        else if (d.units === "ours") fill(check, icon("check-circle"), h("span", null, T.backUnitsOk));
+        else if (d.units === "missing") fill(check, icon("info-circle"), h("span", null, rich(T.backUnitsMissing(d.name))));
+        else if (d.units === "foreign") fill(check, icon("exclamation-circle"), h("span", null, rich(T.backUnitsForeign(d.name))));
+        else fill(check, icon("exclamation-circle"), h("span", null, T.backCheckFailed(d.why)));
+        $("back-units").hidden = d.units === "missing";
+        $("back-ok").disabled = state.busy || !!d.locked || !good;
+    }
+
+    /* Switching the line back on, removing the note and stopping the timer are one
+       root step (SAVE_SCRIPT): if the timer cannot be stopped, the crontab is put
+       back. The unit files are removed afterwards, after another check. */
+    async function submitBack() {
+        const d = dialog;
+        if (!d || d.kind !== "back" || state.busy || d.locked) return;
+        if (d.units !== "ours" && d.units !== "missing") return;
+        dialogError("back-alert", null);
+        setBusyButton($("back-ok"), true, T.backing);
+        $("back-cancel").disabled = true;
+        $("back-close").disabled = true;
+        d.locked = true;
+        const done = () => {
+            d.locked = false;
+            setBusyButton($("back-ok"), false, T.backing);
+            $("back-cancel").disabled = false;
+            $("back-close").disabled = false;
+            renderBack();
+        };
+        const res = await commit(d.base, entries => {
+            const cur = jobAt(entries, d.index, d.line);
+            const note = entries[d.index - 1];
+            if (!cur || !note || note.line !== d.noteLine) return null;
+            const copy = entries.slice();
+            copy[d.index] = C.setEnabled(cur, true);
+            copy.splice(d.index - 1, 1);
+            return copy;
+        }, null, { quiet: true, timer: d.units === "ours" ? d.name + ".timer" : null, stopTimer: true });
+        if (!res.ok) {
+            done();
+            dialogError("back-alert", (res.error || T.conflictBody) + (res.timerFailed ? "\n" + T.backRolledBack : ""), T.backFailed);
+            if (res.timerFailed) requestLoad();
+            return;
+        }
+        let left = null;
+        if (d.units === "ours") {
+            try {
+                await unitsStep("remove", d.name);
+            } catch (ex) {
+                left = ex && ex.exit_status === 8 ? T.backUnitsChanged : errText(ex);
+            }
+        }
+        d.locked = false;
+        closeDialog(d.openerKey, true);
+        if (left) showAlert("warning", T.okBackUnitsLeft(d.name), [left, " ", rich(res.saved)]);
+        else showAlert("success", T.okBack, [d.units === "ours" ? [rich(T.okBackBody(d.name)), " "] : null, rich(res.saved)]);
+        requestLoad();
     }
 
     /* ---------- start ---------- */
@@ -2598,6 +2753,10 @@ systemctl daemon-reload
         $("conv-name").addEventListener("input", updateConvert);
         $("conv-persistent").addEventListener("change", updateConvert);
         $("conv-units-toggle").addEventListener("click", toggleUnits);
+
+        $("back-ok").addEventListener("click", submitBack);
+        $("back-cancel").addEventListener("click", () => closeDialog());
+        $("back-close").addEventListener("click", () => closeDialog());
 
         const onVisible = () => {
             const hidden = cockpit.hidden !== undefined ? cockpit.hidden : document.hidden;

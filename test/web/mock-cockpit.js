@@ -107,6 +107,8 @@
         units: {},
         enabled: [],
         failEnable: null,
+        failDisable: null,
+        unitsRemoved: [],
         analyzeShift: 0,
         mangleExec: false,
         runs_started: [],
@@ -256,10 +258,13 @@
             }
             if (M.failWrite) fail({ exit_status: 1, problem: null, message: M.failWrite });
             const timer = args[5];
-            if (timer && M.failEnable) fail({ exit_status: 7, problem: null, message: M.failEnable });
+            const stop = args[6] === "stop";
+            if (timer && !stop && M.failEnable) fail({ exit_status: 7, problem: null, message: M.failEnable });
+            if (timer && stop && M.failDisable) fail({ exit_status: 7, problem: null, message: M.failDisable });
             M.writes++;
             M.root = input;
-            if (timer) M.enabled.push(timer);
+            if (timer && stop) M.enabled = M.enabled.filter(n => n !== timer);
+            else if (timer) M.enabled.push(timer);
             return path + "\n";
         }
         if (/sec host/.test(script)) return basicsOutput();
@@ -295,6 +300,19 @@
             const name = args[4];
             if (M.units[name] || ["logrotate", "apt-daily"].includes(name)) fail({ exit_status: 6, problem: null, message: "" });
             M.units[name] = { service: args[5], timer: args[6] };
+            return "";
+        }
+        /* Back to cron: units checked (and removed) only when the page wrote them. */
+        if (/\n {2}check\) ;;/.test(script)) {
+            const [step, name] = args.slice(4);
+            const u = M.units[name];
+            if (!u) fail({ exit_status: 9, problem: null, message: "" });
+            if (u.foreign) fail({ exit_status: 8, problem: null, message: "" });
+            if (step === "remove") {
+                delete M.units[name];
+                M.enabled = M.enabled.filter(n => n !== name + ".timer");
+                M.unitsRemoved.push(name);
+            }
             return "";
         }
         if (/disable --now/.test(script)) {

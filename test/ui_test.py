@@ -566,6 +566,7 @@ with sync_playwright() as p:
     wait_js(page, "!document.querySelector('#conv-alert').hidden")
     check("Es gibt bereits logrotate.service" in page.inner_text("#conv-alert"), "name taken")
     before = root_text(page)
+    before_convert = before
     page.fill("#conv-name", "fstrim-weekly")
     page.click("#conv-ok")
     wait_js(page, "document.querySelector('#conv-dlg').hidden")
@@ -609,6 +610,67 @@ with sync_playwright() as p:
     check("nicht wie vorgesehen" in page.inner_text("#conv-alert") and root_text(page) == before, "unit mismatch refused")
     check(list(mock(page, "units").keys()) == ["fstrim-weekly"], "mismatching units removed")
     page.click("#conv-cancel")
+
+    # back to cron: the converted line is recognised, and going back restores the crontab byte for byte
+    conv = page.locator("#root-body tbody tr", has_text="/usr/sbin/fstrim -a")
+    ct = conv.inner_text()
+    check("Umgewandelt in systemd-Timer" in ct and "fstrim-weekly.timer" in ct and "Converted to" not in ct,
+          "converted job recognised: " + ct)
+    conv.locator("button", has_text="fstrim-weekly.timer").click()
+    check(mock(page, "jumps")[-1][0] == "/system/services#/fstrim-weekly.timer", "link to the timer")
+    conv.locator("[data-key^=more]").click()
+    items = page.locator("#row-menu [role=menuitem]").all_inner_texts()
+    check(any(i.startswith("Zurück zu cron") for i in items) and not any("umwandeln" in i for i in items),
+          "menu offers back to cron: " + repr(items))
+    # units changed by hand: nothing is done
+    page.evaluate("() => { window.__mock.units['fstrim-weekly'].foreign = true; }")
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    check(page.locator("#back-dlg").is_visible(), "back dialog")
+    wait_js(page, "!document.querySelector('#back-check').innerText.includes('geprüft')")
+    check("verändert" in page.inner_text("#back-check") and page.is_disabled("#back-ok"), "foreign units: refused")
+    page.click("#back-cancel")
+    # the timer cannot be stopped: the crontab is put back
+    page.evaluate("""() => { delete window.__mock.units['fstrim-weekly'].foreign;
+                             window.__mock.failDisable = 'Failed to disable unit: Access denied'; }""")
+    converted = root_text(page)
+    conv.locator("[data-key^=more]").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    check("angelegt" in page.inner_text("#back-check") and "fstrim-weekly.service" in page.inner_text("#back-units"),
+          "own units: " + page.inner_text("#back-dlg"))
+    check("30 1 * * 0  /usr/sbin/fstrim -a" in page.inner_text("#back-line"), "line shown")
+    shot(page, "de-light-back", full=False)
+    page.click("#back-ok")
+    wait_js(page, "!document.querySelector('#back-alert').hidden")
+    wait_idle(page)
+    check("Access denied" in page.inner_text("#back-alert") and "wiederhergestellt" in page.inner_text("#back-alert"),
+          "rollback reported: " + page.inner_text("#back-alert"))
+    check(root_text(page) == converted and "fstrim-weekly" in mock(page, "units"), "nothing changed when the timer cannot be stopped")
+    page.click("#back-cancel")
+    # back to cron
+    page.evaluate("() => { window.__mock.failDisable = null; }")
+    conv.locator("[data-key^=more]").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    page.click("#back-ok")
+    wait_js(page, "document.querySelector('#back-dlg').hidden")
+    wait_idle(page)
+    check(root_text(page) == before_convert, "back to cron gives the crontab from before the conversion, byte for byte")
+    check("fstrim-weekly" not in mock(page, "units") and mock(page, "unitsRemoved") == ["fstrim-weekly"] and
+          "fstrim-weekly.timer" not in mock(page, "enabled"), "units stopped and removed")
+    check("wieder über cron" in page.inner_text("#alerts"), "back alert: " + page.inner_text("#alerts"))
+    # a converted line whose timer is gone: only the line goes back on
+    reload_with_root(page, "# Converted to systemd timer old-job.timer by Cockpit Cron Jobs on 2026-01-02; "
+                           "the line below is no longer used.\n#[cronjobs:off] 0 4 * * * /usr/local/bin/old-job\n")
+    row(page, 0).locator("[data-key^=more]").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    check("gibt es nicht mehr" in page.inner_text("#back-check") and page.locator("#back-units").is_hidden(),
+          "missing units: only the line")
+    page.click("#back-ok")
+    wait_js(page, "document.querySelector('#back-dlg').hidden")
+    wait_idle(page)
+    check(root_text(page) == "0 4 * * * /usr/local/bin/old-job\n", "line back on, note gone: " + repr(root_text(page)))
     check(not page.problems, "no console problems (convert): " + repr(page.problems))
     page.context.close()
 

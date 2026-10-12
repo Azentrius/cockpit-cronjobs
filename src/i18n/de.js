@@ -294,6 +294,28 @@
         convRandomDelay: "Nicht, solange die Crontab RANDOM_DELAY setzt.",
         okConverted: name => `In systemd-Timer \`${name}.timer\` umgewandelt`,
         okConvertedBody: "Die Crontab-Zeile ist ausgeschaltet und mit einem Hinweis versehen.",
+        convertedTo: "Umgewandelt in systemd-Timer",
+
+        /* Zurück zu cron */
+        backToCron: "Zurück zu cron",
+        backTitle: "Zurück zu cron?",
+        backIntro: "Der Job läuft dann wieder über cron, wie vor der Umwandlung. In einem Schritt:",
+        backLineIntro: "Diese Zeile der root-Crontab wird eingeschaltet und der Hinweis darüber entfernt:",
+        backUnits: name => `\`${name}.timer\` wird angehalten und ausgeschaltet; \`${name}.service\` und \`${name}.timer\` ` +
+            "werden aus /etc/systemd/system entfernt.",
+        backChecking: "Die Einheiten werden geprüft …",
+        backUnitsOk: "Beide Einheiten hat Cron Jobs angelegt.",
+        backUnitsMissing: name => `\`${name}.timer\` gibt es nicht mehr, daher wird nur die Zeile wieder eingeschaltet.`,
+        backUnitsForeign: name => `\`${name}.service\` oder \`${name}.timer\` wurde verändert oder nicht von Cron Jobs angelegt. ` +
+            "Sicherheitshalber wird hier nichts geändert.",
+        backCheckFailed: err => `Die Einheiten ließen sich nicht prüfen. ${err}`,
+        backing: "Wird zurückgestellt …",
+        backFailed: "Zurückstellen fehlgeschlagen",
+        backRolledBack: "Die Crontab wurde wiederhergestellt; der Timer läuft weiter.",
+        backUnitsChanged: "Sie wurden inzwischen verändert.",
+        okBack: "Der Job läuft wieder über cron",
+        okBackBody: name => `\`${name}.timer\` ist angehalten und entfernt.`,
+        okBackUnitsLeft: name => `Der Job läuft wieder über cron; \`${name}.timer\` ist angehalten, seine Unit-Dateien sind aber noch da`,
     };
 
     const schedule = {

@@ -22,7 +22,8 @@ and turns cron jobs into systemd timers.
   `SHELL`, input after `%`), shows the output live and can stop it.
 - **Convert to a systemd timer.** Creates `NAME.service` and `NAME.timer` with the same schedule (checked
   against `systemd-analyze`), the same command and environment, checks what systemd read, starts the
-  timer and switches the cron line off with a note.
+  timer and switches the cron line off with a note. **Back to cron** undoes it in one step: the line is
+  on again exactly as before, the note is gone, and the timer is stopped and its units removed.
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 
@@ -125,6 +126,9 @@ sudo rm -rf /var/lib/cockpit-cronjobs
 - Converting to a timer refuses to go on if systemd would run the job at other times than cron, or reads
   the command or its environment differently; if starting the timer fails, the cron line is switched on
   again and the units are removed.
+- Back to cron only removes units that Cron Jobs wrote under that name (plain files, with the first line
+  and description it gives them), checked again as root right before; if the timer cannot be stopped,
+  the crontab is put back.
 
 ## Translations
 

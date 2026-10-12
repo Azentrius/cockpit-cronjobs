@@ -311,6 +311,29 @@
   </form>
 </div>
 
+<!-- Back to cron -->
+<div class="az-backdrop" id="back-dlg" hidden>
+  <div class="az-modal" role="dialog" aria-modal="true" aria-labelledby="back-title" aria-describedby="back-intro">
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="back-title" data-t="backTitle">Back to cron?</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="back-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div class="cron-dialog-alert" id="back-alert" hidden></div>
+      <p id="back-intro" data-t="backIntro"></p>
+      <p data-t="backLineIntro"></p>
+      <p class="az-mono cron-codebox" id="back-line"></p>
+      <p id="back-units"></p>
+      <p class="az-field__help cron-check" id="back-check" aria-live="polite"></p>
+      <p class="cron-muted" id="back-backup"></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--primary" type="button" id="back-ok" data-t="backToCron">Back to cron</button>
+      <button class="az-btn az-btn--link" type="button" id="back-cancel" data-t="cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

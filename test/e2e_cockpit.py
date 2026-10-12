@@ -207,6 +207,37 @@ with sync_playwright() as p:
     wait_idle(page)
     check(crontab() == before, "switch on restores bytes")
 
+    # convert to a systemd timer and back: units written and running, then gone again,
+    # and the crontab byte for byte as before
+    unit = "cj-e2e-fstrim"
+    row_of(page, "fstrim").locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    page.fill("#conv-name", unit)
+    wait_js(page, "!document.querySelector('#conv-ok').disabled")
+    check("stimmen überein" in page.inner_text("#conv-check"), "schedule checked with systemd-analyze")
+    page.click("#conv-ok")
+    wait_js(page, "document.querySelector('#conv-dlg').hidden")
+    wait_idle(page)
+    converted = crontab()
+    check(f"\n# Converted to systemd timer {unit}.timer by Cockpit Cron Jobs on " in converted and
+          "\n#[cronjobs:off] 30 1 * * 0 /usr/sbin/fstrim -a\n" in converted, "line off with a note: " + repr(converted))
+    check(sh(f"systemctl is-enabled {unit}.timer").stdout.strip() == "enabled" and
+          sh(f"systemctl is-active {unit}.timer").stdout.strip() == "active", "timer enabled and active")
+    check("Umgewandelt in systemd-Timer" in row_of(page, "fstrim").inner_text(), "converted job recognised")
+    row_of(page, "fstrim").locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    check("angelegt" in page.inner_text("#back-check"), "units recognised as ours: " + page.inner_text("#back-check"))
+    page.screenshot(path=os.path.join(SHOTS, "e2e-back.png"))
+    page.click("#back-ok")
+    wait_js(page, "document.querySelector('#back-dlg').hidden")
+    wait_idle(page)
+    check(crontab() == before, "back to cron: crontab byte for byte as before: " + repr(crontab()))
+    check(not os.path.exists(f"/etc/systemd/system/{unit}.service") and not os.path.exists(f"/etc/systemd/system/{unit}.timer"),
+          "unit files removed")
+    check(sh(f"systemctl is-active {unit}.timer").stdout.strip() != "active" and
+          unit not in sh("systemctl list-units --all --no-legend 'cj-e2e-*'").stdout, "timer gone from systemd")
+
     # recording off removes wrapper use and the runs
     row.locator("[data-key^='more:']").click()
     page.locator(".cron-menu__item", has_text="Erfassung ausschalten").click()
