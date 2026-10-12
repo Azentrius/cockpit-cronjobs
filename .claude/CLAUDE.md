@@ -155,6 +155,10 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
   `(in UTC)` line only when the local zone is not UTC.
 - **cron flavours:** Debian's cron ignores `CRON_TZ`, cronie honours it; `run-parts --test` exists only
   in Debian's run-parts; spool in `/var/spool/cron/crontabs` (Debian), `/var/spool/cron/tabs` (SUSE)
-  or `/var/spool/cron`; cron skips `/etc/cron.d` files that are not root's or are writable by others.
+  or `/var/spool/cron`. What each skips in `/etc/cron.d` (from their `database.c`, see `C.cronDSkip`):
+  Debian's cron checks a symlink's own owner, then the target's owner, type, group/other write bits
+  and hard link count; cronie follows links without checking them, then wants a regular file with
+  `(mode & 07533) == 0400` (so nothing executable) owned by root. The end-to-end test compares the
+  page with what Debian's cron logs.
 - **`/run/lock`** is world-writable on Debian and Ubuntu; locks for root belong in a root-only directory
   (here `/var/lib/cockpit-cronjobs/.crontab.lock`).

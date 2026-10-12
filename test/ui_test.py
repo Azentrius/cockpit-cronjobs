@@ -783,6 +783,51 @@ with sync_playwright() as p:
     check("RANDOM_DELAY" in page.inner_text("#row-menu"), "RANDOM_DELAY blocks conversion")
     page.context.close()
 
+    # /etc/cron.d: links, types, modes and hard links, as Debian's cron and cronie read them
+    # (raw mode in hex and owner of the entry, then mode, owner, hard links of what it opens)
+    CROND = {
+        "link-ok": ["a1ff:0:81a4:0:1", "0 1 * * * root /usr/bin/true\n"],
+        "link-user": ["a1ff:1000:81a4:0:1", "0 2 * * * root /usr/bin/true\n"],
+        "link-broken": ["a1ff:0:::", ""],
+        "a-dir": ["41ed:0:41ed:0:2", ""],
+        "group-writable": ["81b4:0:81b4:0:1", "0 3 * * * root /usr/bin/true\n"],
+        "hard-linked": ["81a4:0:81a4:0:2", "0 4 * * * root /usr/bin/true\n"],
+        "executable": ["81ed:0:81ed:0:1", "0 5 * * * root /usr/bin/true\n"],
+    }
+    WHY = {"linkOwner": "Link ist, der nicht root gehört", "broken": "Link ins Leere", "notFile": "keine normale Datei",
+           "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink", "mode": "wegen ihrer Rechte"}
+    EXPECT = {
+        "debian": {"link-ok": None, "link-user": "linkOwner", "link-broken": "broken", "a-dir": "notFile",
+                   "group-writable": "writable", "hard-linked": "links", "executable": None},
+        "cronie": {"link-ok": None, "link-user": None, "link-broken": "broken", "a-dir": "notFile",
+                   "group-writable": "writable", "hard-linked": None, "executable": "mode"},
+    }
+    for flavor, expect in EXPECT.items():
+        page = open_page(browser, "flavor=" + flavor)
+        page.evaluate("""m => Object.entries(m).forEach(([f, [meta, text]]) => {
+            window.__mock.sys.crond[f] = text; window.__mock.sys.crondMeta[f] = meta; })""", CROND)
+        page.click("#reload")
+        wait_idle(page)
+        got = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
+            tr.querySelector('.az-mono').textContent,
+            { why: (tr.querySelector('.cron-ignored-why') || {}).textContent || null,
+              label: !!tr.querySelector('.az-label--warning'), cells: tr.innerText }]))""")
+        tl = page.inner_text("#tl-card")
+        for f, reason in expect.items():
+            row_info = got.get(f)
+            if reason is None:
+                check(row_info is not None and row_info["why"] is None and not row_info["label"] and f in tl,
+                      f"{flavor}: {f} is read: {row_info!r}")
+            else:
+                check(row_info is not None and row_info["label"] and row_info["why"] and WHY[reason] in row_info["why"]
+                      and f not in tl, f"{flavor}: {f} skipped ({reason}): {row_info!r}")
+        check(got["link-broken"]["cells"].count("—") == 3, f"{flavor}: a file without jobs shows dashes: {got['link-broken']!r}")
+        if flavor == "debian":
+            page.locator("#crond-card").scroll_into_view_if_needed()
+            shot(page, "de-light-crond", full=False)
+        check(not page.problems, f"no console problems (cron.d, {flavor}): " + repr(page.problems))
+        page.context.close()
+
     page = open_page(browser, "tz=Europe/Berlin&tzmode=fallback")
     check("Serverzeit Europe/Berlin" in page.inner_text("#meta"), "tz fallback to /etc/localtime")
     page.context.close()
