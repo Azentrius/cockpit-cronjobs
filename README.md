@@ -138,8 +138,7 @@ make check-ui     # browser tests against a stand-in for Cockpit (needs Python P
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
 crontab, so only use it on a throwaway machine or container (see the top of the file).
 
-What comes next is in [ROADMAP.md](ROADMAP.md); the rules for changing the code are in
-[CLAUDE.md](CLAUDE.md).
+What comes next is in [ROADMAP.md](ROADMAP.md).
 
 ## Releasing
 
