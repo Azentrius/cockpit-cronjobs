@@ -47,10 +47,11 @@ the system crontabs and timers.
 From a [release](https://github.com/Azentrius/cockpit-cronjobs/releases) (replace the version):
 
 ```sh
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.0/cockpit-cronjobs-2.1.0.tar.gz
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.0/SHA256SUMS
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.1/cockpit-cronjobs-2.1.1.tar.gz
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.1.1/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
-sudo tar -xzf cockpit-cronjobs-2.1.0.tar.gz -C /usr/share/cockpit
+gh attestation verify cockpit-cronjobs-2.1.1.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
+sudo tar -xzf cockpit-cronjobs-2.1.1.tar.gz -C /usr/share/cockpit
 ```
 
 Or from the source:
