@@ -162,7 +162,10 @@ with sync_playwright() as p:
     page.click("#run-close-btn")
     page.wait_for_timeout(800)
     recs = [json.loads(l) for l in open(f"{STATE}/runs/{job_id}/runs.jsonl")]
-    check(len(recs) == 1 and recs[0]["trigger"] == "manual" and recs[0]["rc"] == 0, "manual run recorded: " + repr(recs))
+    # the job runs every minute, so cron may already have recorded a scheduled run as well
+    manual = [r for r in recs if r["trigger"] == "manual"]
+    check(len(manual) == 1 and manual[0]["rc"] == 0 and all(r["trigger"] in ("manual", "schedule") for r in recs),
+          "manual run recorded: " + repr(recs))
 
     # cron runs it on the next minute
     deadline = time.time() + 75

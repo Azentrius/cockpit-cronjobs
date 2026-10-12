@@ -797,6 +797,8 @@ with sync_playwright() as p:
     page.context.close()
     page = open_page(browser, "wrapper=missing")
     page.click("[data-key='capture:25']")
+    # the page shows no loading while it installs the recorder, only while it saves: wait for the saved line
+    wait_js(page, "window.__mock.root.includes('fstrim-')")
     wait_idle(page)
     check(mock(page, "wrapperInstalls.length") == 1 and "fstrim-" in root_text(page), "recording installs the wrapper first")
     page.context.close()
