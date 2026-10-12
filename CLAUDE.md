@@ -12,13 +12,29 @@ timers.
 
 ## Working together
 
-- Talk to the user **in German**: the big picture in a few sentences first, then details; the
-  recommendation first, then the reasons.
-- Everything in this repository is **English**: code, comments, commit messages, pull requests, docs,
-  test data. The only German is the German translation (`src/i18n/de.js`) and the tests that check it.
-- UI texts always in **English and German**.
+- Big picture first in a few sentences, then details; the recommendation first, then the reasons.
 - For anything that runs as root on a server, say briefly what the user has to understand to answer
   for it, and what can be left to the machine.
+
+## Repository conventions
+
+The same in every Azentrius repository.
+
+- **Language.** Everything in the repository is English: code, comments, docs, commit messages, pull
+  requests, test names and test data. The only German is the German translation and the tests that
+  check it. User-facing texts always exist in English and German; German addresses the user formally
+  (“Sie”). Answer the user in the language they write in.
+- **Versions.** Semantic Versioning; the version lives in exactly one place (see “Releases and the
+  repository”). Tags are `vX.Y.Z`.
+- **Changelog.** `CHANGELOG.md`, newest first. Each version gets `## X.Y.Z – YYYY-MM-DD`, a one-line
+  summary, then bullets. The pull request that raises the version adds its section.
+- **Pull requests.** `main` is protected: every change goes through a pull request and is
+  squash-merged once the `test` check is green; the branch is deleted afterwards. The PR title becomes
+  the commit on `main`: short, imperative, English, without version numbers.
+- **Authorship.** Commits on `main` are authored by the maintainer (the squash merge takes care of
+  that). AI help is credited with a `Co-Authored-By:` trailer, never as the author.
+
+Here the German translation is `src/i18n/de.js`, checked by `test/i18n.test.js`.
 
 ## Layout
 
@@ -77,7 +93,8 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
 
 ## Releases and the repository
 
-- `main` is protected: changes only through pull requests (squash merge), the `test` check must be green.
+- The version lives in `const VERSION` in `src/app.js`; `make package`, the `test` check and the
+  release workflow read it from there.
 - Release: raise `const VERSION` in `src/app.js`, add a section to `CHANGELOG.md`, merge, then
   Actions › release › Run workflow on `main`. The workflow checks the version, runs all tests, builds
   the package and creates tag and release.
