@@ -1,0 +1,7 @@
+# Python checks in CI (ruff check): the browser and end-to-end tests.
+
+[lint]
+# Mistakes, not style: pyflakes (unused or undefined names, broken imports)
+# and syntax errors. Fixed here so that a newer ruff with other defaults does
+# not change what CI checks.
+select = ["E9", "F"]

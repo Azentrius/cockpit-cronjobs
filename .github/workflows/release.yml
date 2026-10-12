@@ -72,7 +72,7 @@ jobs:
         run: make check
       - name: Install Playwright
         run: |
-          pip install playwright
+          pip install -r test/requirements.txt
           python -m playwright install --with-deps chromium
       - name: Browser tests
         run: make check-ui

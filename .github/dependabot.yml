@@ -1,7 +1,18 @@
-# Dependabot version updates for the GitHub Actions used in .github/workflows.
-# The page itself has no package dependencies.
+# Dependabot version updates for the Python check tools in test/ and the GitHub
+# Actions used in .github/workflows. The page itself has no package dependencies.
 version: 2
 updates:
+  - package-ecosystem: "pip"
+    directory: "/test"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    groups:
+      check-tools:
+        patterns:
+          - "*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
