@@ -27,10 +27,12 @@ jobs:
           make package
           version=$(sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
           tools/release-notes.sh "$version" > /dev/null || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
-      - name: Install Playwright
+      - name: Check tools (pinned in test/requirements.txt) and the browser
         run: |
-          pip install playwright
+          pip install -r test/requirements.txt
           python -m playwright install --with-deps chromium
+      - name: Lint (shellcheck, ruff)
+        run: make lint
       - name: Browser tests
         run: make check-ui
       - name: Keep screenshots

@@ -9,7 +9,7 @@ VERSION := $(shell sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
 PACKAGE = cockpit-cronjobs-$(VERSION).tar.gz
 
-.PHONY: all install uninstall devel-install devel-uninstall check check-ui dist package
+.PHONY: all install uninstall devel-install devel-uninstall check check-ui lint dist package
 
 all:
 	@echo "Nothing to build. Try: make install, make check, make check-ui, make package"
@@ -62,3 +62,9 @@ package:
 	cd build/cronjobs && find . -type f | sort | xargs sha256sum | sed 's|  \./|  cronjobs/|' >> ../../SHA256SUMS
 	rm -rf build
 	@cat SHA256SUMS
+
+# As in CI: shell scripts with shellcheck, Python with ruff
+# (the tools: pip install -r test/requirements.txt).
+lint:
+	shellcheck --severity=warning src/cockpit-cronjobs-run tools/*.sh
+	ruff check .

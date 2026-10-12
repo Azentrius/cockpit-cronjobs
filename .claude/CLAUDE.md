@@ -36,6 +36,29 @@ The same in every Azentrius repository.
 
 Here the German translation is `src/i18n/de.js`, checked by `test/i18n.test.js`.
 
+## Repository baseline
+
+The same in every Azentrius repository; keep it when changing the repository or its settings.
+
+- **Security.** `SECURITY.md` with private vulnerability reporting; secret scanning with push
+  protection; Dependabot alerts and security updates; Dependabot version updates for every
+  ecosystem in use and for GitHub Actions; CodeQL default setup.
+- **Branches and tags.** Ruleset `main`: pull request, squash only, linear history, no deletion or
+  force push, required check `test`. Ruleset `release tags`: `v*` cannot be deleted or moved.
+- **CI.** The job `test` runs every test and every lint on each push and pull request. Actions are
+  pinned by commit SHA with the version as a comment; checkouts use `persist-credentials: false`;
+  the token is read-only unless a job needs more. Check tools are pinned as well, so Dependabot keeps
+  them current.
+- **Releases.** Only the `release` workflow makes releases, on request, from `main`: it checks the
+  version against the code and the existing tags, runs all tests, builds the artifact with
+  `SHA256SUMS`, signs a build provenance (`gh attestation verify`) and takes the notes from
+  `CHANGELOG.md`. Releases are immutable. Files that are not for users stay out of the artifact.
+- **Licensing.** `LICENSE` in the root; `NOTICE` for third-party material.
+
+Here: check tools in `test/requirements.txt` (pip); lint is `make lint` (`shellcheck --severity=warning`
+for the shell scripts, `ruff check` with the rules in `ruff.toml`); the artifact is `make package`,
+which takes only `src/`.
+
 ## Layout
 
 ```
