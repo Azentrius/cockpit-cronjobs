@@ -1,4 +1,4 @@
-/* Cron Jobs — run now, the recorded runs of a job, and leftover runs.
+/* Cron Jobs: run now, the recorded runs of a job, and leftover runs.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

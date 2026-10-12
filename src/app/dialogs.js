@@ -1,4 +1,4 @@
-/* Cron Jobs — dialogs in general (focus, Escape), and adding, editing, deleting and
+/* Cron Jobs: dialogs in general (focus, Escape), and adding, editing, deleting and
  * confirming.
  *
  * SPDX-License-Identifier: Apache-2.0

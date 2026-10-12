@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/* Tests for lib/systemd.js — run with: node test/systemd.test.js
+/* Tests for lib/systemd.js. Run with: node test/systemd.test.js
  * Where systemd-analyze is installed, converted schedules are checked against it. */
 "use strict";
 const assert = require("assert");

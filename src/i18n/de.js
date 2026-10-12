@@ -1,4 +1,4 @@
-/* Cron Jobs — deutsche Texte.
+/* Cron Jobs: deutsche Texte.
  *
  * `…` im Text wird als Code gezeigt. Texte mit Werten sind Funktionen.
  * Anrede wie in Cockpit: „Sie“.

@@ -154,7 +154,7 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
   (e.g. `loadIfPending`) or through `state`.
 - **Cockpit bridge:** closing a spawn sends SIGTERM to the direct child only, so `RUN_SCRIPT` starts
   the job in its own process group (`setsid`) and forwards the signal. Text channels must be valid
-  UTF-8 or the channel (and the job) ends — read and run with `binary: true` and decode leniently.
+  UTF-8 or the channel (and the job) ends, so read and run with `binary: true` and decode leniently.
 - **dash:** `kill -TERM -- -PGID` fails ("Illegal number"); use `kill -TERM -PGID`.
 - **Pipes:** opening `/dev/fd/N` fails when stdout is a socket (e.g. under some supervisors), so the run
   recorder uses a FIFO.
