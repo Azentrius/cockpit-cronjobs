@@ -36,11 +36,11 @@
 
     const WRAP = "/usr/local/libexec/cockpit-cronjobs-run";
     const ROOT_DEFAULT = TEMPLATE +
-        "# GeoIP-Datenbank für Plausible\n" +
+        "# GeoIP database for Plausible\n" +
         "0 3 2 * *\t" + WRAP + " update-geoip-1a2b '/opt/plausible/update-geoip.sh'\n" +
         "30 1 * * 0 /usr/sbin/fstrim -a\n" +
         "#[cronctl:off] 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/\n" +
-        "*/10 * * * * test -x /opt/x && echo '<b>nicht fett</b>' > /dev/null\n" +
+        "*/10 * * * * test -x /opt/x && echo '<b>not bold</b>' > /dev/null\n" +
         "@reboot /usr/local/bin/warmup.sh\n";
 
     const SYS = {
@@ -53,7 +53,7 @@
             "certbot": "SHELL=/bin/sh\n0 */12 * * * root test -x /usr/bin/certbot -a \\! -d /run/systemd/system && perl -e 'sleep int(rand(43200))' && certbot -q renew\n",
             "e2scrub_all": "30 3 * * 0 root test -e /run/systemd/system || SERVICE_MODE=1 /usr/lib/x86_64-linux-gnu/e2fsprogs/e2scrub_all_cron\n10 3 * * * root test -e /run/systemd/system || SERVICE_MODE=1 /sbin/e2scrub_all -A -r\n",
             "sysstat.dpkg-old": "5-55/10 * * * * root command -v debian-sa1 > /dev/null && debian-sa1 1 1\n",
-            "latin1": "0 1 * * * root echo M\x01rz > /dev/null\n",
+            "latin1": "0 1 * * * root echo caf\x01 > /dev/null\n",
             "userfile": "0 2 * * * root /home/eve/run.sh\n",
         },
         crondMeta: { "userfile": "1000:644" },
@@ -75,7 +75,7 @@
     };
     const OUTPUTS = {
         "update-geoip-1a2b/20261009T030000Z-101": "GeoLite2-City.mmdb aktualisiert\n",
-        "update-geoip-1a2b/20261012T010000Z-202": "Lade GeoLite2-City …\ncurl: (22) The requested URL returned error: 401\nupdate-geoip: Download fehlgeschlagen\n",
+        "update-geoip-1a2b/20261012T010000Z-202": "Fetching GeoLite2-City …\ncurl: (22) The requested URL returned error: 401\nupdate-geoip: download failed\n",
     };
 
     const wrapperParam = params.get("wrapper");
@@ -215,7 +215,7 @@
             if (M.conflictNext !== null) { M.root = M.conflictNext; M.conflictNext = null; }
             if (M.root === null) fail({ exit_status: 1, problem: null, message: "no crontab for root\n" });
             const bytes = new TextEncoder().encode(M.root);
-            return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE4 : b) : bytes) : M.root;
+            return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
         }
         if (/flock -w 10 9/.test(script)) {
             if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
@@ -243,13 +243,13 @@
         }
         if (/sec host/.test(script)) return basicsOutput();
         if (/sec etc/.test(script)) {
-            if (M.failSystem) fail({ exit_status: 2, problem: null, message: "sh: kaputt" });
+            if (M.failSystem) fail({ exit_status: 2, problem: null, message: "sh: broken" });
             const out = systemOutput(privileged && opts.superuser === "try");
             if (!opts.binary) {
                 if (out.includes("\x01")) fail({ problem: "protocol-error", message: "invalid UTF-8" });
                 return out;
             }
-            return new TextEncoder().encode(out).map(b => b === 1 ? 0xE4 : b);
+            return new TextEncoder().encode(out).map(b => b === 1 ? 0xE9 : b);
         }
         if (/runs\.jsonl/.test(script)) return new TextEncoder().encode(runsOutput());
         if (args[0] === "tail" && args[1] === "-c") {
@@ -292,7 +292,7 @@
         M.runs_started.push({ env, command, shell: args[5], home: args[4], opts,
                               input: input === null ? null : new TextDecoder().decode(input) });
         if (opts.superuser === "require" && M.superuser === "none") { api.reject({ problem: "access-denied", message: "" }); return; }
-        const lines = /fail/.test(command) ? ["Lade …", "Fehler: kaputt"] : ["Lade 12 Feeds …", "news.example.org 34 neue Einträge", "fertig"];
+        const lines = /fail/.test(command) ? ["Loading …", "Error: broken"] : ["Loading 12 feeds …", "news.example.org 34 new entries", "done"];
         const forever = /sleep/.test(command);
         let i = 0;
         const timer = setInterval(() => {
