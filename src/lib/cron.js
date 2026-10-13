@@ -366,6 +366,173 @@
         return env;
     }
 
+    /* ---------- the environment cron gives a job ---------- */
+
+    const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+    /* The words of a PAM line; "[...]" (with "\]" inside) is one word. */
+    function pamWords(line) {
+        const words = [];
+        let i = 0;
+        while (i < line.length) {
+            while (i < line.length && /\s/.test(line[i])) i++;
+            if (i >= line.length) break;
+            let w = "";
+            if (line[i] === "[") {
+                i++;
+                while (i < line.length && line[i] !== "]") {
+                    if (line[i] === "\\" && line[i + 1] === "]") { w += "]"; i += 2; } else w += line[i++];
+                }
+                i++;
+                w = "[" + w + "]";
+            } else {
+                while (i < line.length && !/\s/.test(line[i])) w += line[i++];
+            }
+            words.push(w);
+        }
+        return words;
+    }
+
+    /* The lines of a PAM service file: { include, type } for "@include NAME" (type null:
+       every type) and "TYPE include|substack NAME", else { type, module, args }. */
+    function pamLines(text) {
+        const out = [];
+        String(text || "").replace(/\\\n/g, " ").split("\n").forEach(raw => {
+            const words = pamWords(raw.replace(/#.*$/, ""));
+            if (words[0] === "@include") {
+                if (words[1]) out.push({ include: words[1], type: null });
+                return;
+            }
+            if (words.length < 3) return;
+            const type = words[0].replace(/^-/, "").toLowerCase();
+            if (words[1] === "include" || words[1] === "substack") out.push({ include: words[2], type });
+            else out.push({ type, module: words[2], args: words.slice(3).map(a => a.replace(/^\[([\s\S]*)\]$/, "$1")) });
+        });
+        return out;
+    }
+
+    /* The arguments of the pam_env.so lines of PAM service name (files: { NAME: text }
+       of the service and what it includes), for the types in order. */
+    function pamEnvModules(files, name, types) {
+        const out = [];
+        const walk = (file, type, depth) => {
+            if (depth > 8 || !has(files, file)) return;
+            pamLines(files[file]).forEach(l => {
+                if (l.include) {
+                    if (l.type === null || l.type === type) walk(l.include, type, depth + 1);
+                } else if (l.type === type && /(^|\/)pam_env\.so$/.test(l.module)) {
+                    out.push(l.args);
+                }
+            });
+        };
+        types.forEach(type => walk(name, type, 0));
+        return out;
+    }
+
+    /* The file one pam_env.so line reads: envfile=, else /etc/environment; none with
+       readenv=0. Its conffile (pam_env.conf) is not read. */
+    function pamEnvFileOf(args) {
+        let file = "/etc/environment";
+        let read = true;
+        args.forEach(a => {
+            const m = /^([a-z_]+)=(.*)$/.exec(a);
+            if (m && m[1] === "envfile") file = m[2];
+            else if (m && m[1] === "readenv") read = (parseInt(m[2], 10) || 0) !== 0;
+        });
+        return read ? file : null;
+    }
+
+    /* Applies an environment file to env the way pam_env reads it (Linux-PAM 1.5):
+       a line ending in "\" goes on in the next one; leading blanks and "export " are
+       dropped; "#" ends the line; the name is letters, digits and "_"; a value that
+       starts with a quote loses it and a quote that is its last character; a name
+       without "=" unsets it. */
+    function applyEnvFile(env, text) {
+        const lines = [];
+        let cur = null;
+        String(text || "").split("\n").forEach(raw => {
+            let line = raw.replace(/^[ \t\n]+/, "");
+            if (cur === null && (line === "" || line[0] === "#")) return;
+            const hash = line.indexOf("#");
+            let more = false;
+            if (hash >= 0) line = line.slice(0, hash);
+            else if (/\\[ \t\n]*$/.test(line)) {
+                line = line.replace(/\\[ \t\n]*$/, "");
+                more = true;
+            }
+            cur = cur === null ? line : cur + line;
+            if (!more) {
+                lines.push(cur);
+                cur = null;
+            }
+        });
+        if (cur !== null) lines.push(cur);
+        lines.forEach(line => {
+            let key = line.replace(/^[ \t\n]+/, "");
+            if (key.startsWith("export ")) key = key.slice(7);
+            const eq = key.indexOf("=");
+            const name = eq < 0 ? key : key.slice(0, eq);
+            if (!/^[A-Za-z0-9_]+$/.test(name)) return;
+            if (eq < 0) {
+                delete env[name];
+                return;
+            }
+            let value = key.slice(eq + 1);
+            if (value[0] === "\"" || value[0] === "'") {
+                let v = "";
+                for (let t = 1; t < value.length; t++) {
+                    const c = value[t];
+                    if ((c !== "\"" && c !== "'") || t + 1 < value.length) v += c;
+                }
+                value = v;
+            }
+            env[name] = value;
+        });
+        return env;
+    }
+
+    const CRONIE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+    const SYSTEMD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
+
+    /* How cron gives its jobs their environment on this server, from what the page reads
+       (see BASICS_SCRIPT): o.flavor "debian" or "cronie", o.args the cron daemon's
+       command line (running, else the unit's ExecStart), o.pam { NAME: text } of
+       cron's PAM service and what it includes, o.files { PATH: text } of the env files
+       those name, o.managerPath the PATH of systemd's environment for services.
+       Result { pam: {NAME: value}, path: cron's default PATH or null, user: whether cron
+       sets USER }. Debian's cron opens the PAM session, then sets the credentials;
+       cronie the other way round. Its default PATH: Debian's cron "/usr/bin:/bin",
+       none with -P (Ubuntu starts it so); cronie its _PATH_STDPATH, with -P its own. */
+    function cronEnvModel(o) {
+        o = o || {};
+        const cronie = o.flavor === "cronie";
+        const noDefault = /(^|\s)-[A-Za-z]*P[A-Za-z]*(?=\s|;|$)/.test(o.args || "");
+        const pam = {};
+        pamEnvModules(o.pam || {}, cronie ? "crond" : "cron", cronie ? ["auth", "session"] : ["session", "auth"])
+            .forEach(args => {
+                const file = pamEnvFileOf(args);
+                if (file && has(o.files || {}, file)) applyEnvFile(pam, o.files[file]);
+            });
+        const path = cronie ? (noDefault ? o.managerPath || SYSTEMD_PATH : CRONIE_PATH) : (noDefault ? null : "/usr/bin:/bin");
+        return { pam, path, user: cronie };
+    }
+
+    /* The environment cron gives a job of user (default root, at home; another user's
+       home as read from the user database): the variables from PAM, overridden by the
+       crontab's variables (cronEnv, see envBefore) and cron's own: SHELL, HOME and PATH
+       unless the crontab sets them, LOGNAME, and USER where cron sets it. */
+    function jobEnvironment(cronEnv, home, user, model) {
+        model = model || { pam: {}, path: "/usr/bin:/bin", user: false };
+        user = user || "root";
+        const own = Object.assign({}, cronEnv || {});
+        if (!has(own, "SHELL")) own.SHELL = "/bin/sh";
+        if (!has(own, "HOME")) own.HOME = home || (user === "root" ? "/root" : "/");
+        if (!has(own, "PATH") && model.path) own.PATH = model.path;
+        own.LOGNAME = user;
+        if (model.user) own.USER = user;
+        return Object.assign({}, model.pam, own);
+    }
+
     /* ---------- run capture (cockpit-cronjobs-run) ---------- */
 
     const WRAPPER_PATH = "/usr/local/libexec/cockpit-cronjobs-run";
@@ -699,7 +866,7 @@
         parseUserCrontab, serializeUserCrontab, roundTrips, normalizeText, templateEnd,
         setEnabled, setJob, newJob, rawLine, entryLine,
         parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
-        parseEnvLine, envBefore,
+        parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, jobName, slug,
         cksum,
         validTimeZone, wallParts, wallToInstant, nextRun, runsBetween,

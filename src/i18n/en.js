@@ -230,6 +230,8 @@
         runTitle: "Run now",
         runIntro: user => `This command runs as ${user} right away:`,
         runEnv: (path, home, shell) => `With cron's environment: \`${path}\`, \`${home}\`, shell \`${shell}\`.`,
+        runEnvNoPath: (home, shell) => `With cron's environment, which sets no \`PATH\` here: \`${home}\`, shell \`${shell}\`.`,
+        runEnvOthers: list => `Also set: ${list}.`,
         runRecorded: "Result and output are recorded.",
         runStdin: "The text after % in the line is passed as input, as cron does.",
         runKeepOpen: "The job stops if you close this page while it runs.",

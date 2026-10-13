@@ -31,8 +31,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
   the current version, so a restore can be undone the same way.
 - **The result of every run.** Turn on recording for a job and it keeps exit code, duration and output of
   its last 20 runs. Handy on servers without a mail program, where cron's output is otherwise lost.
-- **Run now.** Starts a job right away with cron's environment (the crontab's variables, `PATH`, `HOME`,
-  `SHELL`, input after `%`), shows the output live and can stop it.
+- **Run now.** Starts a job right away with the environment cron gives it on this server (see below) and
+  input after `%`, shows the output live and can stop it.
 - **Convert to a systemd timer.** Creates `NAME.service` and `NAME.timer` with the same schedule (checked
   against `systemd-analyze`), the same command and environment, checks what systemd read, starts the
   timer and switches the cron line off with a note. **Back to cron** undoes it in one step: the line is
@@ -116,6 +116,24 @@ and lists only what has the form of runs: nothing the user puts there reaches be
   the wrapper call instead of the plain command; adjust filters that match on them.
 - Jobs that record their runs need the script. Before you remove Cron Jobs, turn recording off, or leave
   the script in place.
+
+## Cron's environment
+
+Run now and a conversion to a systemd timer give a job the environment cron gives it on this server.
+Cron builds it in three layers, and the page reads each one from the server:
+
+1. What PAM sets for cron's service (`/etc/pam.d/cron`, with cronie `/etc/pam.d/crond`): through
+   `pam_env`, the variables of `/etc/environment` and, on Debian and Ubuntu, `LANG` and the like from
+   `/etc/default/locale`.
+2. The crontab's own variables above the job, `MAILTO` included.
+3. Cron's own: `SHELL` (`/bin/sh`) and `HOME` unless the crontab sets them, and `LOGNAME`. `PATH` unless
+   the crontab sets it: `/usr/bin:/bin` with Debian's cron, none with Ubuntu's, which starts cron with `-P`
+   (so `PATH` comes from `/etc/environment`), `/usr/bin:/bin:/usr/sbin:/sbin` with cronie, which sets
+   `USER` as well.
+
+A converted unit lists these variables with `Environment=` and removes with `UnsetEnvironment=` what
+systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. What is in
+`/etc/environment` when you convert is copied into the unit. `/etc/security/pam_env.conf` is not read.
 
 ## Files
 

@@ -77,15 +77,47 @@ sh("crontab -u root -", input="MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fs
 USER = "cjuser"
 sh(f"id -u {USER} || useradd -m -s /bin/sh {USER}")
 USER_TAB = "MAILTO=\"\"\n# reports for cjuser\n15 3 * * * /bin/true\n"
-# Who runs a job, where and with which environment: once from cron, once with run now.
-WHO = "id -un; pwd; env | grep -E '^(HOME|LOGNAME|USER|SHELL|PATH)=' | sort"
+# Who runs a job, where and with which environment, all of it: from cron, with run now, as a unit.
+WHO = "id -un; pwd; env | sort"
+# What systemd gives every service for its own bookkeeping; a converted job may have these too.
+SYSTEMD_OWN = {"INVOCATION_ID", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID", "MEMORY_PRESSURE_WATCH", "MEMORY_PRESSURE_WRITE"}
 
 
 def who_parts(text):
     """(user, working directory, {NAME: value}) from the output of WHO."""
-    lines = (text or "").strip().split("\n")
+    lines = (text or "").rstrip("\n").split("\n")
     return (lines[0] if lines else None, lines[1] if len(lines) > 1 else None,
             dict(line.split("=", 1) for line in lines[2:] if "=" in line))
+
+
+def env_diff(a, b, ignore=()):
+    """{NAME: (a's value, b's value)} for every variable the two environments do not share."""
+    names = (set(a) | set(b)) - set(ignore)
+    return {k: (a.get(k), b.get(k)) for k in sorted(names) if a.get(k) != b.get(k)}
+
+
+def read(path):
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return f.read()
+
+
+def wait_file(path, timeout=75):
+    deadline = time.time() + timeout
+    while time.time() < deadline and not os.path.exists(path):
+        time.sleep(2)
+    time.sleep(1)   # the job may still be writing
+    return read(path)
+
+
+# /etc/environment as pam_env reads it: cron gives these to every job, so run now and a
+# converted unit must too (quotes, "export", a comment that ends the value)
+ETC_ENV = "/etc/environment"
+etc_env_before = read(ETC_ENV)
+with open(ETC_ENV, "a") as f:
+    f.write("\n# cj-e2e\nexport CJ_E2E_EXPORT=\"quoted value\"\nCJ_E2E_PLAIN=plain # a comment\n"
+            "CJ_E2E_SINGLE='single'\nCJ_E2E_INNER=\"a\"b\"\n")
 sh(f"crontab -u {USER} -", input=USER_TAB)
 if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
     sys.exit("cron is not running")
@@ -345,6 +377,55 @@ with sync_playwright() as p:
     check(len(os.listdir(STATE + "/backups")) == 10, "ten backups kept: " + repr(len(os.listdir(STATE + "/backups"))))
     check(os.path.exists(STATE + "/.crontab.lock"), "lock in the state dir")
 
+    # cron's environment, all of it: the same command from cron, with run now and as a converted
+    # unit sees the same user, directory and variables (PAM's from /etc/environment and the
+    # locale, the crontab's, cron's own; no USER from Debian's cron)
+    start = crontab()
+    sh("rm -f /tmp/cj-e2e-root-cron /tmp/cj-e2e-root-out")
+    sh("crontab -u root -", input=start + "* * * * * { " + WHO + "; } > /tmp/cj-e2e-root-cron\n"
+                                          "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n")
+    page.click("#reload")
+    wait_idle(page)
+    by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
+    check(by_cron[0] == "root" and by_cron[1] == "/root" and by_cron[2].get("CJ_E2E_EXPORT") == "quoted value" and
+          "USER" not in by_cron[2], "cron ran the job as root with /etc/environment: " + repr(by_cron))
+    who_row = row_of(page, "0 5 1 1 *")
+    who_row.locator("[data-key^='run:']").click()
+    check("Außerdem gesetzt:" in page.inner_text("#run-env") and "CJ_E2E_EXPORT" in page.inner_text("#run-env"),
+          "the run dialog names the other variables: " + page.inner_text("#run-env"))
+    page.click("#run-start")
+    wait_js(page, "!document.querySelector('#run-done-actions').hidden")
+    page.click("#run-close-btn")
+    by_now = who_parts(read("/tmp/cj-e2e-root-out"))
+    check(by_now[:2] == by_cron[:2] and not env_diff(by_cron[2], by_now[2]),
+          "run now: the environment cron gives, all of it: " + repr(env_diff(by_cron[2], by_now[2])))
+    unit = "cj-e2e-who"
+    who_row.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    page.fill("#conv-name", unit)
+    wait_js(page, "!document.querySelector('#conv-ok').disabled")
+    page.click("#conv-ok")
+    wait_js(page, "document.querySelector('#conv-dlg').hidden")
+    wait_idle(page)
+    os.remove("/tmp/cj-e2e-root-out")
+    started = sh(f"systemctl start {unit}.service")
+    by_unit = who_parts(read("/tmp/cj-e2e-root-out"))
+    check(started.returncode == 0 and by_unit[:2] == by_cron[:2] and not env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN),
+          "the converted unit: the environment cron gives, all of it: " + started.stderr +
+          repr(env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN)) + "\n" + (read(f"/etc/systemd/system/{unit}.service") or ""))
+    who_row.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    page.click("#back-ok")
+    wait_js(page, "document.querySelector('#back-dlg').hidden")
+    wait_idle(page)
+    check(not os.path.exists(f"/etc/systemd/system/{unit}.service"), "back to cron: the unit removed")
+    sh("crontab -u root -", input=start)
+    sh("rm -f /tmp/cj-e2e-root-cron /tmp/cj-e2e-root-out")
+    page.click("#reload")
+    wait_idle(page)
+    check(crontab() == start, "root's crontab as before")
+
     # backups: listed as on disk, the difference as diff shows it, restoring and restoring back gives the original bytes
     def crontab_bytes():
         return subprocess.run(["crontab", "-l", "-u", "root"], capture_output=True, check=True).stdout
@@ -452,14 +533,12 @@ with sync_playwright() as p:
     check(f"als {USER} ausgeführt" in page.inner_text("#run-intro"), "run dialog names the user: " + page.inner_text("#run-intro"))
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
-    log = page.inner_text("#run-log")
+    log = page.text_content("#run-log")   # not inner_text: a value may end in a space
     cron_ran, now_ran = who_parts(who), who_parts(log)
     check("OK" in page.inner_text("#run-label") and cron_ran[0] == now_ran[0] == USER and cron_ran[1] == now_ran[1] and
-          all(cron_ran[2].get(k) == now_ran[2].get(k) for k in ("HOME", "LOGNAME", "SHELL")),
-          "run now: the user, working directory, HOME, LOGNAME and SHELL that cron gave: " + repr(log) + " vs " + repr(who))
-    for k in ("PATH", "USER"):
-        if cron_ran[2].get(k) != now_ran[2].get(k):
-            print(f"note: {k} under cron {cron_ran[2].get(k)!r}, with run now {now_ran[2].get(k)!r}")
+          not env_diff(cron_ran[2], now_ran[2]) and cron_ran[2].get("CJ_E2E_INNER") == "a\"b",
+          "run now: the user, working directory and environment cron gave, all of it: " +
+          repr(env_diff(cron_ran[2], now_ran[2])) + " " + repr(log))
     page.screenshot(path=os.path.join(SHOTS, "e2e-user-run.png"))
     page.click("#run-close-btn")
 
@@ -588,6 +667,11 @@ with sync_playwright() as p:
             check(not any(m in line for line in said for _, m in expected), f"cron reads {name}: {said!r}")
     sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
     sh(f"crontab -r -u {USER}; userdel -r {USER}; rm -f /tmp/cj-e2e-whoami")
+    if etc_env_before is None:
+        os.remove(ETC_ENV)
+    else:
+        with open(ETC_ENV, "w") as f:
+            f.write(etc_env_before)
 
     page.click("#tab-overview")
     page.screenshot(path=os.path.join(SHOTS, "e2e-end.png"), full_page=True)

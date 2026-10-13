@@ -217,29 +217,21 @@
             .replace(/%/g, "%%") + "\"";
     }
 
-    /* Variables of a crontab that only mean something to cron itself. */
-    const CRON_ONLY_VARS = new Set(["MAILTO", "MAILFROM", "CRON_TZ", "RANDOM_DELAY", "CONTENT_TYPE",
-                                    "CONTENT_TRANSFER_ENCODING", "CRON_CORRECT_DST"]);
-
-    /* The environment a job has under cron: cron's defaults for user (default root, with
-       the user's home) and the crontab's variables. */
-    function jobEnvironment(cronEnv, home, user) {
-        user = user || "root";
-        const env = { SHELL: "/bin/sh", PATH: "/usr/bin:/bin", HOME: home || (user === "root" ? "/root" : "/"),
-                      LOGNAME: user, USER: user };
-        Object.keys(cronEnv || {}).forEach(k => {
-            if (!CRON_ONLY_VARS.has(k)) env[k] = cronEnv[k];
-        });
-        return env;
-    }
-
-    /* Environment= for a converted job: User=root already gives USER, LOGNAME and HOME
-       (HOME stays when the crontab sets it). */
-    function serviceEnvironment(cronEnv) {
-        const env = jobEnvironment(cronEnv, null);
-        ["USER", "LOGNAME"].forEach(k => delete env[k]);
+    /* Environment= and UnsetEnvironment= for a converted job of root, so that it has the
+       environment cron gives it (jobEnv, see CronLogic.jobEnvironment; variables like
+       MAILTO included, as cron passes them on too), from the crontab's variables (cronEnv)
+       and the environment systemd gives every service (managerEnv, `systemctl
+       show-environment`). User=root already gives LOGNAME, USER and HOME (HOME stays when
+       the crontab sets it); what systemd would give and cron does not (USER with Debian's
+       cron, PATH when cron sets none, the manager's variables) is unset. */
+    function serviceEnvironment(jobEnv, cronEnv, managerEnv) {
+        const env = Object.assign({}, jobEnv || {});
+        const unset = Array.from(new Set(["USER", "PATH"].concat(Object.keys(managerEnv || {}))))
+            .filter(k => !Object.prototype.hasOwnProperty.call(env, k));
+        if (env.LOGNAME === "root") delete env.LOGNAME;
+        if (env.USER === "root") delete env.USER;
         if (!cronEnv || !Object.prototype.hasOwnProperty.call(cronEnv, "HOME")) delete env.HOME;
-        return env;
+        return { env, unset };
     }
 
     /* How the units of a converted job begin and describe themselves. Back to cron only
@@ -247,7 +239,7 @@
     const UNIT_HEADER = "# Created by Cockpit Cron Jobs from this line of the root crontab:";
     const unitDescription = name => name + " (from the root crontab)";
 
-    /* opts: { name, line, shell, command, env: {NAME: value}, workdir } -> text of
+    /* opts: { name, line, shell, command, env: {NAME: value}, unset: [NAME], workdir } -> text of
        name.service. cron starts jobs in $HOME; WorkingDirectory=~ is root's home. */
     function serviceUnit(opts) {
         const env = opts.env || {};
@@ -265,6 +257,7 @@
             "WorkingDirectory=" + workdir,
         ];
         Object.keys(env).sort().forEach(k => lines.push(envLine(k, env[k])));
+        if (opts.unset && opts.unset.length) lines.push("UnsetEnvironment=" + opts.unset.join(" "));
         lines.push("ExecStart=" + execWord(opts.shell || "/bin/sh") + " -c " + execWord(opts.command));
         return lines.join("\n") + "\n";
     }
@@ -312,7 +305,7 @@
         DOC_URL, UNIT_HEADER,
         calField, calendarFromCron, calendarToCron, describeCalendar, describeTimer,
         formatSpan, parseAnalyzeCalendar,
-        validUnitName, suggestUnitName, execWord, envLine, jobEnvironment, serviceEnvironment,
+        validUnitName, suggestUnitName, execWord, envLine, serviceEnvironment,
         serviceUnit, timerUnit, expectedArgv, convertNote, parseConvertNote,
     };
 }));
