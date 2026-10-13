@@ -8,6 +8,9 @@
 (function (root) {
     "use strict";
 
+    /* "root-Crontab", "Crontab von alice" */
+    const crontabName = user => user === "root" ? "root-Crontab" : `Crontab von ${user}`;
+
     const ui = {
         loadedAt: t => `Geladen um ${t}`,
         serverTz: tz => `Serverzeit ${tz}`,
@@ -68,6 +71,9 @@
         /* root-Crontab */
         rootTitle: "root-Crontab",
         rootDesc: "Änderungen laufen über `crontab -u root`. Vor jeder Änderung wird ein Backup geschrieben.",
+        userTitle: user => `Crontab von ${user}`,
+        userDesc: user => `Änderungen laufen über \`crontab -u ${user}\`; ihre Jobs laufen als ${user}. Vor jeder ` +
+                          "Änderung wird ein Backup geschrieben.",
         add: "Job hinzufügen",
         colActive: "Aktiv",
         colSchedule: "Zeitplan",
@@ -107,11 +113,11 @@
         nextBoot: "Beim nächsten Start",
         neverRuns: "Nie",
         emptyTitle: "Keine Jobs",
-        emptyBody: "In der root-Crontab ist noch kein Job eingetragen.",
+        emptyBody: user => `In der ${crontabName(user)} ist noch kein Job eingetragen.`,
         deniedTitle: "Administrativer Zugriff nötig",
         deniedBody: "Die root-Crontab lässt sich nur mit administrativem Zugriff lesen und ändern. Schalten Sie ihn " +
                     "oben in Cockpit über „Eingeschränkter Zugriff“ ein; die Seite lädt danach von selbst neu.",
-        readErrorTitle: "Die root-Crontab ließ sich nicht lesen",
+        readErrorTitle: user => `Die ${crontabName(user)} ließ sich nicht lesen`,
         sysErrorTitle: "Die System-Crontabs ließen sich nicht lesen",
         lockedTitle: "Nur lesend geöffnet",
         lockedBody: "Diese Crontab enthält Zeilen, die beim Zurückschreiben nicht exakt erhalten blieben. " +
@@ -145,7 +151,7 @@
             links: "cron überspringt diese Datei, weil sie mehr als einen Hardlink hat.",
         },
         usersTitle: "Weitere Benutzer",
-        usersDesc: "Crontabs anderer Benutzer auf diesem Server.",
+        usersDesc: "Crontabs weiterer Benutzer, die diese Seite nur anzeigen kann.",
         periodicTitle: "Periodische Skripte",
         periodicDesc: "Die Skripte in `/etc/cron.hourly` bis `/etc/cron.monthly` startet run-parts aus /etc/crontab " +
                       "oder anacron. Viele Systemaufgaben laufen inzwischen als systemd-Timer.",
@@ -175,19 +181,20 @@
         errCommand: "Bitte einen Befehl eingeben.",
         errNewline: "Ein Befehl muss in eine Zeile passen.",
         errLine: "cron würde diese Zeile anders lesen als eingegeben. Bitte Zeitplan und Befehl prüfen.",
-        commandHelp: "Läuft als root. Ausgaben gehen an die lokale Mail von root.",
-        commandHelpMailto: "Läuft als root. Ausgaben gehen an die lokale Mail von root, sofern MAILTO in der Crontab " +
-                           "nichts anderes festlegt.",
-        commandHelpNoMta: "Läuft als root. Auf diesem Server ist kein Mailprogramm installiert: Ausgaben gehen verloren, " +
-                          "außer der Job erfasst seine Läufe oder leitet sie um, etwa `>> /var/log/meinjob.log 2>&1`.",
+        commandHelp: user => `Läuft als ${user}. Ausgaben gehen an die lokale Mail von ${user}.`,
+        commandHelpMailto: user => `Läuft als ${user}. Ausgaben gehen an die lokale Mail von ${user}, sofern MAILTO in der ` +
+                                   "Crontab nichts anderes festlegt.",
+        commandHelpNoMta: user => `Läuft als ${user}. Auf diesem Server ist kein Mailprogramm installiert: Ausgaben gehen ` +
+            (user === "root" ? "verloren, außer der Job erfasst seine Läufe oder leitet sie um, etwa `>> /var/log/meinjob.log 2>&1`."
+                : "verloren, außer der Job leitet sie um, etwa `>> $HOME/meinjob.log 2>&1`."),
         commandHelpNoMtaRecorded: "Läuft als root. Ergebnis und Ausgabe werden erfasst.",
         percentWarn: "cron liest % als Zeilenumbruch und gibt den Rest als Eingabe weiter. Für ein Prozentzeichen " +
                      "`\\%` schreiben, etwa `date +\\%F`.",
 
         /* Löschen */
         delTitle: "Job löschen?",
-        delIntro: "Dieser Job wird aus der root-Crontab entfernt:",
-        delIntroNote: "Dieser Job wird mit dem Kommentar darüber aus der root-Crontab entfernt:",
+        delIntro: user => `Dieser Job wird aus der ${crontabName(user)} entfernt:`,
+        delIntroNote: user => `Dieser Job wird mit dem Kommentar darüber aus der ${crontabName(user)} entfernt:`,
         delBackup: path => `Vorher wird die aktuelle Crontab unter \`${path}\` gesichert. Die letzten zehn Sicherungen bleiben erhalten.`,
         delRuns: "Seine erfassten Läufe werden ebenfalls gelöscht.",
         delConfirm: "Job löschen",
@@ -202,10 +209,10 @@
         okCaptureOn: "Der Job erfasst jetzt seine Läufe",
         okCaptureOff: "Der Job erfasst seine Läufe nicht mehr",
         backupAt: path => `Backup der vorherigen Fassung unter \`${path}\``,
-        noBackup: "Vorher gab es keine root-Crontab, daher kein Backup.",
+        noBackup: user => `Vorher gab es keine ${crontabName(user)}, daher kein Backup.`,
         conflictTitle: "Die Crontab wurde inzwischen geändert",
-        conflictBody: "Die root-Crontab wurde außerhalb dieser Seite geändert. Ihre Änderung wurde nicht gespeichert; " +
-                      "die Seite zeigt jetzt den aktuellen Stand.",
+        conflictBody: user => `Die ${crontabName(user)} wurde außerhalb dieser Seite geändert. Ihre Änderung wurde nicht ` +
+                              "gespeichert; die Seite zeigt jetzt den aktuellen Stand.",
         saveErrorTitle: "Speichern fehlgeschlagen",
         backupFailed: "Das Backup ließ sich nicht anlegen; die Crontab blieb unverändert.",
         unverifiedTitle: "Gespeichert, aber nicht bestätigt",
@@ -277,9 +284,9 @@
 
         /* Sicherungen */
         backups: "Sicherungen",
-        backupsTitle: "Sicherungen der root-Crontab",
-        backupsIntro: "Vor jeder Änderung sichert Cron Jobs die root-Crontab. Öffnen Sie eine Version, um zu sehen, " +
-                      "was ihre Wiederherstellung ändern würde.",
+        backupsTitle: user => `Sicherungen der ${crontabName(user)}`,
+        backupsIntro: user => `Vor jeder Änderung sichert Cron Jobs die ${crontabName(user)}. Öffnen Sie eine Version, um ` +
+                              "zu sehen, was ihre Wiederherstellung ändern würde.",
         backupsNote: (n, path) => `Beim Wiederherstellen wird die aktuelle Crontab zuerst gesichert, so lässt es sich ` +
                                   `auf dem gleichen Weg rückgängig machen. Aufbewahrt werden die letzten ${n} Sicherungen ` +
                                   `in \`${path}\`.`,
@@ -288,7 +295,7 @@
         colSaved: "Gesichert",
         colRestoring: "Wiederherstellen ändert",
         backupSame: "Nichts, sie ist die aktuelle Crontab",
-        backupSameBody: "Diese Version ist dieselbe wie die aktuelle root-Crontab.",
+        backupSameBody: user => `Diese Version ist dieselbe wie die aktuelle ${crontabName(user)}.`,
         backupEncoding: "Nicht UTF-8, hier nicht darstellbar",
         backupDelta: (removed, added) => [
             removed ? (removed === 1 ? "1 Zeile entfernt" : `${removed} Zeilen entfernt`) : null,
@@ -296,8 +303,8 @@
         ].filter(Boolean).join(", "),
         showChanges: "Änderungen anzeigen",
         hideChanges: "Änderungen ausblenden",
-        diffIntro: "Wiederherstellen ändert die root-Crontab so: Zeilen mit `-` werden entfernt, Zeilen mit `+` " +
-                   "kommen hinzu.",
+        diffIntro: user => `Wiederherstellen ändert die ${crontabName(user)} so: Zeilen mit \`-\` werden entfernt, ` +
+                           "Zeilen mit `+` kommen hinzu.",
         diffLabel: "Änderungen",
         diffRemoved: "entfernt: ",
         diffAdded: "hinzugefügt: ",
@@ -305,7 +312,7 @@
         diffNoNewline: "(kein Zeilenumbruch am Ende)",
         restore: "Diese Version wiederherstellen",
         restoring: "Wird wiederhergestellt …",
-        restoreEncoding: "Die aktuelle root-Crontab ist nicht UTF-8, deshalb kann die Seite sie nicht ersetzen.",
+        restoreEncoding: user => `Die aktuelle ${crontabName(user)} ist nicht UTF-8, deshalb kann die Seite sie nicht ersetzen.`,
         okRestored: when => `Version von ${when} wiederhergestellt`,
         restoredUndo: "Zum Rückgängigmachen stellen Sie die neueste Sicherung wieder her.",
         restoreFailed: "Wiederherstellen fehlgeschlagen",

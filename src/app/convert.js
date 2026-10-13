@@ -177,7 +177,7 @@ export async function submitConvert(ev) {
         return copy;
     }, null, { quiet: true, timer: u.name + ".timer" });
     if (!res.ok) {
-        await fail((res.error || T.conflictBody) + (res.timerFailed ? "\n" + T.convRolledBack : ""), true);
+        await fail((res.error || T.conflictBody("root")) + (res.timerFailed ? "\n" + T.convRolledBack : ""), true);
         if (res.timerFailed) requestLoad();
         return;
     }
@@ -275,7 +275,7 @@ export async function submitBack() {
     }, null, { quiet: true, timer: d.units === "ours" ? d.name + ".timer" : null, stopTimer: true });
     if (!res.ok) {
         done();
-        dialogError("back-alert", (res.error || T.conflictBody) + (res.timerFailed ? "\n" + T.backRolledBack : ""), T.backFailed);
+        dialogError("back-alert", (res.error || T.conflictBody("root")) + (res.timerFailed ? "\n" + T.backRolledBack : ""), T.backFailed);
         if (res.timerFailed) requestLoad();
         return;
     }

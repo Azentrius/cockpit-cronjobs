@@ -1,34 +1,42 @@
-/* Cron Jobs: the root crontab as the page shows it: what is known about its jobs,
- * loading everything, saving a change in one locked step, and administrative access.
+/* Cron Jobs: the crontabs as the page shows them (root's, and with administrative
+ * access those of other users): what is known about their jobs, loading everything,
+ * saving a change in one locked step, and administrative access.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { C, codeSafe, rich, SD, state, T } from "./core.js";
+import { C, codeSafe, keyOf, rich, SD, state, T, USER_RE } from "./core.js";
 import {
-    ensureWrapper, errText, isDenied, readBasics, readRoot, readRuns, readSystem, readTimers, removeRunsIfUnused,
-    saveRoot,
+    ensureWrapper, errText, isDenied, readBasics, readCrontab, readRuns, readSystem, readTimers, removeRunsIfUnused,
+    saveCrontab,
 } from "./system.js";
-import { closeMenu, renderAll, renderRoot, restoreFocus, showAlert, updateLastRuns } from "./page.js";
+import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns } from "./page.js";
 import { dialog } from "./dialogs.js";
 import { renderOrphansDialog, renderRunsDialog } from "./runs.js";
 
-/* ---------- the root crontab ---------- */
+/* ---------- the crontabs ---------- */
 
-/* Counts the versions of the root crontab the page has seen. Runs read before the
+/* Counts the versions of the crontabs the page has seen. Runs read before the
    current version may still hold the runs of a line the page just removed, so
    leftover runs are only shown from runs read since (see orphanList). */
 export let rootVersion = 0;
 
-/* read: { text, utf8 } from readRoot. A crontab that is not UTF-8, or would not be
+/* The crontab of user as shown: state.root for root, else state.users[user]
+   (undefined when the page does not know it). */
+export function crontabOf(user) {
+    return user === "root" ? state.root : state.users[user];
+}
+
+/* read: { text, utf8 } from readCrontab. A crontab that is not UTF-8, or would not be
    written back exactly, is shown read-only. */
-function setRoot(read) {
+function tabOf(user, read) {
     rootVersion++;
     const content = read.text;
     const entries = C.parseUserCrontab(content);
     const notUtf8 = !read.utf8;
-    state.root = {
+    return {
         status: "ok",
+        user,
         text: content,
         entries,
         templateEnd: C.templateEnd(entries),
@@ -38,12 +46,21 @@ function setRoot(read) {
     };
 }
 
-export function rootJobs() {
-    const r = state.root;
-    if (r.status !== "ok") return [];
+function setCrontab(user, read) {
+    if (user === "root") state.root = tabOf(user, read);
+    else state.users[user] = tabOf(user, read);
+}
+
+/* The jobs of a crontab: [{ e, i }] with i the index of the entry. */
+export function jobsOf(tab) {
+    if (!tab || tab.status !== "ok") return [];
     const out = [];
-    r.entries.forEach((e, i) => { if (e.kind === "job") out.push({ e, i }); });
+    tab.entries.forEach((e, i) => { if (e.kind === "job") out.push({ e, i }); });
     return out;
+}
+
+export function rootJobs() {
+    return jobsOf(state.root);
 }
 
 /* The command as the user wrote it, and the recording, if any. */
@@ -121,7 +138,7 @@ export function loadIfPending(reload) {
 
 async function load() {
     state.suAtLoad = superuser ? superuser.Current : undefined;
-    if (state.root.status !== "ok") state.root = { status: "loading" };
+    if (state.root.status !== "ok") state.root = { status: "loading", user: "root" };
     renderAll();
     const basics = await readBasics().catch(() => null);
     if (basics) {
@@ -130,15 +147,15 @@ async function load() {
         state.basics = basics;
     }
     const [root, sys, runs, timers] = await Promise.allSettled([
-        state.basics.crontab ? readRoot() : Promise.reject({ problem: "not-found" }),
+        state.basics.crontab ? readCrontab("root") : Promise.reject({ problem: "not-found" }),
         readSystem(state.basics.flavor),
         readRuns(),
         state.basics.systemd ? readTimers() : Promise.resolve(null),
     ]);
-    if (root.status === "fulfilled") setRoot(root.value);
-    else if (isDenied(root.reason)) state.root = { status: "denied" };
-    else if (root.reason && root.reason.problem === "not-found") state.root = { status: "missing" };
-    else state.root = { status: "error", message: errText(root.reason) };
+    if (root.status === "fulfilled") setCrontab("root", root.value);
+    else if (isDenied(root.reason)) state.root = { status: "denied", user: "root" };
+    else if (root.reason && root.reason.problem === "not-found") state.root = { status: "missing", user: "root" };
+    else state.root = { status: "error", user: "root", message: errText(root.reason) };
     if (sys.status === "fulfilled") {
         state.sys = sys.value;
         state.sysError = null;
@@ -146,11 +163,31 @@ async function load() {
         state.sys = null;
         state.sysError = errText(sys.reason);
     }
+    await loadUsers();
     if (runs.status === "fulfilled") state.runs = { status: "ok", byId: runs.value, rootVersion };
     else state.runs = { status: isDenied(runs.reason) ? "denied" : "error", byId: {} };
     if (timers.status === "fulfilled") state.timers = timers.value ? { status: "ok", list: timers.value } : { status: "none", list: [] };
     else state.timers = { status: "error", list: [], message: errText(timers.reason) };
     state.loadedAt = Date.now();
+}
+
+/* The crontabs of the other users, read through crontab -l as root, only with
+   administrative access (the system read tells whose there are). Names the root
+   scripts would refuse stay out (they remain read-only under System). */
+async function loadUsers() {
+    const sys = state.sys;
+    if (!sys || !sys.root || !state.basics.crontab) {
+        state.users = {};
+        return;
+    }
+    const names = sys.userNames.filter(u => u !== "root" && USER_RE.test(u)).sort();
+    const reads = await Promise.allSettled(names.map(u => readCrontab(u)));
+    const users = {};
+    reads.forEach((r, k) => {
+        users[names[k]] = r.status === "fulfilled" ? tabOf(names[k], r.value)
+            : { status: "error", user: names[k], message: errText(r.reason) };
+    });
+    state.users = users;
 }
 
 /* Only the recorded runs, e.g. after a manual run or every half minute. */
@@ -191,32 +228,35 @@ export function commit(base, mutate, okTitle, opts) {
     const refused = refuse(base, base && base.locked);
     if (refused) return Promise.resolve(refused);
     const entries = mutate(base.entries);
-    if (!entries) return Promise.resolve(conflict());
+    if (!entries) return Promise.resolve(conflict(base.user));
     return write(base, C.serializeUserCrontab(entries), C.normalizeText, okTitle, opts || {});
 }
 
 /* Writes an earlier version (a backup) as it is, through the same locked step. Also
    on a crontab shown read-only, as nothing of it is kept; only not on one that is
    not UTF-8, whose checksum the page cannot know. Result as with commit. */
-export function restoreRoot(base, text, okTitle, opts) {
+export function restoreCrontab(base, text, okTitle, opts) {
     const refused = refuse(base, base && base.notUtf8);
     if (refused) return Promise.resolve(refused);
     return write(base, text, s => s, okTitle, opts || {});
 }
 
-/* Why a change of base cannot be written now, or null. */
+/* Why a change of base (a crontab as shown) cannot be written now, or null. */
 function refuse(base, readOnly) {
     if (state.busy) return { ok: false, error: T.stillBusy };
     if (loading) return { ok: false, error: T.stillLoading };
-    if (state.root.status !== "ok") return { ok: false, conflict: true };
-    if (!base || base.status !== "ok" || readOnly || (base !== state.root && base.text !== state.root.text))
-        return conflict();
+    const user = base && base.user;
+    const current = user ? crontabOf(user) : null;
+    if (!current || current.status !== "ok") return { ok: false, conflict: true };
+    if (base.status !== "ok" || readOnly || (base !== current && base.text !== current.text))
+        return conflict(user);
     return null;
 }
 
 /* next: the new text; same: how it compares with what crontab -l gives back. */
 async function write(base, next, same, okTitle, opts) {
     if (next === same(base.text)) return { ok: true, unchanged: true };
+    const user = base.user;
 
     state.busy = true;
     closeMenu(false);
@@ -224,12 +264,12 @@ async function write(base, next, same, okTitle, opts) {
     try {
         let backup;
         try {
-            backup = await saveRoot(base.text, next, opts.timer, opts.stopTimer);
+            backup = await saveCrontab(user, base.text, next, opts.timer, opts.stopTimer);
         } catch (ex) {
-            if (isDenied(ex)) { state.root = { status: "denied" }; return { ok: false, conflict: true }; }
+            if (isDenied(ex)) { loadPending = true; return { ok: false, conflict: true }; }
             if (ex && ex.exit_status === 3) {
-                try { setRoot(await readRoot()); } catch (_) { loadPending = true; }
-                return conflict();
+                try { setCrontab(user, await readCrontab(user)); } catch (_) { loadPending = true; }
+                return conflict(user);
             }
             if (ex && ex.exit_status === 4) return { ok: false, error: T.lockBusy };
             if (ex && ex.exit_status === 5)
@@ -237,10 +277,10 @@ async function write(base, next, same, okTitle, opts) {
             if (ex && ex.exit_status === 7) return { ok: false, error: errText(ex), timerFailed: true };
             return { ok: false, error: errText(ex) };
         }
-        const saved = backup ? T.backupAt(codeSafe(backup)) : T.noBackup;
+        const saved = backup ? T.backupAt(codeSafe(backup)) : T.noBackup(user);
         let after = null;
-        try { after = await readRoot(); } catch (_) { loadPending = true; }
-        if (after !== null) setRoot(after);
+        try { after = await readCrontab(user); } catch (_) { loadPending = true; }
+        if (after !== null) setCrontab(user, after);
         const verified = after !== null && same(after.text) === next;
         if (!verified) {
             showAlert("warning", T.unverifiedTitle, [rich(T.unverifiedBody), " ", rich(saved)]);
@@ -256,20 +296,20 @@ async function write(base, next, same, okTitle, opts) {
     }
 }
 
-function conflict() {
-    showAlert("warning", T.conflictTitle, T.conflictBody);
-    if (state.root.status === "ok" && !loading && !state.busy) renderRoot();
+function conflict(user) {
+    showAlert("warning", T.conflictTitle, T.conflictBody(user));
+    if (!loading && !state.busy) renderCrontabs();
     return { ok: false, conflict: true };
 }
 
 function reportResult(res) {
     if (res.error) showAlert("danger", T.saveErrorTitle, res.error);
-    if (!res.ok) renderRoot();
+    if (!res.ok) renderCrontabs();
 }
 
-export async function toggle(i, enabled) {
-    const base = state.root;
-    const line = base.entries && base.entries[i] ? base.entries[i].line : null;
+export async function toggle(user, i, enabled) {
+    const base = crontabOf(user);
+    const line = base && base.entries && base.entries[i] ? base.entries[i].line : null;
     const res = await commit(base, entries => {
         const e = jobAt(entries, i, line);
         if (!e) return null;
@@ -279,7 +319,7 @@ export async function toggle(i, enabled) {
     }, enabled ? T.okEnabled : T.okDisabled);
     reportResult(res);
     if (res.ok) refreshRuns();
-    restoreFocus("toggle:" + i);
+    restoreFocus(keyOf(user, "toggle", i));
 }
 
 /* Turns recording on or off for one job. Off also deletes its recorded runs. */

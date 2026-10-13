@@ -76,7 +76,7 @@ for (const sh of SHELLS) {
     t(sh + ": back to cron writes the crontab, then stops and disables the timer", () => {
         const root = setup();
         fs.writeFileSync(path.join(root, "root.crontab"), BEFORE);
-        const r = run(sh, root, save(root), [C.cksum(BEFORE), "trim.timer", "stop"], { input: AFTER });
+        const r = run(sh, root, save(root), ["root", C.cksum(BEFORE), "trim.timer", "stop"], { input: AFTER });
         assert.strictEqual(r.rc, 0, r.err);
         assert.strictEqual(read(root, "root.crontab"), AFTER);
         assert.strictEqual(read(root, "systemctl.log"), "disable --now trim.timer\n");
@@ -88,7 +88,7 @@ for (const sh of SHELLS) {
     t(sh + ": when the timer cannot be stopped, the crontab is put back byte for byte", () => {
         const root = setup();
         fs.writeFileSync(path.join(root, "root.crontab"), BEFORE);
-        const r = run(sh, root, save(root), [C.cksum(BEFORE), "trim.timer", "stop"], { input: AFTER, env: { FAKE_FAIL: "disable" } });
+        const r = run(sh, root, save(root), ["root", C.cksum(BEFORE), "trim.timer", "stop"], { input: AFTER, env: { FAKE_FAIL: "disable" } });
         assert.strictEqual(r.rc, 7);
         assert.ok(/Access denied/.test(r.err), r.err);
         assert.strictEqual(read(root, "root.crontab"), BEFORE);
@@ -97,7 +97,7 @@ for (const sh of SHELLS) {
     t(sh + ": a conversion still enables and starts the timer", () => {
         const root = setup();
         fs.writeFileSync(path.join(root, "root.crontab"), AFTER);
-        const r = run(sh, root, save(root), [C.cksum(AFTER), "trim.timer"], { input: BEFORE });
+        const r = run(sh, root, save(root), ["root", C.cksum(AFTER), "trim.timer"], { input: BEFORE });
         assert.strictEqual(r.rc, 0, r.err);
         assert.strictEqual(read(root, "root.crontab"), BEFORE);
         assert.strictEqual(read(root, "systemctl.log"), "enable --now trim.timer\n");
@@ -105,7 +105,7 @@ for (const sh of SHELLS) {
 
     t(sh + ": without a crontab before, a failed timer leaves none", () => {
         const root = setup();
-        const r = run(sh, root, save(root), [C.cksum(""), "trim.timer"], { input: AFTER, env: { FAKE_FAIL: "enable" } });
+        const r = run(sh, root, save(root), ["root", C.cksum(""), "trim.timer"], { input: AFTER, env: { FAKE_FAIL: "enable" } });
         assert.strictEqual(r.rc, 7);
         assert.strictEqual(read(root, "root.crontab"), null);
     });
@@ -113,7 +113,7 @@ for (const sh of SHELLS) {
     t(sh + ": a crontab changed meanwhile is not touched", () => {
         const root = setup();
         fs.writeFileSync(path.join(root, "root.crontab"), BEFORE + "0 4 * * * other\n");
-        const r = run(sh, root, save(root), [C.cksum(BEFORE), "trim.timer", "stop"], { input: AFTER });
+        const r = run(sh, root, save(root), ["root", C.cksum(BEFORE), "trim.timer", "stop"], { input: AFTER });
         assert.strictEqual(r.rc, 3);
         assert.strictEqual(read(root, "root.crontab"), BEFORE + "0 4 * * * other\n");
         assert.strictEqual(read(root, "systemctl.log"), null);

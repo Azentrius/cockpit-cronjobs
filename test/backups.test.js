@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-/* Tests for the backups of the root crontab: the difference (src/lib/backups.js)
- * against GNU diff, the list as BACKUPS_SCRIPT (src/app/system.js) prints it, with
- * dash and bash, and restoring through SAVE_SCRIPT: restoring and restoring back
- * gives the original bytes. Run with: node test/backups.test.js */
+/* Tests for the backups of the crontabs: the difference (src/lib/backups.js) against
+ * GNU diff, the list as BACKUPS_SCRIPT (src/app/system.js) prints it, with dash and
+ * bash, SAVE_SCRIPT for root's crontab and another user's, and restoring: restoring
+ * and restoring back gives the original bytes. Run with: node test/backups.test.js */
 "use strict";
 const assert = require("assert");
 const fs = require("fs");
@@ -200,16 +200,19 @@ function appScript(name, values) {
 const listScript = root => appScript("BACKUPS_SCRIPT", { BACKUP_DIR: root + "/state/backups", STATE_DIR: root + "/state" });
 const saveScript = root => appScript("SAVE_SCRIPT", { BACKUP_DIR: root + "/state/backups", STATE_DIR: root + "/state", KEEP_BACKUPS: 10 });
 
-/* A fake root: bin/crontab keeps root's crontab in root.crontab. */
+/* A fake root: bin/crontab keeps each user's crontab in crontabs/USER (as
+   crontab -l -u, crontab -u USER FILE and crontab -r -u do). SAVE_SCRIPT checks users
+   with id, so the second user is one every Linux system has. */
+const OTHER = "nobody";
 function setup() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-backups-"));
-    ["bin", "state"].forEach(d => fs.mkdirSync(path.join(root, d), { recursive: true }));
+    ["bin", "state", "crontabs"].forEach(d => fs.mkdirSync(path.join(root, d), { recursive: true }));
     fs.writeFileSync(path.join(root, "bin", "crontab"),
         "#!/bin/sh\n" +
-        "f=\"$FAKE/root.crontab\"\n" +
-        "case \"$1 $2 $3\" in\n" +
-        "  '-l -u root') [ -f \"$f\" ] || { echo 'no crontab for root' >&2; exit 1; }; cat \"$f\" ;;\n" +
-        "  '-u root '*) cat \"$3\" > \"$f\" ;;\n" +
+        "case \"$1\" in\n" +
+        "  -l) f=\"$FAKE/crontabs/$3\"; [ -f \"$f\" ] || { echo \"no crontab for $3\" >&2; exit 1; }; cat \"$f\" ;;\n" +
+        "  -u) cat \"$3\" > \"$FAKE/crontabs/$2\" ;;\n" +
+        "  -r) rm -f \"$FAKE/crontabs/$3\" ;;\n" +
         "  *) echo \"fake crontab: $*\" >&2; exit 2 ;;\n" +
         "esac\n", { mode: 0o755 });
     return root;
@@ -222,19 +225,23 @@ function run(shell, root, script, args, input) {
     });
     return { rc: r.status, out: r.stdout, err: r.stderr.toString() };
 }
+const tabPath = (root, user) => path.join(root, "crontabs", user || "root");
+const crontab = (root, user) => fs.readFileSync(tabPath(root, user));
 /* What the page does: read the list, then write a backup's text through SAVE_SCRIPT
    (Cockpit passes the text on as UTF-8). */
-function list(shell, root) {
-    const r = run(shell, root, listScript(root), []);
+function list(shell, root, user) {
+    const r = run(shell, root, listScript(root), [user || "root"]);
     assert.strictEqual(r.rc, 0, r.err);
-    return B.parseBackups(new Uint8Array(r.out));
+    return B.parseBackups(new Uint8Array(r.out), user || "root");
 }
-function save(shell, root, text) {
-    const cur = fs.existsSync(path.join(root, "root.crontab")) ? fs.readFileSync(path.join(root, "root.crontab"), "utf8") : "";
-    const r = run(shell, root, saveScript(root), [C.cksum(cur)], Buffer.from(text, "utf8"));
+function save(shell, root, text, user) {
+    const f = tabPath(root, user);
+    const cur = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
+    const r = run(shell, root, saveScript(root), [user || "root", C.cksum(cur)], Buffer.from(text, "utf8"));
     assert.strictEqual(r.rc, 0, r.err);
+    return r.out.toString().trim();
 }
-const crontab = root => fs.readFileSync(path.join(root, "root.crontab"));
+const mode = p => (fs.statSync(p).mode & 0o777).toString(8);
 
 if (SHELLS.length === 0 || !HAVE_FLOCK) {
     console.log("skipped the root scripts: needs flock and dash or bash");
@@ -269,38 +276,70 @@ if (SHELLS.length === 0 || !HAVE_FLOCK) {
 
         t(sh + ": no backups yet", () => {
             const root = setup();
-            const r = run(sh, root, listScript(root), []);
+            const r = run(sh, root, listScript(root), ["root"]);
             assert.strictEqual(r.rc, 0, r.err);
             assert.strictEqual(r.out.length, 0);
         });
 
         /* The done criterion of stage 2: restoring and restoring back gives the
            original bytes, and each restore can be undone the same way. */
-        t(sh + ": restoring and restoring back gives the original bytes", () => {
-            const root = setup();
-            const A = TEMPLATE + "MAILTO=\"\"\n# ü, tabs\tand spaces at the end  \n30 2 * * * /usr/local/bin/backup.sh\n\n";
-            const Bt = A.replace("30 2", "45 3") + "0 * * * * /bin/true\n";
-            fs.writeFileSync(path.join(root, "root.crontab"), A);
-            const original = crontab(root);
-            save(sh, root, Bt);
-            const changedBytes = crontab(root);
-            let got = list(sh, root);
-            assert.strictEqual(got.length, 1);
-            assert.strictEqual(got[0].text, A);
-            save(sh, root, got[0].text);
-            assert.ok(crontab(root).equals(original), "restored byte for byte");
-            got = list(sh, root);
-            assert.deepStrictEqual(got.map(b => b.text), [Bt, A], "the version before the restore is the newest backup");
-            save(sh, root, got[0].text);
-            assert.ok(crontab(root).equals(changedBytes), "restored back byte for byte");
-        });
+        for (const user of ["root", OTHER]) {
+            t(sh + ": " + user + ": restoring and restoring back gives the original bytes", () => {
+                const root = setup();
+                const A = TEMPLATE + "MAILTO=\"\"\n# ü, tabs\tand spaces at the end  \n30 2 * * * /usr/local/bin/backup.sh\n\n";
+                const Bt = A.replace("30 2", "45 3") + "0 * * * * /bin/true\n";
+                fs.writeFileSync(tabPath(root, user), A);
+                const original = crontab(root, user);
+                save(sh, root, Bt, user);
+                const changedBytes = crontab(root, user);
+                let got = list(sh, root, user);
+                assert.strictEqual(got.length, 1);
+                assert.strictEqual(got[0].text, A);
+                save(sh, root, got[0].text, user);
+                assert.ok(crontab(root, user).equals(original), "restored byte for byte");
+                got = list(sh, root, user);
+                assert.deepStrictEqual(got.map(b => b.text), [Bt, A], "the version before the restore is the newest backup");
+                save(sh, root, got[0].text, user);
+                assert.ok(crontab(root, user).equals(changedBytes), "restored back byte for byte");
+            });
+        }
 
         t(sh + ": ten backups are kept, newest first", () => {
             const root = setup();
-            fs.writeFileSync(path.join(root, "root.crontab"), "# version 0\n");
+            fs.writeFileSync(tabPath(root), "# version 0\n");
             for (let i = 1; i <= 12; i++) save(sh, root, "# version " + i + "\n");
             const got = list(sh, root);
             assert.deepStrictEqual(got.map(b => b.text), Array.from({ length: 10 }, (_, i) => "# version " + (11 - i) + "\n"));
+        });
+
+        /* Stage 3: another user's crontab, with its own backups next to root's. */
+        t(sh + ": another user's crontab: written as that user's, backups of its own", () => {
+            const root = setup();
+            fs.writeFileSync(tabPath(root), "# root 0\n");
+            fs.writeFileSync(tabPath(root, OTHER), "# other 0\n");
+            for (let i = 1; i <= 12; i++) {
+                save(sh, root, "# other " + i + "\n", OTHER);
+                if (i <= 2) save(sh, root, "# root " + i + "\n");
+            }
+            assert.strictEqual(crontab(root, OTHER).toString(), "# other 12\n");
+            assert.strictEqual(crontab(root).toString(), "# root 2\n");
+            const dir = path.join(root, "state", "backups", "users", OTHER);
+            assert.deepStrictEqual(list(sh, root, OTHER).map(b => b.text),
+                                   Array.from({ length: 10 }, (_, i) => "# other " + (11 - i) + "\n"));
+            assert.deepStrictEqual(list(sh, root).map(b => b.text), ["# root 1\n", "# root 0\n"], "root's list holds root's only");
+            assert.ok(fs.readdirSync(dir).every(n => B.backupOf(n, OTHER)), fs.readdirSync(dir).join(" "));
+            assert.deepStrictEqual([mode(path.join(root, "state", "backups")), mode(path.join(root, "state", "backups", "users")),
+                                    mode(dir), mode(path.join(dir, fs.readdirSync(dir)[0]))], ["700", "700", "700", "600"]);
+        });
+
+        t(sh + ": names the scripts refuse, and users the system does not know", () => {
+            const root = setup();
+            for (const bad of ["", "-r", "a b", "../x", "x/y", ".hidden", "a$b", "no-such-user-cronjobs"]) {
+                const r = run(sh, root, saveScript(root), [bad, C.cksum("")], "# x\n");
+                assert.strictEqual(r.rc, 2, JSON.stringify(bad) + " " + r.err);
+                if (bad !== "no-such-user-cronjobs") assert.strictEqual(run(sh, root, listScript(root), [bad]).rc, 2, JSON.stringify(bad));
+            }
+            assert.deepStrictEqual(fs.readdirSync(path.join(root, "crontabs")), [], "nothing written");
         });
     }
 
@@ -315,7 +354,7 @@ if (SHELLS.length === 0 || !HAVE_FLOCK) {
             const until = Date.now() + 5000;
             while (!fs.existsSync(held) && Date.now() < until) spawnSync("sleep", ["0.05"]);
             assert.ok(fs.existsSync(held), "lock held");
-            const r = run(SHELLS[0], root, listScript(root), []);
+            const r = run(SHELLS[0], root, listScript(root), ["root"]);
             assert.strictEqual(r.rc, 4);
             assert.strictEqual(r.out.length, 0);
         } finally {

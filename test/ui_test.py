@@ -178,7 +178,7 @@ with sync_playwright() as p:
     check(page.locator("#crond-body .az-label--warning").nth(1).get_attribute("title").startswith("cron überspringt diese Datei, weil"),
           "owner reason as hint")
     check(not page.locator("#etc-card").is_hidden() and not page.locator("#crond-card").is_hidden(), "/etc/crontab and /etc/cron.d")
-    check(not page.locator("#users-card").is_hidden() and "www-data" in page.inner_text("#users-body"), "users card")
+    check(page.locator("#users-card").is_hidden(), "other users are not in the read-only list: their crontabs have cards")
     check("logrotate" in page.inner_text("#periodic-body") and "keine" in page.inner_text("#periodic-body"), "periodic scripts")
     check(page.locator("#tl-card").is_hidden() and page.locator("#timers-card").is_hidden(), "only the System cards")
     shot(page, "de-light-1280-system")
@@ -738,6 +738,108 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (backups, dark): " + repr(page.problems))
     page.context.close()
 
+    # ---------- crontabs of other users (with administrative access only) ----------
+    page = open_page(browser)
+    www = "*/5 * * * * php -f /var/www/nextcloud/cron.php\n"
+    card = page.locator("#user-crontabs section[data-user='www-data']")
+    check(card.count() == 1 and page.inner_text("#user-crontabs h2") == "Crontab von www-data",
+          "a card for the crontab of www-data under root's")
+    check("crontab -u www-data" in card.locator(".az-card__desc").inner_text() and "als www-data" in card.inner_text(),
+          "the card says how it is changed and as whom the jobs run: " + card.locator(".az-card__desc").inner_text())
+    check(card.locator("tbody tr").count() == 1 and "Alle 5 Minuten" in card.inner_text(), "its job")
+    check(card.locator("[data-key^='run:'], [data-key^='capture:']").count() == 0 and "Nicht erfasst" in card.inner_text(),
+          "no run now and no recording for other users (yet)")
+    show_tab(page, "system")
+    check(page.locator("#users-card").is_hidden(), "nothing left for the read-only list of other users")
+    show_tab(page, "overview")
+    # switch off: exactly one line changes, the backup goes to the user's own directory
+    card.locator("[data-key='toggle:www-data:0']").click()
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == "#[cronjobs:off] " + www, "switched off: " + repr(mock(page, "sys.users['www-data']")))
+    check(mock(page, "userWrites.length") == 1 and mock(page, "userWrites[0].user") == "www-data", "written as www-data's crontab")
+    check("Job ausgeschaltet" in page.inner_text("#alerts") and
+          "/var/lib/cockpit-cronjobs/backups/users/www-data/www-data-" in page.inner_text("#alerts"),
+          "own backup: " + page.inner_text("#alerts"))
+    check(focused_key(page) == "toggle:www-data:0", "focus stays on the switch: " + repr(focused_key(page)))
+    card.locator("[data-key='toggle:www-data:0']").click()
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == www, "switched on again: the bytes from before")
+    # edit: the dialog names the crontab, there is no recording, the help says as whom it runs
+    card.locator("[data-key='edit:www-data:0']").click()
+    check(page.inner_text("#edit-title") == "Job bearbeiten" and page.inner_text("#edit-sub") == "Crontab von www-data",
+          "edit dialog names the crontab")
+    check(page.locator("#f-capture-field").is_hidden() and "Läuft als www-data" in page.inner_text("#f-command-help"),
+          "no recording; runs as www-data: " + page.inner_text("#f-command-help"))
+    page.fill("#f-schedule", "*/10 * * * *")
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#edit-dlg').hidden")
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == www.replace("*/5", "*/10"), "edited: " + repr(mock(page, "sys.users['www-data']")))
+    # add, then delete
+    card.locator("[data-key='add:www-data']").click()
+    check(page.inner_text("#edit-title") == "Job hinzufügen" and not page.is_checked("#f-capture"), "add dialog for www-data")
+    page.fill("#f-schedule", "0 4 * * *")
+    page.fill("#f-command", "/usr/bin/php /var/www/nextcloud/occ files:scan --all")
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#edit-dlg').hidden")
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']").endswith("0 4 * * * /usr/bin/php /var/www/nextcloud/occ files:scan --all\n"),
+          "added: " + repr(mock(page, "sys.users['www-data']")))
+    check(focused_key(page) == "edit:www-data:1", "focus on the new job: " + repr(focused_key(page)))
+    check("occ" in page.locator("#tl-card .cron-tl-name").all_inner_texts(), "the new job in the timeline right away")
+    card.locator("[data-key='more:www-data:1']").click()
+    items = page.locator("#row-menu [role=menuitem]").all_inner_texts()
+    check([x.strip() for x in items] == ["Löschen"], "menu of another user's job: delete only: " + repr(items))
+    page.locator(".cron-menu__item", has_text="Löschen").click()
+    check("aus der Crontab von www-data" in page.inner_text("#del-intro") and
+          "/var/lib/cockpit-cronjobs/backups/users/www-data/" in page.inner_text("#del-backup"), "delete names the crontab")
+    page.click("#del-confirm")
+    wait_js(page, "document.querySelector('#del-dlg').hidden")
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == www.replace("*/5", "*/10"), "deleted")
+    # backups of www-data: restore the first version
+    card.locator("[data-key='backups:www-data']").click()
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length >= 3")
+    check(page.inner_text("#bk-title") == "Sicherungen der Crontab von www-data" and
+          "/var/lib/cockpit-cronjobs/backups/users/www-data/" in page.inner_text("#bk-note"), "backups dialog of www-data")
+    names = page.locator("#bk-body tbody tr td:first-child .az-mono").all_inner_texts()
+    check(all(n.startswith("www-data-") for n in names), "only www-data's backups: " + repr(names))
+    oldest = names[-1]
+    page.click(f"[data-key='bk:{oldest}']")
+    page.click(f"[data-key='restore:{oldest}']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == www, "restored the first version byte for byte")
+    check(focused_key(page) == "backups:www-data", "focus back on the backups button: " + repr(focused_key(page)))
+    page.click("#backups")
+    wait_js(page, "!document.querySelector('#bk-dlg').hidden && document.querySelector('#bk-body .cron-state')")
+    wait_js(page, "document.querySelector('#bk-body').innerText.includes('Noch keine')")
+    check(page.inner_text("#bk-title") == "Sicherungen der root-Crontab", "root's backups are still root's own")
+    page.click("#bk-close-btn")
+    # changed outside the page meanwhile: nothing written, the page says so
+    page.evaluate("t => { window.__mock.userConflictNext = t; }", www + "# by hand\n")
+    card.locator("[data-key='toggle:www-data:0']").click()
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == www + "# by hand\n", "changed meanwhile: nothing written")
+    check("Die Crontab von www-data wurde außerhalb" in page.inner_text("#alerts"), "conflict names the crontab: " + page.inner_text("#alerts"))
+    check(not page.problems, "no console problems (other users): " + repr(page.problems))
+    page.context.close()
+    # a user cron cannot read gets an error card; a name the page does not take stays read-only under System
+    page = open_page(browser)
+    page.evaluate("""() => { window.__mock.sys.users['ghost'] = null;
+                             window.__mock.sys.users['bad name'] = '0 1 * * * /bin/true\\n'; }""")
+    page.click("#reload")
+    wait_idle(page)
+    ghost = page.locator("#user-crontabs section[data-user='ghost']")
+    check(ghost.count() == 1 and "Die Crontab von ghost ließ sich nicht lesen" in ghost.inner_text() and "unknown" in ghost.inner_text(),
+          "unreadable crontab: " + (ghost.inner_text() if ghost.count() else "no card"))
+    check(page.locator("#user-crontabs section[data-user='bad name']").count() == 0, "no card for a name the scripts refuse")
+    show_tab(page, "system")
+    check(not page.locator("#users-card").is_hidden() and "bad name" in page.inner_text("#users-body") and
+          "www-data" not in page.inner_text("#users-body"), "read-only list: only what the page cannot change")
+    check(not page.problems, "no console problems (other users, read-only): " + repr(page.problems))
+    page.context.close()
+
     # ---------- run now ----------
     page = open_page(browser)
     extra = ("PATH=/usr/local/bin:/usr/bin:/bin\n0 4 * * * /opt/fail.sh\n0 6 * * * sleep 600\n"
@@ -1107,6 +1209,7 @@ with sync_playwright() as p:
     check(not page.locator("#tl-card").is_hidden(), "timeline without admin")
     show_tab(page, "system")
     check(page.locator("#users-card").is_hidden(), "users card hidden without admin")
+    check(page.locator("#user-crontabs").is_hidden(), "no crontabs of other users without admin")
     check(not page.locator("#etc-card").is_hidden(), "system crontabs without admin")
     show_tab(page, "timers")
     check(not page.locator("#timers-card").is_hidden(), "timers without admin")
@@ -1114,8 +1217,7 @@ with sync_playwright() as p:
     shot(page, "de-light-denied")
     page.evaluate("() => window.__mock.setSuperuser('sudo')")
     wait_js(page, "document.querySelectorAll('#root-body tbody tr').length === 5")
-    show_tab(page, "system")
-    check(not page.locator("#users-card").is_hidden(), "users card after admin")
+    check(page.locator("#user-crontabs section[data-user='www-data']").count() == 1, "crontab of www-data after admin")
     page.context.close()
 
     # ---------- empty crontab ----------

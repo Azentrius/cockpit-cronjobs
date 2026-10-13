@@ -1,4 +1,4 @@
-/* Cron Jobs: backups of the root crontab: the list, what restoring one would change
+/* Cron Jobs: backups of a crontab: the list, what restoring one would change
  * (line by line, as diff shows it), and restoring it through the same locked step as
  * every other change, which first saves the current version, so that a restore can be
  * undone the same way.
@@ -6,23 +6,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, B, BACKUP_DIR, cap, fill, fmtWhen, h, icon, KEEP_BACKUPS, rich, state, T } from "./core.js";
+import { $, B, backupDirOf, cap, fill, fmtWhen, h, icon, KEEP_BACKUPS, rich, state, T } from "./core.js";
 import { errText, isDenied, readBackups } from "./system.js";
-import { loading, restoreRoot } from "./crontab.js";
+import { crontabOf, loading, restoreCrontab } from "./crontab.js";
 import { showAlert } from "./page.js";
 import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
 
 /* Unchanged lines shown around a change. */
 const CONTEXT = 3;
 
-export function openBackups(openerKey) {
-    if (state.busy || loading || state.root.status !== "ok") return;
+/* The backups of user's crontab. */
+export function openBackups(user, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok") return;
     dialogError("bk-alert", null);
-    openDialog($("bk-dlg"), openerKey, { kind: "backups", base: state.root, list: null, error: null, open: null, diffs: {} },
+    $("bk-title").textContent = T.backupsTitle(user);
+    $("bk-intro").textContent = T.backupsIntro(user);
+    openDialog($("bk-dlg"), openerKey, { kind: "backups", base, list: null, error: null, open: null, diffs: {} },
                $("bk-close-btn"));
     const d = dialog;
     renderBackups();
-    readBackups().then(list => { d.list = list; }, ex => {
+    readBackups(user).then(list => { d.list = list; }, ex => {
         d.error = isDenied(ex) ? T.deniedTitle : ex && ex.exit_status === 4 ? T.lockBusy : errText(ex);
     }).finally(() => { if (dialog === d) renderBackups(); });
 }
@@ -38,7 +42,7 @@ function diffOf(d, b) {
 function renderBackups() {
     const d = dialog;
     if (!d || d.kind !== "backups") return;
-    fill($("bk-note"), rich(T.backupsNote(KEEP_BACKUPS, BACKUP_DIR + "/")));
+    fill($("bk-note"), rich(T.backupsNote(KEEP_BACKUPS, backupDirOf(d.base.user) + "/")));
     const body = $("bk-body");
     const focusedKey = document.activeElement && body.contains(document.activeElement)
         ? document.activeElement.dataset.key : null;
@@ -97,11 +101,12 @@ function changeCell(n) {
 /* What restoring would change, and the button that does it. */
 function detail(d, b, ops, n, id) {
     const same = n.removed + n.added === 0;
-    const blocked = state.root.notUtf8;
+    const user = d.base.user;
+    const blocked = d.base.notUtf8;
     return h("div", { class: "cron-bk-detail", id },
-        same ? h("p", { class: "cron-muted" }, T.backupSameBody)
-            : [h("p", null, rich(T.diffIntro)), diffView(ops)],
-        blocked ? h("p", { class: "cron-muted cron-small" }, T.restoreEncoding) : null,
+        same ? h("p", { class: "cron-muted" }, T.backupSameBody(user))
+            : [h("p", null, rich(T.diffIntro(user))), diffView(ops)],
+        blocked ? h("p", { class: "cron-muted cron-small" }, T.restoreEncoding(user)) : null,
         h("div", { class: "cron-copy-row" },
             h("button", { class: "az-btn az-btn--primary az-btn--sm", type: "button", "data-key": "restore:" + b.name,
                           "aria-busy": d.locked === b.name ? "true" : "false",
@@ -143,7 +148,7 @@ async function restore(name) {
     dialogError("bk-alert", null);
     closers.forEach(x => { x.disabled = true; });
     renderBackups();
-    const res = await restoreRoot(d.base, b.text, T.okRestored(when), { quiet: true });
+    const res = await restoreCrontab(d.base, b.text, T.okRestored(when), { quiet: true });
     d.locked = false;
     closers.forEach(x => { x.disabled = false; });
     if (res.ok || res.conflict) {

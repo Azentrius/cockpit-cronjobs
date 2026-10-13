@@ -1,9 +1,10 @@
-/* Cron Jobs: backups of the root crontab (no DOM, no Cockpit).
+/* Cron Jobs: backups of the crontabs (no DOM, no Cockpit).
  *
- * Before every change, SAVE_SCRIPT (app/system.js) copies the root crontab to
- * /var/lib/cockpit-cronjobs/backups/root-YYYYMMDD-HHMMSS[-N].crontab and keeps the last
- * ten. BACKUPS_SCRIPT prints all of them in one go; this parses that output and
- * compares two versions line by line, the way diff does.
+ * Before every change, SAVE_SCRIPT (app/system.js) copies the crontab to
+ * /var/lib/cockpit-cronjobs/backups/root-YYYYMMDD-HHMMSS[-N].crontab (root's) or
+ * /var/lib/cockpit-cronjobs/backups/users/USER/USER-YYYYMMDD-HHMMSS[-N].crontab and
+ * keeps the last ten of each. BACKUPS_SCRIPT prints those of one user in one go; this
+ * parses that output and compares two versions line by line, the way diff does.
  *
  * Loaded in the browser as window.CronBackups and in Node via require().
  *
@@ -16,7 +17,13 @@
 }(typeof self !== "undefined" ? self : this, function () {
     "use strict";
 
-    const NAME_RE = /^root-\d{8}-\d{6}(?:-\d+)?\.crontab$/;
+    /* What follows "USER-" in the name of a backup. */
+    const STAMP_RE = /^\d{8}-\d{6}(?:-\d+)?\.crontab$/;
+
+    /* Whether name is the name of a backup of user's crontab. */
+    function backupOf(name, user) {
+        return name.startsWith(user + "-") && STAMP_RE.test(name.slice(user.length + 1));
+    }
 
     /* ---------- the list ---------- */
 
@@ -25,9 +32,11 @@
        Result: the backups in that order (the script knows it to the nanosecond, as
        SAVE_SCRIPT does; names are reused once old ones are gone): { name, mtime (ms),
        size, text } where text is null when the file is not UTF-8 (it can then neither
-       be compared nor restored here). Throws when the output does not have this
+       be compared nor restored here). Files whose names are not backups of user's
+       crontab (default root) are left out. Throws when the output does not have this
        shape. */
-    function parseBackups(bytes) {
+    function parseBackups(bytes, user) {
+        user = user || "root";
         const list = [];
         let pos = 0;
         while (pos < bytes.length) {
@@ -40,7 +49,7 @@
             const body = bytes.subarray(nl + 1, nl + 1 + size);
             if (body.length !== size) throw new Error("file shorter than its size");
             pos = nl + 1 + size;
-            if (!NAME_RE.test(m[3])) continue;
+            if (!backupOf(m[3], user)) continue;
             let text = null;
             try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body); } catch (_) { text = null; }
             list.push({ name: m[3], mtime: +m[1] * 1000, size, text });
@@ -216,5 +225,5 @@
         return out;
     }
 
-    return { NAME_RE, parseBackups, lines, diff, counts, hunks };
+    return { backupOf, parseBackups, lines, diff, counts, hunks };
 }));

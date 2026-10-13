@@ -7,7 +7,7 @@
 import {
     $, C, clock, codeSafe, DAY, fill, h, icon, joinList, lowerFirst, pad2, rich, S, SD, state, T, weekdayShort,
 } from "./core.js";
-import { jobInfo, jobTz, rootJobs } from "./crontab.js";
+import { jobInfo, jobsOf, jobTz, rootJobs } from "./crontab.js";
 import { describe } from "./page.js";
 
 /* ---------- timeline ---------- */
@@ -29,7 +29,13 @@ function timelineRows(from, to) {
     if (state.sys) {
         state.sys.etc.forEach(j => addCron(C.jobName(j.command), "/etc/crontab", j.schedule, 1));
         state.sys.crond.forEach(j => { if (!j.ignored) addCron(j.file, "/etc/cron.d", j.schedule, 2); });
-        state.sys.users.forEach(j => { if (j.enabled) addCron(C.jobName(j.command), T.srcUser(j.user), j.schedule, 3, j.tz); });
+        /* Other users: as the page shows their crontabs (also right after a change), else as read */
+        Object.keys(state.users).forEach(user => jobsOf(state.users[user]).forEach(({ e, i }) => {
+            if (e.enabled) addCron(C.jobName(e.command), T.srcUser(user), e.schedule, 3, jobTz(state.users[user].entries, i));
+        }));
+        state.sys.users.forEach(j => {
+            if (j.enabled && !state.users[j.user]) addCron(C.jobName(j.command), T.srcUser(j.user), j.schedule, 3, j.tz);
+        });
     }
     state.timers.list.forEach(t => {
         if (!t.active) return;
