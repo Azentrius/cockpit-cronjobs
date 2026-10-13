@@ -187,7 +187,7 @@
         commandHelpNoMta: user => `Runs as ${user}. No mail program is installed on this server, so the job's output is lost ` +
             (user === "root" ? "unless it records its runs or redirects it, e.g. `>> /var/log/myjob.log 2>&1`."
                 : "unless it redirects it, e.g. `>> $HOME/myjob.log 2>&1`."),
-        commandHelpNoMtaRecorded: "Runs as root. Its result and output are recorded.",
+        commandHelpNoMtaRecorded: user => `Runs as ${user}. Its result and output are recorded.`,
         percentWarn: "cron reads % as a line break and passes the rest as input. Write `\\%` for a percent sign, " +
                      "e.g. `date +\\%F`.",
 
@@ -315,6 +315,7 @@
         okRestored: when => `Version saved ${when} restored`,
         restoredUndo: "To undo it, restore the newest backup.",
         restoreFailed: "Restoring failed",
+        userRunsFailed: user => `The directory for the runs of ${user}'s jobs could not be made`,
 
         /* convert */
         convTitle: "Convert to systemd timer",

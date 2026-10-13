@@ -24,7 +24,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - **Crontabs of other users.** With administrative access, every other user's crontab gets a card of its
   own and is changed the same way, through `crontab -u USER`, with backups of its own; its jobs run as
   that user. Without administrative access they are not shown at all. Run now starts their jobs as that
-  user, in the user's home with cron's environment; recording and conversion are for root's jobs so far.
+  user, in the user's home with cron's environment, and their runs can be recorded; conversion to a
+  systemd timer is for root's jobs so far.
 - **Backups you can use.** The last ten versions of the root crontab, each with what restoring it would
   change, line by line as `diff` shows it. Restoring goes through the same locked step, after a backup of
   the current version, so a restore can be undone the same way.
@@ -99,6 +100,11 @@ The script runs the command with `$SHELL -c`, just as cron does, and passes the 
 from cron keeps working. It keeps the last 20 runs, each with up to 64 KiB of output, in
 `/var/lib/cockpit-cronjobs/runs/backup-1a2b/`. If it cannot record, the command runs anyway.
 
+A job of another user runs as that user, so it cannot write there: its runs go to
+`/var/lib/cockpit-cronjobs/users/USER/runs/`, a directory that belongs to the user (mode 700). Cron Jobs
+creates it when you turn on recording for the first job of that user; `/var/lib/cockpit-cronjobs` and
+`/var/lib/cockpit-cronjobs/users` are then mode 711, so the user can reach it but list nothing.
+
 - Commands with an unescaped `%` cannot be recorded (cron passes the text after `%` as input).
 - Turning recording off restores the plain line and deletes the recorded runs.
 - When a recorded line is changed or removed outside Cron Jobs, its runs are left over. They are listed
@@ -115,7 +121,8 @@ from cron keeps working. It keeps the last 20 runs, each with up to 64 KiB of ou
 |---|---|
 | `/var/lib/cockpit-cronjobs/backups/` | The last 10 versions of the root crontab (directory 700, files 600) |
 | `/var/lib/cockpit-cronjobs/backups/users/USER/` | The last 10 versions of the crontab of USER |
-| `/var/lib/cockpit-cronjobs/runs/` | Recorded runs |
+| `/var/lib/cockpit-cronjobs/runs/` | Recorded runs of root's jobs |
+| `/var/lib/cockpit-cronjobs/users/USER/runs/` | Recorded runs of the jobs of USER (owned by USER) |
 | `/usr/local/libexec/cockpit-cronjobs-run` | The run recorder |
 | `/etc/systemd/system/NAME.service`, `NAME.timer` | Jobs converted to systemd timers |
 | `/var/lib/cockpit-cronjobs/.crontab.lock` | Lock while the crontab is written |

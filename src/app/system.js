@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { B, BACKUP_DIR, C, DAY, KEEP_BACKUPS, KEEP_RUNS, R, RUNS_DIR, SD, state, STATE_DIR, T } from "./core.js";
-import { takenIds } from "./crontab.js";
+import { B, BACKUP_DIR, C, DAY, KEEP_BACKUPS, KEEP_RUNS, R, RUNS_DIR, SD, state, STATE_DIR, T, USER_RE } from "./core.js";
+import { crontabOf, takenIds } from "./crontab.js";
 import { renderNotices, showAlert } from "./page.js";
 
 /* ---------- system access ---------- */
@@ -67,7 +67,8 @@ export function readCrontab(user) {
    The current version is backed up first: root's in BACKUP_DIR, another user's in
    BACKUP_DIR/users/USER (directories 700, files 600, the last ten of each user are
    kept; a version that already is the newest backup is not stored twice). One lock
-   for all crontabs; it lives in a directory only root can write to. Closing the page
+   for all crontabs; it lives in a directory only root can write to (STATE_DIR, 711:
+   other users reach their runs below it, see USER_RUNS_SCRIPT). Closing the page
    does not interrupt the script (SIGTERM and SIGHUP are ignored).
    Output: path of the backup, empty when there was no crontab before.
    Exit 2 = not a user, 3 = changed meanwhile, 4 = locked, 5 = backup failed,
@@ -84,7 +85,7 @@ case $user in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
 id -u "$user" > /dev/null 2>&1 || exit 2
 dir='${BACKUP_DIR}'
 if [ "$user" != root ]; then dir=$dir/users/$user; fi
-install -d -m 700 '${STATE_DIR}' || exit 5
+install -d -m 711 '${STATE_DIR}' || exit 5
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -w 10 9 || exit 4
 tmp=$(mktemp -d)
@@ -104,7 +105,7 @@ sum=$(cksum < "$tmp/cur")
 f=
 if [ "$have" = 1 ]; then
   install -d -m 700 "$dir" || exit 5
-  chmod 700 '${STATE_DIR}' '${BACKUP_DIR}' "$dir" || exit 5
+  chmod 711 '${STATE_DIR}' && chmod 700 '${BACKUP_DIR}' "$dir" || exit 5
   if [ "$user" != root ]; then chmod 700 '${BACKUP_DIR}/users' || exit 5; fi
   last=$(ls -1t "$dir/$user"-*.crontab 2>/dev/null | head -n 1)
   if [ -n "$last" ] && [ "$(cksum < "$last")" = "$sum" ]; then
@@ -362,16 +363,14 @@ function parseSystem(out, flavor) {
     return sys;
 }
 
-/* Recorded runs of all jobs (see lib/runs.js), with the disk use of each
+/* Recorded runs of all jobs (see lib/runs.js): root's under RUNS_DIR (key ID), other
+   users' under STATE_DIR/users/USER/runs (key USER/ID), each with the disk use of its
    directory in KB. A run marker whose process is gone is reported with ALIVE 0. */
-const RUNS_SCRIPT = `base='${RUNS_DIR}'
-[ -d "$base" ] || exit 0
-for d in "$base"/*; do
-  [ -d "$d" ] || continue
-  printf '\\036%s\\n' "\${d##*/}"
-  printf 'size %s\\n' "$(du -sk "$d" 2>/dev/null | cut -f1)"
-  tail -n ${KEEP_RUNS} "$d/runs.jsonl" 2>/dev/null
-  for r in "$d"/*.running; do
+const RUNS_SCRIPT = `job() {
+  printf '\\036%s\\n' "$2"
+  printf 'size %s\\n' "$(du -sk "$1" 2>/dev/null | cut -f1)"
+  tail -n ${KEEP_RUNS} "$1/runs.jsonl" 2>/dev/null
+  for r in "$1"/*.running; do
     [ -f "$r" ] || continue
     pid=$(sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$r" | head -n 1)
     alive=0
@@ -379,6 +378,17 @@ for d in "$base"/*; do
       alive=1
     fi
     printf 'running %s %s\\n' "$alive" "$(head -n 1 "$r")"
+  done
+}
+for d in '${RUNS_DIR}'/*; do
+  [ -d "$d" ] && [ ! -L "$d" ] || continue
+  job "$d" "\${d##*/}"
+done
+for u in '${STATE_DIR}'/users/*; do
+  [ -d "$u/runs" ] && [ ! -L "$u" ] && [ ! -L "$u/runs" ] || continue
+  for d in "$u"/runs/*; do
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    job "$d" "\${u##*/}/\${d##*/}"
   done
 done
 exit 0
@@ -389,9 +399,12 @@ export function readRuns() {
         .then(out => R.parseRuns(decode(out)));
 }
 
-export function readOutput(id, out) {
-    if (!R.ID_RE.test(id) || !R.OUT_RE.test(out)) return Promise.resolve("");
-    return spawn(["tail", "-c", "65536", RUNS_DIR + "/" + id + "/" + out + ".out"],
+/* Where the runs of user's jobs are kept (see cockpit-cronjobs-run). */
+export const runsDirOf = user => user === "root" ? RUNS_DIR : STATE_DIR + "/users/" + user + "/runs";
+
+export function readOutput(user, id, out) {
+    if (!USER_RE.test(user) || !R.ID_RE.test(id) || !R.OUT_RE.test(out)) return Promise.resolve("");
+    return spawn(["tail", "-c", "65536", runsDirOf(user) + "/" + id + "/" + out + ".out"],
                  Object.assign({}, SPAWN_ROOT, { binary: true }))
         .then(decode, ex => {
             if (ex && ex.exit_status === 1) return "";
@@ -399,15 +412,44 @@ export function readOutput(id, out) {
         });
 }
 
-function removeRuns(id) {
-    if (!R.ID_RE.test(id)) return Promise.resolve();
-    return spawn(["rm", "-rf", "--", RUNS_DIR + "/" + id], SPAWN_ROOT);
+function removeRuns(user, id) {
+    if (!USER_RE.test(user) || !R.ID_RE.test(id)) return Promise.resolve();
+    return spawn(["rm", "-rf", "--", runsDirOf(user) + "/" + id], SPAWN_ROOT);
 }
 
-/* A copied line may share the ID; its runs stay as long as a line still uses them. */
-export function removeRunsIfUnused(id) {
-    if (state.root.status !== "ok" || takenIds(state.root.entries).has(id)) return Promise.resolve();
-    return removeRuns(id).catch(() => {});
+/* A copied line may share the ID; its runs stay as long as a line of user's crontab
+   still uses them. */
+export function removeRunsIfUnused(user, id) {
+    const tab = crontabOf(user);
+    if (!tab || tab.status !== "ok" || takenIds(tab.entries).has(id)) return Promise.resolve();
+    return removeRuns(user, id).catch(() => {});
+}
+
+/* Gives another user ($1) a directory for the runs of the user's jobs, which the run
+   recorder writes as that user: STATE_DIR/users/USER, owned by the user, mode 700.
+   STATE_DIR and STATE_DIR/users get mode 711, so the user can reach it but list
+   nothing. Exit 2 = not a user the system knows. */
+const USER_RUNS_SCRIPT = `set -eu
+user=$1
+case $user in ''|root|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
+id -u "$user" > /dev/null 2>&1 || exit 2
+umask 077
+s='${STATE_DIR}'
+mkdir -p "$s/users"
+chmod 711 "$s" "$s/users"
+d=$s/users/$user
+if [ ! -d "$d" ]; then mkdir "$d"; fi
+chown -h "$user:" "$d"
+chmod 700 "$d"
+`;
+
+/* Makes sure user has the directory before a job of the user is recorded; says so
+   when it cannot be made. Resolves to whether it is there. */
+export function ensureUserRuns(user) {
+    return spawn(["sh", "-c", USER_RUNS_SCRIPT, "cockpit-cronjobs", user], SPAWN_ROOT).then(() => true, ex => {
+        showAlert("danger", T.userRunsFailed(user), errText(ex));
+        return false;
+    });
 }
 
 /* Removes the run directories of recorded jobs that no crontab uses any more. Under
@@ -415,13 +457,12 @@ export function removeRunsIfUnused(id) {
    appears as a word anywhere in the root crontab, /etc/crontab, /etc/anacrontab,
    /etc/cron.d or another user's crontab ("used"), or while a run is going on
    ("running"). If one of these files cannot be read, nothing is removed.
-   Arguments: the IDs. Output: "removed|gone|used|running ID" for each.
-   Exit 4 = locked, else an error. */
+   Arguments: ID (root's runs) or USER/ID (another user's). Output:
+   "removed|gone|used|running ARGUMENT" for each. Exit 4 = locked, else an error. */
 const REMOVE_ORPHANS_SCRIPT = `set -u
 trap '' TERM HUP INT
 umask 077
-base='${RUNS_DIR}'
-[ -d "$base" ] || exit 0
+[ -d '${STATE_DIR}' ] || exit 0
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -w 10 9 || exit 4
 tmp=$(mktemp -d) || exit 1
@@ -434,14 +475,23 @@ for f in /etc/crontab /etc/anacrontab /etc/cron.d/* /var/spool/cron/crontabs/* /
   [ -f "$f" ] || continue
   { cat -- "$f" && echo; } >> "$tmp/all" || exit 1
 done
-for id in "$@"; do
+for key in "$@"; do
+  case $key in
+    */*)
+      user=\${key%%/*}
+      id=\${key#*/}
+      case $user in root|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) continue ;; esac
+      d='${STATE_DIR}'/users/$user/runs/$id ;;
+    *)
+      id=$key
+      d='${RUNS_DIR}'/$id ;;
+  esac
   case $id in ''|*[!A-Za-z0-9_-]*) continue ;; esac
   [ \${#id} -le 64 ] || continue
-  d=$base/$id
-  if [ ! -d "$d" ]; then echo "gone $id"; continue; fi
+  if [ ! -d "$d" ]; then echo "gone $key"; continue; fi
   grep -qE "(^|[^A-Za-z0-9_-])$id([^A-Za-z0-9_-]|\\$)" "$tmp/all"
   case $? in
-    0) echo "used $id"; continue ;;
+    0) echo "used $key"; continue ;;
     1) ;;
     *) exit 1 ;;
   esac
@@ -453,21 +503,22 @@ for id in "$@"; do
       alive=1
     fi
   done
-  if [ "$alive" = 1 ]; then echo "running $id"; continue; fi
+  if [ "$alive" = 1 ]; then echo "running $key"; continue; fi
   rm -rf -- "$d" || exit 1
-  echo "removed $id"
+  echo "removed $key"
 done
 exit 0
 `;
 
-/* Result: { removed: [ID…], kept: [ID…] }; "gone" counts as removed. */
-export function removeOrphans(ids) {
-    const args = ["sh", "-c", REMOVE_ORPHANS_SCRIPT, "cockpit-cronjobs"].concat(ids.filter(id => R.ID_RE.test(id)));
+/* keys: ID or USER/ID (see R.KEY_RE). Result: { removed: [key…], kept: [key…] };
+   "gone" counts as removed. */
+export function removeOrphans(keys) {
+    const args = ["sh", "-c", REMOVE_ORPHANS_SCRIPT, "cockpit-cronjobs"].concat(keys.filter(k => R.KEY_RE.test(k)));
     return spawn(args, SPAWN_ROOT).then(out => {
         const res = { removed: [], kept: [] };
         String(out || "").split("\n").forEach(line => {
-            const m = /^(removed|gone|used|running) ([A-Za-z0-9_-]{1,64})$/.exec(line);
-            if (m) (m[1] === "removed" || m[1] === "gone" ? res.removed : res.kept).push(m[2]);
+            const m = /^(removed|gone|used|running) (\S+)$/.exec(line);
+            if (m && R.KEY_RE.test(m[2])) (m[1] === "removed" || m[1] === "gone" ? res.removed : res.kept).push(m[2]);
         });
         return res;
     });

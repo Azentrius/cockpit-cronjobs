@@ -29,7 +29,7 @@
  */
 
 import { $, fill, icon, rich, state, T } from "./app/core.js";
-import { jobAt, loading, refreshRuns, requestLoad, watchSuperuser } from "./app/crontab.js";
+import { crontabOf, jobAt, loading, refreshRuns, requestLoad, watchSuperuser } from "./app/crontab.js";
 import { clearAlerts, updateNextRuns } from "./app/page.js";
 import {
     closeDialog, confirmDelete, confirmOk, dialog, form, openCaptureOff, openEdit, submitEdit, updateForm,
@@ -90,11 +90,11 @@ function init() {
     $("runs-capture-off").addEventListener("click", () => {
         const d = dialog;
         if (!d || d.kind !== "runs") return;
-        const e = state.root.status === "ok" ? state.root.entries[d.index] : null;
-        if (!jobAt(state.root.entries || [], d.index, d.line) || !e) { closeDialog(); return; }
+        const tab = crontabOf(d.user);
+        if (!tab || tab.status !== "ok" || !jobAt(tab.entries, d.index, d.line)) { closeDialog(); return; }
         const key = d.openerKey;
         closeDialog();
-        openCaptureOff(d.index, key);
+        openCaptureOff(d.user, d.index, key);
     });
 
     $("orph-all").addEventListener("click", () => removeOrphanRuns(orphanList().map(o => o.id)));

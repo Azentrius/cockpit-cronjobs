@@ -98,6 +98,8 @@
         backups: [],
         backupSeq: 0,
         userWrites: [],
+        userRunsMade: [],
+        failUserRuns: null,
         /* getent passwd, after the name */
         passwd: { "www-data": "33:33:www-data:/var/www:/usr/sbin/nologin", "ghost": "1001:1001::/home/ghost:/bin/sh" },
         userConflictNext: null,
@@ -113,7 +115,7 @@
         lockBusy: false,
         systemd: params.get("systemd") !== "no",
         cronActive: params.get("cron") !== "inactive",
-        wrapper: wrapperParam === "missing" ? null : { version: wrapperParam === "0" ? 0 : 1 },
+        wrapper: wrapperParam === "missing" ? null : { version: wrapperParam === "0" ? 0 : 2 },
         wrapperInstalls: [],
         removedRuns: [],
         orphanCalls: [],
@@ -195,6 +197,12 @@
         }).join("");
     }
 
+    /* The key of the runs a path is in (root's: ID/…, another user's: USER/ID/…). */
+    function runsKey(path) {
+        const m = /^\/var\/lib\/cockpit-cronjobs\/users\/([^/]+)\/runs\/(.*)$/.exec(path);
+        return m ? m[1] + "/" + m[2] : path.replace("/var/lib/cockpit-cronjobs/runs/", "");
+    }
+
     function fail(o) { const e = new Error(o.message || o.problem); Object.assign(e, o); throw e; }
 
     /* systemd's reading of ExecStart= (single quotes, C escapes, %% and $$). */
@@ -253,9 +261,10 @@
             const all = [M.root || "", M.sys.etc].concat(Object.values(M.sys.crond), Object.values(M.sys.users).map(t => t || "")).join("\n");
             const words = new Set(all.split(/[^A-Za-z0-9_-]+/));
             M.orphanCalls.push(args.slice(4));
+            /* keys: ID (root's runs) or USER/ID */
             return args.slice(4).map(id => {
                 if (!M.runs[id]) return "gone " + id;
-                if (words.has(id)) return "used " + id;
+                if (words.has(id.slice(id.indexOf("/") + 1))) return "used " + id;
                 if (M.runs[id].running.some(r => r.alive !== false)) return "running " + id;
                 delete M.runs[id];
                 M.removedRuns.push(id);
@@ -322,6 +331,12 @@
             parts.forEach(p => { out.set(p, pos); pos += p.length; });
             return out;
         }
+        /* A directory for another user's runs */
+        if (/chown -h "\$user:"/.test(script)) {
+            if (M.failUserRuns) fail({ exit_status: 1, problem: null, message: M.failUserRuns });
+            M.userRunsMade.push(args[4]);
+            return "";
+        }
         /* The user database: getent passwd for each name */
         if (/getent passwd/.test(script)) {
             return args.slice(4).filter(u => M.passwd[u]).map(u => u + ":x:" + M.passwd[u] + "\n").join("");
@@ -338,12 +353,12 @@
         }
         if (/runs\.jsonl/.test(script)) return new TextEncoder().encode(runsOutput());
         if (args[0] === "tail" && args[1] === "-c") {
-            const key = args[3].replace("/var/lib/cockpit-cronjobs/runs/", "").replace(/\.out$/, "");
+            const key = runsKey(args[3]).replace(/\.out$/, "");
             if (!(key in M.outputs)) fail({ exit_status: 1, problem: null, message: "tail: cannot open" });
             return new TextEncoder().encode(M.outputs[key]);
         }
         if (args[0] === "rm" && args[1] === "-rf") {
-            const id = args[3].replace("/var/lib/cockpit-cronjobs/runs/", "");
+            const id = runsKey(args[3]);
             M.removedRuns.push(id);
             delete M.runs[id];
             return "";

@@ -187,7 +187,7 @@
         commandHelpNoMta: user => `Läuft als ${user}. Auf diesem Server ist kein Mailprogramm installiert: Ausgaben gehen ` +
             (user === "root" ? "verloren, außer der Job erfasst seine Läufe oder leitet sie um, etwa `>> /var/log/meinjob.log 2>&1`."
                 : "verloren, außer der Job leitet sie um, etwa `>> $HOME/meinjob.log 2>&1`."),
-        commandHelpNoMtaRecorded: "Läuft als root. Ergebnis und Ausgabe werden erfasst.",
+        commandHelpNoMtaRecorded: user => `Läuft als ${user}. Ergebnis und Ausgabe werden erfasst.`,
         percentWarn: "cron liest % als Zeilenumbruch und gibt den Rest als Eingabe weiter. Für ein Prozentzeichen " +
                      "`\\%` schreiben, etwa `date +\\%F`.",
 
@@ -316,6 +316,7 @@
         okRestored: when => `Version von ${when} wiederhergestellt`,
         restoredUndo: "Zum Rückgängigmachen stellen Sie die neueste Sicherung wieder her.",
         restoreFailed: "Wiederherstellen fehlgeschlagen",
+        userRunsFailed: user => `Das Verzeichnis für die Läufe der Jobs von ${user} ließ sich nicht anlegen`,
 
         /* Umwandeln */
         convTitle: "In systemd-Timer umwandeln",

@@ -115,12 +115,31 @@ for (const sh of SHELLS) {
         assert.ok(fs.existsSync(path.join(outside, "keep")));
     });
 
-    t(sh + ": without a runs directory there is nothing to do", () => {
+    t(sh + ": without a runs directory there is nothing to remove", () => {
         const root = setup({ root: "" });
         fs.rmdirSync(path.join(root, "state", "runs"));
         const r = run(sh, root, ["a-0001"]);
         assert.strictEqual(r.rc, 0, r.err);
-        assert.strictEqual(r.out, "");
+        assert.strictEqual(r.out, "gone a-0001\n");
+    });
+
+    /* Stage 3: the runs of another user's jobs, in users/USER/runs, by the key USER/ID. */
+    t(sh + ": runs of other users' jobs, by USER/ID", () => {
+        const root = setup({ root: "", files: { "var/spool/cron/crontabs/alice": "0 1 * * * " + WRAP + " used-0002 'true'\n" } });
+        const userRuns = (user, id) => {
+            const d = path.join(root, "state", "users", user, "runs", id);
+            fs.mkdirSync(d, { recursive: true });
+            return d;
+        };
+        userRuns("alice", "gone-0001");
+        userRuns("alice", "used-0002");
+        const bobs = userRuns("bob", "x-0003");
+        const r = run(sh, root, ["alice/gone-0001", "alice/used-0002", "bob/missing-0004", "root/x-0003", "../bob/x-0003",
+                                 "bob/../x", "b b/x-0003", "alice/a/b"]);
+        assert.strictEqual(r.rc, 0, r.err);
+        assert.deepStrictEqual(r.out.trim().split("\n"), ["removed alice/gone-0001", "used alice/used-0002", "gone bob/missing-0004"]);
+        assert.deepStrictEqual(fs.readdirSync(path.join(root, "state", "users", "alice", "runs")), ["used-0002"]);
+        assert.ok(fs.existsSync(bobs), "names that are not keys touch nothing");
     });
 }
 

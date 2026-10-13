@@ -459,6 +459,54 @@ with sync_playwright() as p:
             print(f"note: {k} under cron {cron_ran[2].get(k)!r}, with run now {now_ran[2].get(k)!r}")
     page.screenshot(path=os.path.join(SHOTS, "e2e-user-run.png"))
     page.click("#run-close-btn")
+
+    # recording a job of the second user: the runs land in the user's own directory, written by the user
+    card.locator(f"[data-key='add:{USER}']").click()
+    page.fill("#f-schedule", "* * * * *")
+    page.fill("#f-command", "echo recorded-for-" + USER)
+    check(page.is_checked("#f-capture"), "recording on by default for the user's job")
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#edit-dlg').hidden")
+    wait_idle(page)
+    line = crontab_of(USER).decode().rstrip("\n").split("\n")[-1]
+    m = re.fullmatch(r"\* \* \* \* \* " + re.escape(WRAP) + r" ([a-z0-9_-]+-[0-9a-f]{4}) 'echo recorded-for-" + USER + "'", line)
+    check(m is not None, "the user's line goes through the run recorder: " + repr(line))
+    uid = pwd.getpwnam(USER).pw_uid
+    home = os.stat(f"{STATE}/users/{USER}")
+    check(oct(os.stat(STATE).st_mode & 0o777) == "0o711" and oct(os.stat(f"{STATE}/users").st_mode & 0o777) == "0o711" and
+          oct(home.st_mode & 0o777) == "0o700" and home.st_uid == uid,
+          "a directory of the user's own for its runs, reachable but not listable")
+    rec_dir = f"{STATE}/users/{USER}/runs/{m.group(1) if m else 'x'}"
+    deadline = time.time() + 75
+    recs = []
+    while time.time() < deadline and not recs:
+        if os.path.exists(rec_dir + "/runs.jsonl"):
+            recs = [json.loads(x) for x in open(rec_dir + "/runs.jsonl")]
+        if not recs:
+            time.sleep(2)
+    check(any(r["trigger"] == "schedule" and r["rc"] == 0 for r in recs) and os.stat(rec_dir).st_uid == uid,
+          "cron ran the user's job through the recorder, as the user: " + repr(recs))
+    if recs and recs[0]["out"]:
+        out_file = f"{rec_dir}/{recs[0]['out']}.out"
+        check(open(out_file).read() == f"recorded-for-{USER}\n" and os.stat(out_file).st_uid == uid, "the output recorded")
+    page.click("#reload")
+    wait_idle(page)
+    row = card.locator("tbody tr", has_text="recorded-for-" + USER)
+    check("OK" in row.locator("td[data-last]").inner_text(), "the last run in the user's card: " + row.inner_text())
+    row.locator("[data-key^='runs:']").click()
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1")
+    check(f"/var/lib/cockpit-cronjobs/users/{USER}/runs/" in page.inner_text("#runs-note"), "the runs dialog names the user's directory")
+    page.locator("#runs-body [data-key^='out:']").first.click()
+    wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('recorded-for-')")
+    check(True, "the user's output read through Cockpit")
+    page.screenshot(path=os.path.join(SHOTS, "e2e-user-runs.png"))
+    page.keyboard.press("Escape")
+    row.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Erfassung ausschalten").click()
+    page.click("#confirm-ok")
+    wait_idle(page)
+    check(crontab_of(USER).decode().rstrip("\n").split("\n")[-1] == "* * * * * echo recorded-for-" + USER and
+          not os.path.exists(rec_dir), "recording off: the plain line, the user's runs gone")
     page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-user.png"))
 
