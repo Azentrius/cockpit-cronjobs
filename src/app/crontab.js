@@ -7,8 +7,8 @@
 
 import { C, codeSafe, keyOf, rich, SD, state, T, USER_RE } from "./core.js";
 import {
-    ensureWrapper, errText, isDenied, readBasics, readCrontab, readRuns, readSystem, readTimers, removeRunsIfUnused,
-    saveCrontab,
+    ensureWrapper, errText, isDenied, readBasics, readCrontab, readHomes, readRuns, readSystem, readTimers,
+    removeRunsIfUnused, saveCrontab,
 } from "./system.js";
 import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns } from "./page.js";
 import { dialog } from "./dialogs.js";
@@ -28,8 +28,9 @@ export function crontabOf(user) {
 }
 
 /* read: { text, utf8 } from readCrontab. A crontab that is not UTF-8, or would not be
-   written back exactly, is shown read-only. */
-function tabOf(user, read) {
+   written back exactly, is shown read-only. home: another user's home directory (from
+   the user database, for run now). */
+function tabOf(user, read, home) {
     rootVersion++;
     const content = read.text;
     const entries = C.parseUserCrontab(content);
@@ -43,12 +44,13 @@ function tabOf(user, read) {
         notUtf8,
         locked: notUtf8 || !C.roundTrips(content),
         mailto: entries.some(e => e.kind === "raw" && /^\s*MAILTO\s*=/.test(e.line)),
+        home: home || null,
     };
 }
 
 function setCrontab(user, read) {
     if (user === "root") state.root = tabOf(user, read);
-    else state.users[user] = tabOf(user, read);
+    else state.users[user] = tabOf(user, read, state.users[user] && state.users[user].home);
 }
 
 /* The jobs of a crontab: [{ e, i }] with i the index of the entry. */
@@ -181,10 +183,11 @@ async function loadUsers() {
         return;
     }
     const names = sys.userNames.filter(u => u !== "root" && USER_RE.test(u)).sort();
-    const reads = await Promise.allSettled(names.map(u => readCrontab(u)));
+    const [reads, homes] = await Promise.all([Promise.allSettled(names.map(u => readCrontab(u))),
+                                              readHomes(names).catch(() => ({}))]);
     const users = {};
     reads.forEach((r, k) => {
-        users[names[k]] = r.status === "fulfilled" ? tabOf(names[k], r.value)
+        users[names[k]] = r.status === "fulfilled" ? tabOf(names[k], r.value, homes[names[k]])
             : { status: "error", user: names[k], message: errText(r.reason) };
     });
     state.users = users;

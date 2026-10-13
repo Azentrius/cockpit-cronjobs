@@ -174,6 +174,25 @@ export function readBackups(user) {
         .then(out => B.parseBackups(typeof out === "string" ? new TextEncoder().encode(out) : out, user));
 }
 
+/* The home directories of users (cron starts their jobs there, with HOME set to it),
+   from the user database; names checked by the caller (USER_RE). */
+const HOMES_SCRIPT = `for u in "$@"; do getent passwd "$u" || :; done
+exit 0
+`;
+
+export function readHomes(names) {
+    if (!names.length) return Promise.resolve({});
+    return spawn(["sh", "-c", HOMES_SCRIPT, "cockpit-cronjobs"].concat(names), { err: "ignore", environ: ["LC_ALL=C"] })
+        .then(out => {
+            const homes = {};
+            String(out || "").split("\n").forEach(line => {
+                const f = line.split(":");
+                if (f.length >= 7 && names.includes(f[0]) && /^\//.test(f[5])) homes[f[0]] = f[5];
+            });
+            return homes;
+        });
+}
+
 /* Host name, time zone as cron sees it, and what is installed. */
 const BASICS_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
 has_systemd() { [ -d /run/systemd/system ] && command -v systemctl > /dev/null 2>&1; }
@@ -618,16 +637,25 @@ export async function readTimers() {
 /* Starts the command in its own process group, so that "Stop" (SIGTERM from
    Cockpit to this shell) reaches everything the job started. Only the job gets
    the cron environment; this script keeps Cockpit's, so it finds its tools.
-   $1 working directory, $2 shell, $3 command, then NAME=value for the job;
-   standard input is passed on. */
-export const RUN_SCRIPT = `cd "$1" 2>/dev/null || cd /
-sh=$2
-cmd=$3
-shift 3
+   $1 the user the job runs as: root's runs as root, another user's through runuser
+   (that user with the user's groups, as cron runs it), $2 working directory,
+   $3 shell, $4 command, then NAME=value for the job; standard input is passed on.
+   Exit 2 = not a user the system knows. */
+export const RUN_SCRIPT = `user=$1
+cd "$2" 2>/dev/null || cd /
+sh=$3
+cmd=$4
+shift 4
+as=
+if [ "$user" != root ]; then
+  case $user in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) echo "cockpit-cronjobs: not a user name" >&2; exit 2 ;; esac
+  id -u "$user" > /dev/null 2>&1 || { echo "cockpit-cronjobs: the system does not know $user" >&2; exit 2; }
+  as="runuser -u $user --"
+fi
 w=
 if setsid -w true > /dev/null 2>&1; then w=-w; fi
 exec 3<&0
-setsid $w env -i "$@" "$sh" -c "$cmd" <&3 3<&- &
+setsid $w $as env -i "$@" "$sh" -c "$cmd" <&3 3<&- &
 pid=$!
 exec 3<&-
 trap 'kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null' TERM INT HUP

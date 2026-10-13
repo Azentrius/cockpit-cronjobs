@@ -221,9 +221,12 @@
     const CRON_ONLY_VARS = new Set(["MAILTO", "MAILFROM", "CRON_TZ", "RANDOM_DELAY", "CONTENT_TYPE",
                                     "CONTENT_TRANSFER_ENCODING", "CRON_CORRECT_DST"]);
 
-    /* The environment a job had under cron: cron's defaults and the crontab's variables. */
-    function jobEnvironment(cronEnv, home) {
-        const env = { SHELL: "/bin/sh", PATH: "/usr/bin:/bin", HOME: home || "/root", LOGNAME: "root", USER: "root" };
+    /* The environment a job has under cron: cron's defaults for user (default root, with
+       the user's home) and the crontab's variables. */
+    function jobEnvironment(cronEnv, home, user) {
+        user = user || "root";
+        const env = { SHELL: "/bin/sh", PATH: "/usr/bin:/bin", HOME: home || (user === "root" ? "/root" : "/"),
+                      LOGNAME: user, USER: user };
         Object.keys(cronEnv || {}).forEach(k => {
             if (!CRON_ONLY_VARS.has(k)) env[k] = cronEnv[k];
         });

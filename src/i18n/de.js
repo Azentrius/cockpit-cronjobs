@@ -228,7 +228,7 @@
 
         /* Jetzt ausführen */
         runTitle: "Jetzt ausführen",
-        runIntro: "Dieser Befehl wird sofort als root ausgeführt:",
+        runIntro: user => `Dieser Befehl wird sofort als ${user} ausgeführt:`,
         runEnv: (path, home, shell) => `Mit der Umgebung von cron: \`${path}\`, \`${home}\`, Shell \`${shell}\`.`,
         runRecorded: "Ergebnis und Ausgabe werden erfasst.",
         runStdin: "Der Text nach % in der Zeile wird als Eingabe übergeben, wie bei cron.",

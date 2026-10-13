@@ -8,7 +8,7 @@ import {
     RUN_OUTPUT_LIMIT, RUNS_DIR, SD, setBusyButton, state, T,
 } from "./core.js";
 import { errText, isDenied, readOutput, removeOrphans, RUN_SCRIPT } from "./system.js";
-import { jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
+import { crontabOf, jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
 import { labelEl, runLabel, showAlert } from "./page.js";
 import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
 
@@ -16,22 +16,25 @@ import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
 
 let run = null;   /* { phase, proc, output, started, ended, rc, signal, stopped, error, timer, … } */
 
-/* cron's environment for the job; a recorded job is marked as started by hand. */
-function runEnvironment(entries, index, recorded) {
-    const env = SD.jobEnvironment(C.envBefore(entries, index), null);
+/* cron's environment for job index of crontab tab: root's, or another user's with
+   that user's home; a recorded job is marked as started by hand. */
+function runEnvironment(tab, index, recorded) {
+    const env = SD.jobEnvironment(C.envBefore(tab.entries, index), tab.user === "root" ? null : tab.home, tab.user);
     if (recorded) env.CRONJOBS_TRIGGER = "manual";
     return env;
 }
 
-export function openRun(index, openerKey) {
-    if (state.root.status !== "ok") return;
-    const base = state.root;
+/* Run job index of user's crontab now, as that user. */
+export function openRun(user, index, openerKey) {
+    const base = crontabOf(user);
+    if (!base || base.status !== "ok") return;
     const e = base.entries[index];
     if (!e || e.kind !== "job") return;
     const info = jobInfo(e);
-    const env = runEnvironment(base.entries, index, !!info.capture);
+    const capture = user === "root" ? info.capture : null;
+    const env = runEnvironment(base, index, !!capture);
     const cron = C.cronCommand(e.command);
-    run = { phase: "confirm", index, command: e.command, shown: info.command, capture: info.capture,
+    run = { phase: "confirm", user, index, command: e.command, shown: info.command, capture,
             env, cron, proc: null, output: "", cut: false, started: 0, ended: 0, rc: null, signal: null,
             stopped: false, error: null, timer: null, raf: 0 };
     renderRunDialog();
@@ -45,7 +48,7 @@ export function openRun(index, openerKey) {
 export function startRun() {
     if (!run || run.phase === "running") return;
     const env = run.env;
-    const argv = ["/bin/sh", "-c", RUN_SCRIPT, "cockpit-cronjobs-run", env.HOME || "/", env.SHELL || "/bin/sh",
+    const argv = ["/bin/sh", "-c", RUN_SCRIPT, "cockpit-cronjobs-run", run.user, env.HOME || "/", env.SHELL || "/bin/sh",
                   run.cron.command].concat(Object.keys(env).map(k => k + "=" + env[k]));
     Object.assign(run, { phase: "running", output: "", cut: false, started: Date.now(), ended: 0, rc: null,
                          signal: null, stopped: false, error: null });
@@ -117,6 +120,7 @@ function renderRunDialog() {
     const running = r.phase === "running";
     const done = r.phase === "done";
     $("run-intro").hidden = !confirm;
+    $("run-intro").textContent = T.runIntro(r.user);
     $("run-cmd").textContent = r.shown;
     const env = r.env;
     fill($("run-env"), rich(T.runEnv(codeSafe("PATH=" + env.PATH), codeSafe("HOME=" + env.HOME), codeSafe(env.SHELL))),
