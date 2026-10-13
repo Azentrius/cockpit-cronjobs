@@ -91,13 +91,17 @@
         sys: SYS,
         runs: RUNS,
         outputs: OUTPUTS,
+        /* Backups of the root crontab, oldest first: { path, content, mtime (s) [, latin1] }.
+           latin1: a byte 0x01 in content is read as 0xE9 (not UTF-8). */
         backups: [],
+        backupSeq: 0,
         calls: [],
         jumps: [],
         writes: 0,
         delay: +(params.get("delay") || 40),
         failWrite: null,
         failBackup: null,
+        failBackups: null,
         conflictNext: null,
         failSystem: false,
         lockBusy: false,
@@ -255,8 +259,10 @@
                 if (last && last.content === cur) {
                     path = last.path;
                 } else {
-                    path = "/var/lib/cockpit-cronjobs/backups/root-20261012-0" + (100 + M.backups.length) + "00.crontab";
-                    M.backups.push({ path, content: cur });
+                    const seq = M.backupSeq++;
+                    path = "/var/lib/cockpit-cronjobs/backups/root-20261012-0" + (100 + seq) + "00.crontab";
+                    M.backups.push({ path, content: cur, mtime: M.backups.reduce((t, b) => Math.max(t, b.mtime + 1), now()) });
+                    if (M.backups.length > 10) M.backups.shift();
                 }
             }
             if (M.failWrite) fail({ exit_status: 1, problem: null, message: M.failWrite });
@@ -269,6 +275,21 @@
             if (timer && stop) M.enabled = M.enabled.filter(n => n !== timer);
             else if (timer) M.enabled.push(timer);
             return path + "\n";
+        }
+        /* The backups, newest first (ls -t): header "\x1eMTIME SIZE NAME", then the file. */
+        if (/flock -s -w 10 9/.test(script)) {
+            if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
+            if (M.failBackups) fail({ exit_status: 1, problem: null, message: M.failBackups });
+            const parts = [];
+            M.backups.slice().reverse().sort((a, b) => b.mtime - a.mtime).forEach(b => {
+                let bytes = new TextEncoder().encode(b.content);
+                if (b.latin1) bytes = bytes.map(x => x === 0x01 ? 0xE9 : x);
+                parts.push(new TextEncoder().encode("\x1e" + b.mtime + " " + bytes.length + " " + b.path.replace(/^.*\//, "") + "\n"), bytes);
+            });
+            const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+            let pos = 0;
+            parts.forEach(p => { out.set(p, pos); pos += p.length; });
+            return out;
         }
         if (/sec host/.test(script)) return basicsOutput();
         if (/sec etc/.test(script)) {

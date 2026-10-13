@@ -16,6 +16,7 @@
 <script src="lib/cron.js"></script>
 <script src="lib/systemd.js"></script>
 <script src="lib/runs.js"></script>
+<script src="lib/backups.js"></script>
 </head>
 <body>
 <div class="az-page" id="page">
@@ -60,6 +61,7 @@
           <p class="az-card__desc" data-t="rootDesc"></p>
         </div>
         <div class="az-card__actions">
+          <button class="az-btn az-btn--secondary az-btn--sm" type="button" id="backups" data-key="backups" hidden><span data-icon="history"></span><span data-t="backups">Backups</span></button>
           <button class="az-btn az-btn--secondary az-btn--sm" type="button" id="add" data-key="add" hidden><span data-icon="plus"></span><span data-t="add">Add job</span></button>
         </div>
       </div>
@@ -275,6 +277,25 @@
     <div class="az-modal__footer">
       <button class="az-btn az-btn--danger" type="button" id="orph-all" data-t="orphansRemoveAll" hidden>Remove all</button>
       <button class="az-btn az-btn--link" type="button" id="orph-close-btn" data-t="close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Backups of the root crontab -->
+<div class="az-backdrop" id="bk-dlg" hidden>
+  <div class="az-modal cron-modal-wide" role="dialog" aria-modal="true" aria-labelledby="bk-title" aria-describedby="bk-intro">
+    <div class="az-modal__header">
+      <h2 class="az-modal__title" id="bk-title" data-t="backupsTitle">Backups of the root crontab</h2>
+      <button class="az-btn az-btn--plain az-btn--sm" type="button" id="bk-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
+    </div>
+    <div class="az-modal__body">
+      <div class="cron-dialog-alert" id="bk-alert" hidden></div>
+      <p id="bk-intro" data-t="backupsIntro"></p>
+      <div id="bk-body"></div>
+      <p class="cron-muted cron-small" id="bk-note"></p>
+    </div>
+    <div class="az-modal__footer">
+      <button class="az-btn az-btn--link" type="button" id="bk-close-btn" data-t="close">Close</button>
     </div>
   </div>
 </div>

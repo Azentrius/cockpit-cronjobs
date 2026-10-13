@@ -182,6 +182,8 @@ export function renderRoot() {
     add.hidden = !(editable && jobs.length > 0);
     const frozen = state.busy || loading;
     add.disabled = frozen;
+    $("backups").hidden = r.status !== "ok";
+    $("backups").disabled = frozen;
 
     if (r.status === "loading") {
         fill(body, h("p", { class: "cron-state" }, T.loading));

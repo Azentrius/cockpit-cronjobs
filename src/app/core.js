@@ -8,6 +8,7 @@
 export const C = window.CronLogic;
 export const SD = window.CronSystemd;
 export const R = window.CronRuns;
+export const B = window.CronBackups;
 const ICONS = window.AzIcons;
 export const STATE_DIR = "/var/lib/cockpit-cronjobs";
 export const BACKUP_DIR = STATE_DIR + "/backups";
