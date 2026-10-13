@@ -100,6 +100,8 @@
         userWrites: [],
         userRunsMade: [],
         failUserRuns: null,
+        /* commands run as another user: [user, command…] */
+        asUser: [],
         /* getent passwd, after the name */
         passwd: { "www-data": "33:33:www-data:/var/www:/usr/sbin/nologin", "ghost": "1001:1001::/home/ghost:/bin/sh" },
         userConflictNext: null,
@@ -243,6 +245,11 @@
         if (opts && opts.superuser === "require" && !privileged)
             fail({ problem: "access-denied", message: "" });
         const script = args[0] === "sh" ? args[2] : "";
+        /* A command as another user (AS_USER_SCRIPT): user, then the command */
+        if (/^as_user "\$user" "\$@"$/m.test(script)) {
+            M.asUser.push(args.slice(4));
+            return handle(args.slice(5), opts, input);
+        }
         if (args[0] === "crontab" && args.includes("-l")) {
             const user = args[args.indexOf("-u") + 1];
             if (user !== "root") {
@@ -256,13 +263,13 @@
             return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
         }
         /* Removing leftover runs: the script checks every ID again against all crontabs. */
-        if (/echo "removed /.test(script)) {
+        if (/for key in "\$@"/.test(script)) {
             if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
             const all = [M.root || "", M.sys.etc].concat(Object.values(M.sys.crond), Object.values(M.sys.users).map(t => t || "")).join("\n");
             const words = new Set(all.split(/[^A-Za-z0-9_-]+/));
-            M.orphanCalls.push(args.slice(4));
-            /* keys: ID (root's runs) or USER/ID */
-            return args.slice(4).map(id => {
+            M.orphanCalls.push(args.slice(5));
+            /* $1 the script for one directory, then the keys: ID (root's runs) or USER/ID */
+            return args.slice(5).map(id => {
                 if (!M.runs[id]) return "gone " + id;
                 if (words.has(id.slice(id.indexOf("/") + 1))) return "used " + id;
                 if (M.runs[id].running.some(r => r.alive !== false)) return "running " + id;

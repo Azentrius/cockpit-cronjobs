@@ -12,7 +12,7 @@ DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
 
 Runs as root (the local session is root's). CI runs it the same way on the runner's
 throwaway VM (job e2e in .github/workflows/test.yml)."""
-import json, os, pwd, re, subprocess, sys, time
+import json, os, pwd, re, shutil, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
 if os.environ.get("CRONJOBS_E2E_DESTRUCTIVE") != "1":
@@ -520,6 +520,35 @@ with sync_playwright() as p:
     wait_idle(page)
     check(crontab_of(USER).decode().rstrip("\n").split("\n")[-1] == "* * * * * echo recorded-for-" + USER and
           not os.path.exists(rec_dir), "recording off: the plain line, the user's runs gone")
+
+    # the user's directory belongs to the user: a link there leads nowhere the user could not go.
+    # With the runs directory a link to a directory of root's, nothing there shows up as runs, and
+    # turning recording off for a line that names a directory there removes nothing of root's.
+    root_only = "/tmp/cj-e2e-root-only"
+    os.makedirs(root_only + "/trap-0001", exist_ok=True)
+    with open(root_only + "/trap-0001/runs.jsonl", "w") as fh:
+        fh.write('{"start":1,"end":2,"rc":0,"trigger":"schedule","bytes":0,"truncated":false,"out":""}\n')
+    user_runs = f"{STATE}/users/{USER}/runs"
+    shutil.rmtree(user_runs, ignore_errors=True)
+    os.symlink(root_only, user_runs)
+    os.lchown(user_runs, uid, -1)
+    r = sh(f"crontab -u {USER} -", input=crontab_of(USER).decode() + f"0 4 1 1 * {WRAP} trap-0001 'true'\n")
+    check(r.returncode == 0, "a recorded line of the user's own: " + r.stderr)
+    page.click("#reload")
+    wait_idle(page)
+    trap = card.locator("tbody tr", has_text="0 4 1 1 *")
+    check(trap.count() == 1 and "OK" not in trap.locator("td[data-last]").inner_text(),
+          "nothing behind the link shown as runs: " + trap.inner_text())
+    trap.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Erfassung ausschalten").click()
+    page.click("#confirm-ok")
+    wait_idle(page)
+    page.wait_for_timeout(1500)
+    check(crontab_of(USER).decode().rstrip("\n").split("\n")[-1] == "0 4 1 1 * true" and
+          os.path.isfile(root_only + "/trap-0001/runs.jsonl"),
+          "recording off: the plain line, root's directory behind the link untouched")
+    os.remove(user_runs)
+    shutil.rmtree(root_only)
     page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-user.png"))
 

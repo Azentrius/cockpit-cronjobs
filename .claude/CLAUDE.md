@@ -110,7 +110,10 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
    (root's or another user's) goes through `SAVE_SCRIPT`: lock, checksum of the version shown,
    verified backup, write, read back. Never write a crontab any other way.
 2. **No values in shell code.** Root scripts are constants; values go in as arguments or standard
-   input. Check IDs, unit names and file names in the page and again in the script.
+   input. Check IDs, unit names and file names in the page and again in the script. In a directory
+   another user owns (`users/USER`), root removes nothing and reads no output itself: that goes
+   through `as_user` (setpriv, no PAM session). The run list, which root reads there, takes only what
+   has the form it expects: names checked, no links, regular files under `timeout`, separators stripped.
 3. **Like cron.** Run now, the run recorder and conversions must behave as cron does (environment,
    `%`/`\%`, umask, `$SHELL`, `CRON_TZ` with cronie). Prove it with tests against the real tools.
 4. **Show first, stop early, undo whole.** Anything that can fail stops before the change. A change of

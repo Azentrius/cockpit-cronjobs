@@ -867,6 +867,8 @@ with sync_playwright() as p:
     page.locator("#runs-body [data-key^='out:']").first.click()
     wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('cron.php ok')")
     check(True, "output of www-data's run read")
+    check(["www-data", "tail", "-c", "65536", f"/var/lib/cockpit-cronjobs/users/www-data/runs/{rid}/20261013T120000Z-77.out"]
+          in mock(page, "asUser"), "the output read as www-data: " + repr(mock(page, "asUser")))
     page.click("#runs-close-btn")
     # leftover runs of another user are offered with the user's name, and removed by key
     page.click("[data-key=orphans]")
@@ -883,6 +885,9 @@ with sync_playwright() as p:
     wait_idle(page)
     check(mock(page, "sys.users['www-data']") == www + "# by hand\n" and "www-data/" + rid in mock(page, "removedRuns"),
           "recording off: the plain line, the runs gone: " + repr(mock(page, "removedRuns")))
+    check(["www-data", "rm", "-rf", "--", f"/var/lib/cockpit-cronjobs/users/www-data/runs/{rid}"] in mock(page, "asUser"),
+          "the runs removed as www-data: " + repr(mock(page, "asUser")))
+    check(all(a[0] == "www-data" for a in mock(page, "asUser")), "only www-data's runs as www-data")
     check(not page.problems, "no console problems (other users): " + repr(page.problems))
     page.context.close()
     # a user cron cannot read gets an error card; a name the page does not take stays read-only under System

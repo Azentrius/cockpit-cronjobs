@@ -104,6 +104,8 @@ A job of another user runs as that user, so it cannot write there: its runs go t
 `/var/lib/cockpit-cronjobs/users/USER/runs/`, a directory that belongs to the user (mode 700). Cron Jobs
 creates it when you turn on recording for the first job of that user; `/var/lib/cockpit-cronjobs` and
 `/var/lib/cockpit-cronjobs/users` are then mode 711, so the user can reach it but list nothing.
+Because the directory is the user's, Cron Jobs reads the output and removes the runs there as that user,
+and lists only what has the form of runs: nothing the user puts there reaches beyond the user's own jobs.
 
 - Commands with an unescaped `%` cannot be recorded (cron passes the text after `%` as input).
 - Turning recording off restores the plain line and deletes the recorded runs.

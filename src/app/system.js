@@ -363,32 +363,68 @@ function parseSystem(out, flavor) {
     return sys;
 }
 
+/* Runs a command ($2…) as user $1, without a login session (no PAM, so nothing in the
+   auth log). STATE_DIR/users/USER belongs to that user: whatever is opened or removed
+   in there goes through this, so that a link the user puts there leads nowhere the
+   user could not go anyway. Returns 2 when the system does not know the user. */
+const AS_USER_FN = `as_user() {
+  _uid=$(id -u "$1" 2>/dev/null) && _gid=$(id -g "$1" 2>/dev/null) || return 2
+  shift
+  (cd / && exec setpriv --reuid="$_uid" --regid="$_gid" --clear-groups -- "$@")
+}`;
+
+/* AS_USER_FN for one command: $1 the user (not root), then the command. */
+const AS_USER_SCRIPT = `${AS_USER_FN}
+user=$1
+shift
+case $user in ''|root|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
+as_user "$user" "$@"
+`;
+
+/* argv as the owner of user's runs: as root for root's, as the user for another user's. */
+function asOwner(user, argv) {
+    return user === "root" ? argv : ["sh", "-c", AS_USER_SCRIPT, "cockpit-cronjobs", user].concat(argv);
+}
+
 /* Recorded runs of all jobs (see lib/runs.js): root's under RUNS_DIR (key ID), other
    users' under STATE_DIR/users/USER/runs (key USER/ID), each with the disk use of its
-   directory in KB. A run marker whose process is gone is reported with ALIVE 0. */
+   directory in KB. A run marker whose process is gone is reported with ALIVE 0.
+   Another user writes the directories of the user's jobs, so only what has the form
+   of a job's runs is listed: directories named by an ID, no links, regular files read
+   under a time limit (a FIFO cannot hold up the page) and without the separator \036
+   (nothing in them can pass for the runs of another job). Users the system does not
+   know any more are left out. */
 const RUNS_SCRIPT = `job() {
-  printf '\\036%s\\n' "$2"
-  printf 'size %s\\n' "$(du -sk "$1" 2>/dev/null | cut -f1)"
-  tail -n ${KEEP_RUNS} "$1/runs.jsonl" 2>/dev/null
+  id=\${1##*/}
+  case $id in ''|*[!A-Za-z0-9_-]*) return ;; esac
+  [ \${#id} -le 64 ] && [ -d "$1" ] && [ ! -L "$1" ] || return
+  printf '\\036%s\\n' "$2$id"
+  printf 'size %s\\n' "$(timeout 10 du -sk "$1" 2>/dev/null | cut -f1)"
+  f=$1/runs.jsonl
+  if [ -f "$f" ] && [ ! -L "$f" ]; then
+    timeout 5 tail -n ${KEEP_RUNS} "$f" 2>/dev/null | tr -d '\\036'
+  fi
   for r in "$1"/*.running; do
-    [ -f "$r" ] || continue
-    pid=$(sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$r" | head -n 1)
+    [ -f "$r" ] && [ ! -L "$r" ] || continue
+    line=$(timeout 5 head -c 4096 "$r" 2>/dev/null | head -n 1 | tr -d '\\036')
+    pid=$(printf '%s\\n' "$line" | sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' | head -n 1)
     alive=0
     if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] && tr '\\000' ' ' < "/proc/$pid/cmdline" | grep -q cockpit-cronjobs-run; then
       alive=1
     fi
-    printf 'running %s %s\\n' "$alive" "$(head -n 1 "$r")"
+    printf 'running %s %s\\n' "$alive" "$line"
   done
 }
 for d in '${RUNS_DIR}'/*; do
-  [ -d "$d" ] && [ ! -L "$d" ] || continue
-  job "$d" "\${d##*/}"
+  job "$d" ""
 done
 for u in '${STATE_DIR}'/users/*; do
+  user=\${u##*/}
+  case $user in root|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) continue ;; esac
   [ -d "$u/runs" ] && [ ! -L "$u" ] && [ ! -L "$u/runs" ] || continue
+  id -u "$user" > /dev/null 2>&1 || continue
   for d in "$u"/runs/*; do
-    [ -d "$d" ] && [ ! -L "$d" ] || continue
-    job "$d" "\${u##*/}/\${d##*/}"
+    job "$d" "$user/"
   done
 done
 exit 0
@@ -404,7 +440,7 @@ export const runsDirOf = user => user === "root" ? RUNS_DIR : STATE_DIR + "/user
 
 export function readOutput(user, id, out) {
     if (!USER_RE.test(user) || !R.ID_RE.test(id) || !R.OUT_RE.test(out)) return Promise.resolve("");
-    return spawn(["tail", "-c", "65536", runsDirOf(user) + "/" + id + "/" + out + ".out"],
+    return spawn(asOwner(user, ["tail", "-c", "65536", runsDirOf(user) + "/" + id + "/" + out + ".out"]),
                  Object.assign({}, SPAWN_ROOT, { binary: true }))
         .then(decode, ex => {
             if (ex && ex.exit_status === 1) return "";
@@ -414,7 +450,7 @@ export function readOutput(user, id, out) {
 
 function removeRuns(user, id) {
     if (!USER_RE.test(user) || !R.ID_RE.test(id)) return Promise.resolve();
-    return spawn(["rm", "-rf", "--", runsDirOf(user) + "/" + id], SPAWN_ROOT);
+    return spawn(asOwner(user, ["rm", "-rf", "--", runsDirOf(user) + "/" + id]), SPAWN_ROOT);
 }
 
 /* A copied line may share the ID; its runs stay as long as a line of user's crontab
@@ -452,16 +488,39 @@ export function ensureUserRuns(user) {
     });
 }
 
+/* One directory of leftover runs ($1), run as its owner: "gone" when it is not there,
+   "used" when $2 is 1, "running" while a run is going on, else "removed". */
+const REMOVE_RUN_DIR_SCRIPT = `d=$1
+if [ ! -d "$d" ]; then echo gone; exit 0; fi
+if [ "$2" = 1 ]; then echo used; exit 0; fi
+for r in "$d"/*.running; do
+  [ -f "$r" ] && [ ! -L "$r" ] || continue
+  pid=$(timeout 5 head -c 4096 "$r" 2>/dev/null | sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' | head -n 1)
+  if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] && tr '\\000' ' ' < "/proc/$pid/cmdline" | grep -q cockpit-cronjobs-run; then
+    echo running
+    exit 0
+  fi
+done
+rm -rf -- "$d" || exit 1
+echo removed
+`;
+
 /* Removes the run directories of recorded jobs that no crontab uses any more. Under
    the crontab lock, every ID is checked again: a directory stays when its ID
    appears as a word anywhere in the root crontab, /etc/crontab, /etc/anacrontab,
    /etc/cron.d or another user's crontab ("used"), or while a run is going on
-   ("running"). If one of these files cannot be read, nothing is removed.
-   Arguments: ID (root's runs) or USER/ID (another user's). Output:
+   ("running"). If one of these files cannot be read, nothing is removed. The
+   directory itself is looked at and removed by its owner ($1, REMOVE_RUN_DIR_SCRIPT):
+   another user's as that user, without a handle on the lock. Users the system does
+   not know any more are skipped.
+   Arguments after $1: ID (root's runs) or USER/ID (another user's). Output:
    "removed|gone|used|running ARGUMENT" for each. Exit 4 = locked, else an error. */
 const REMOVE_ORPHANS_SCRIPT = `set -u
 trap '' TERM HUP INT
 umask 077
+${AS_USER_FN}
+one=$1
+shift
 [ -d '${STATE_DIR}' ] || exit 0
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -w 10 9 || exit 4
@@ -476,6 +535,7 @@ for f in /etc/crontab /etc/anacrontab /etc/cron.d/* /var/spool/cron/crontabs/* /
   { cat -- "$f" && echo; } >> "$tmp/all" || exit 1
 done
 for key in "$@"; do
+  user=root
   case $key in
     */*)
       user=\${key%%/*}
@@ -488,24 +548,22 @@ for key in "$@"; do
   esac
   case $id in ''|*[!A-Za-z0-9_-]*) continue ;; esac
   [ \${#id} -le 64 ] || continue
-  if [ ! -d "$d" ]; then echo "gone $key"; continue; fi
   grep -qE "(^|[^A-Za-z0-9_-])$id([^A-Za-z0-9_-]|\\$)" "$tmp/all"
   case $? in
-    0) echo "used $key"; continue ;;
-    1) ;;
+    0) used=1 ;;
+    1) used=0 ;;
     *) exit 1 ;;
   esac
-  alive=0
-  for r in "$d"/*.running; do
-    [ -f "$r" ] || continue
-    pid=$(sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' "$r" | head -n 1)
-    if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] && tr '\\000' ' ' < "/proc/$pid/cmdline" | grep -q cockpit-cronjobs-run; then
-      alive=1
-    fi
-  done
-  if [ "$alive" = 1 ]; then echo "running $key"; continue; fi
-  rm -rf -- "$d" || exit 1
-  echo "removed $key"
+  if [ "$user" = root ]; then
+    r=$(sh -c "$one" cockpit-cronjobs "$d" "$used") || exit 1
+  else
+    id -u "$user" > /dev/null 2>&1 || continue
+    r=$(as_user "$user" sh -c "$one" cockpit-cronjobs "$d" "$used" 9>&-) || exit 1
+  fi
+  case $r in
+    gone|used|running|removed) echo "$r $key" ;;
+    *) exit 1 ;;
+  esac
 done
 exit 0
 `;
@@ -513,7 +571,8 @@ exit 0
 /* keys: ID or USER/ID (see R.KEY_RE). Result: { removed: [key…], kept: [key…] };
    "gone" counts as removed. */
 export function removeOrphans(keys) {
-    const args = ["sh", "-c", REMOVE_ORPHANS_SCRIPT, "cockpit-cronjobs"].concat(keys.filter(k => R.KEY_RE.test(k)));
+    const args = ["sh", "-c", REMOVE_ORPHANS_SCRIPT, "cockpit-cronjobs", REMOVE_RUN_DIR_SCRIPT]
+        .concat(keys.filter(k => R.KEY_RE.test(k)));
     return spawn(args, SPAWN_ROOT).then(out => {
         const res = { removed: [], kept: [] };
         String(out || "").split("\n").forEach(line => {
