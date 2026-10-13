@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-12. Each stage is cut so that it is useful on its own and brings its own tests. The
+As of 2026-10-13. Each stage is cut so that it is useful on its own and brings its own tests. The
 order is the recommendation; stages after 1.1 are proposals until they are decided.
 
 **Guardrails for every stage** (they keep applying):
@@ -44,7 +44,10 @@ Done in 2.2.0 (see [CHANGELOG](CHANGELOG.md)), together with the shared Azentriu
 
 ---
 
-## Stage 2 – Backups you can use
+## Stage 2 – Backups you can use ✅
+
+Done in 2.3.0 (see [CHANGELOG](CHANGELOG.md)): the list shows when each backup was saved and what restoring
+it would change; the end-to-end test compares the difference with `diff` and restores and restores back.
 
 **Goal:** the last ten versions of the root crontab are not only kept, but useful.
 

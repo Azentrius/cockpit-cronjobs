@@ -35,9 +35,9 @@ and turns cron jobs into systemd timers.
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 
-| Run now | Recorded runs | Convert to systemd timer |
-|---|---|---|
-| ![Run now](docs/run-now.png) | ![Runs](docs/runs.png) | ![Convert](docs/convert.png) |
+| Run now | Recorded runs | Convert to systemd timer | Backups |
+|---|---|---|---|
+| ![Run now](docs/run-now.png) | ![Runs](docs/runs.png) | ![Convert](docs/convert.png) | ![Backups](docs/backups.png) |
 
 ## Requirements
 
@@ -56,11 +56,11 @@ the system crontabs and timers.
 From a [release](https://github.com/Azentrius/cockpit-cronjobs/releases) (replace the version):
 
 ```sh
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.2.0/cockpit-cronjobs-2.2.0.tar.gz
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.2.0/SHA256SUMS
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.3.0/cockpit-cronjobs-2.3.0.tar.gz
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.3.0/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
-gh attestation verify cockpit-cronjobs-2.2.0.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
-sudo tar -xzf cockpit-cronjobs-2.2.0.tar.gz -C /usr/share/cockpit
+gh attestation verify cockpit-cronjobs-2.3.0.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
+sudo tar -xzf cockpit-cronjobs-2.3.0.tar.gz -C /usr/share/cockpit
 ```
 
 Or from the source:
