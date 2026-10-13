@@ -5,10 +5,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { C, codeSafe, keyOf, rich, SD, state, T, USER_RE } from "./core.js";
+import { C, codeSafe, keyOf, R, rich, SD, state, T, USER_RE } from "./core.js";
 import {
-    ensureWrapper, errText, isDenied, readBasics, readCrontab, readHomes, readRuns, readSystem, readTimers,
-    removeRunsIfUnused, saveCrontab,
+    ensureUserRuns, ensureWrapper, errText, isDenied, readBasics, readCrontab, readHomes, readRuns, readSystem,
+    readTimers, removeRunsIfUnused, saveCrontab,
 } from "./system.js";
 import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns } from "./page.js";
 import { dialog } from "./dialogs.js";
@@ -107,8 +107,9 @@ export function jobTz(entries, index) {
     return tz && C.validTimeZone(tz) ? tz : state.tz;
 }
 
-export function runsOf(id) {
-    return state.runs.status === "ok" ? (state.runs.byId[id] || { runs: [], running: [] }) : null;
+/* The recorded runs of job id of user's crontab, or null while they are not known. */
+export function runsOf(user, id) {
+    return state.runs.status === "ok" ? (state.runs.byId[R.keyOf(user, id)] || { runs: [], running: [] }) : null;
 }
 
 /* ---------- loading ---------- */
@@ -325,14 +326,17 @@ export async function toggle(user, i, enabled) {
     restoreFocus(keyOf(user, "toggle", i));
 }
 
-/* Turns recording on or off for one job. Off also deletes its recorded runs. */
-export async function setCapture(i, on, focusKey, shownBase) {
-    const base = shownBase || state.root;
-    const e = base.entries && base.entries[i];
+/* Turns recording on or off for job i of user's crontab. Off also deletes its
+   recorded runs. Another user's job needs the run recorder and that user's
+   directory for runs first. */
+export async function setCapture(user, i, on, focusKey, shownBase) {
+    const base = shownBase || crontabOf(user);
+    const e = base && base.entries && base.entries[i];
     if (!e || e.kind !== "job") return;
     const line = e.line;
     const before = jobInfo(e);
     if (on && !(await ensureWrapper())) { restoreFocus(focusKey); return; }
+    if (on && user !== "root" && !(await ensureUserRuns(user))) { restoreFocus(focusKey); return; }
     const res = await commit(base, entries => {
         const cur = jobAt(entries, i, line);
         if (!cur) return null;
@@ -344,7 +348,7 @@ export async function setCapture(i, on, focusKey, shownBase) {
         copy[i] = C.setJob(cur, cur.schedule, command, cur.enabled);
         return copy;
     }, on ? T.okCaptureOn : T.okCaptureOff);
-    if (res.ok && !on && before.capture) await removeRunsIfUnused(before.capture.id);
+    if (res.ok && !on && before.capture) await removeRunsIfUnused(user, before.capture.id);
     reportResult(res);
     if (res.ok) refreshRuns();
     restoreFocus(focusKey);

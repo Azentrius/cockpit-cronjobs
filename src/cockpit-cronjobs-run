@@ -7,8 +7,10 @@
 # Runs COMMAND with $SHELL -c, as cron would (same environment, same umask), and
 # passes its output through, so mail from cron still works. Keeps the last 20
 # runs of each job, with up to 64 KiB of output each, in
-# /var/lib/cockpit-cronjobs/runs/ID/. When nothing can be recorded, the command
-# runs anyway.
+# /var/lib/cockpit-cronjobs/runs/ID/ for root's jobs and in
+# /var/lib/cockpit-cronjobs/users/USER/runs/ID/ for the jobs of another user (that
+# directory belongs to the user; Cockpit Cron Jobs creates it). When nothing can be
+# recorded, the command runs anyway.
 #
 # Cockpit Cron Jobs installs this file to /usr/local/libexec/ when you turn on
 # recording for a job. Jobs that use it stop working if it is removed.
@@ -17,7 +19,7 @@
 # environment is changed.
 #
 # SPDX-License-Identifier: Apache-2.0
-CRONJOBS_RUN_VERSION=1
+CRONJOBS_RUN_VERSION=2
 
 _cj_sh=${SHELL:-/bin/sh}
 _cj_umask=$(umask)
@@ -38,7 +40,16 @@ unset CRONJOBS_TRIGGER
 
 _cj_keep=20
 _cj_max=65536
-_cj_dir=${CRONJOBS_STATE_DIR:-/var/lib/cockpit-cronjobs}/runs/$_cj_id
+_cj_state=${CRONJOBS_STATE_DIR:-/var/lib/cockpit-cronjobs}
+if [ "$(id -u 2>/dev/null)" = 0 ]; then
+    _cj_dir=$_cj_state/runs/$_cj_id
+else
+    _cj_user=$(id -un 2>/dev/null)
+    case $_cj_user in
+        ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) _cj_dir= ;;
+        *) _cj_dir=$_cj_state/users/$_cj_user/runs/$_cj_id ;;
+    esac
+fi
 
 # The command itself, with the umask it was started with.
 _cj_run() {
@@ -47,7 +58,7 @@ _cj_run() {
 }
 
 umask 077
-{ mkdir -p "$_cj_dir" && [ -w "$_cj_dir" ]; } 2>/dev/null || _cj_run
+{ [ -n "$_cj_dir" ] && mkdir -p "$_cj_dir" && [ -w "$_cj_dir" ]; } 2>/dev/null || _cj_run
 
 _cj_stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 _cj_start=$(date +%s)

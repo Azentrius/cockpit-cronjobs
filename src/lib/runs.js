@@ -21,6 +21,11 @@
 
     const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
     const OUT_RE = /^[0-9A-Za-z_-]{1,64}$/;
+    /* The key of a recorded job: its ID for root's jobs, USER/ID for another user's. */
+    const KEY_RE = /^(?:[A-Za-z0-9_][A-Za-z0-9._-]{0,31}\/)?[A-Za-z0-9_-]{1,64}$/;
+    const keyOf = (user, id) => user === "root" ? id : user + "/" + id;
+    const idOfKey = key => key.slice(key.indexOf("/") + 1);
+    const userOfKey = key => key.indexOf("/") < 0 ? "root" : key.slice(0, key.indexOf("/"));
     const num = v => (typeof v === "number" && isFinite(v) ? v : null);
 
     function record(o) {
@@ -43,8 +48,8 @@
         try { return JSON.parse(text); } catch (_) { return null; }
     }
 
-    /* Script output -> { ID: { runs: [newest first], running: [{ start, pid, trigger }], kb } }.
-       Sections start with "\x1eID"; lines are records ("{…}"), "size KB" (disk use of
+    /* Script output -> { KEY: { runs: [newest first], running: [{ start, pid, trigger }], kb } }.
+       Sections start with "\x1eKEY" (ID, or USER/ID for another user's job); lines are records ("{…}"), "size KB" (disk use of
        the directory, kb null when missing) or "running ALIVE {…}" for a run marker
        (ALIVE 0: the run died without finishing). */
     function parseRuns(text) {
@@ -52,7 +57,7 @@
         String(text || "").split("\x1e").slice(1).forEach(chunk => {
             const lines = chunk.split("\n");
             const id = lines.shift().trim();
-            if (!ID_RE.test(id)) return;
+            if (!KEY_RE.test(id)) return;
             const job = { runs: [], running: [], kb: null };
             lines.forEach(line => {
                 if (line.charAt(0) === "{") {
@@ -100,16 +105,17 @@
     }
 
     /* Recorded jobs that no crontab mentions any more (lines changed or removed by
-       hand): [{ id, count, last, kb }], the most recent last run first. A job with a
-       run going on is never one of them.
+       hand): [{ key, user, id, count, last, kb }], the most recent last run first. A
+       job with a run going on is never one of them.
        byId: from parseRuns; text: all crontabs together. */
     function orphans(byId, text) {
         const used = words(text);
         return Object.keys(byId)
-            .filter(id => byId[id].running.length === 0 && !used.has(id))
-            .map(id => ({ id, count: byId[id].runs.length, last: byId[id].runs[0] || null, kb: byId[id].kb }))
-            .sort((a, b) => (b.last ? b.last.start : 0) - (a.last ? a.last.start : 0) || a.id.localeCompare(b.id));
+            .filter(key => byId[key].running.length === 0 && !used.has(idOfKey(key)))
+            .map(key => ({ key, user: userOfKey(key), id: idOfKey(key), count: byId[key].runs.length,
+                           last: byId[key].runs[0] || null, kb: byId[key].kb }))
+            .sort((a, b) => (b.last ? b.last.start : 0) - (a.last ? a.last.start : 0) || a.key.localeCompare(b.key));
     }
 
-    return { ID_RE, OUT_RE, parseRuns, outcome, duration, mentioned, orphans };
+    return { ID_RE, OUT_RE, KEY_RE, keyOf, parseRuns, outcome, duration, mentioned, orphans };
 }));

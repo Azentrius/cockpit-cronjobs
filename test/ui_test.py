@@ -525,7 +525,7 @@ with sync_playwright() as p:
     check("gone-0000" in ot and "update-geoip-1a2b" not in ot, "only the job no line uses: " + ot)
     check("8 KB" in ot and "OK" in ot and page.locator("#orph-body tbody tr").count() == 1, "size and last run: " + ot)
     check(page.locator("#orph-all").is_hidden(), "no 'remove all' for one job")
-    check("/var/lib/cockpit-cronjobs/runs/" in page.inner_text("#orph-note"), "leftover note names the directory")
+    check("/var/lib/cockpit-cronjobs/" in page.inner_text("#orph-note"), "leftover note names the directory")
     shot(page, "de-light-orphans", full=False)
     # a crontab mentions the ID again meanwhile: the root script keeps it, the page reloads
     page.evaluate("() => { window.__mock.root += '# gone-0000 is coming back\\n'; }")
@@ -747,8 +747,8 @@ with sync_playwright() as p:
     check("crontab -u www-data" in card.locator(".az-card__desc").inner_text() and "als www-data" in card.inner_text(),
           "the card says how it is changed and as whom the jobs run: " + card.locator(".az-card__desc").inner_text())
     check(card.locator("tbody tr").count() == 1 and "Alle 5 Minuten" in card.inner_text(), "its job")
-    check(card.locator("[data-key^='capture:']").count() == 0 and "Nicht erfasst" in card.inner_text(),
-          "no recording for other users (yet)")
+    check(card.locator("[data-key='capture:www-data:0']").count() == 1 and "Nicht erfasst" in card.inner_text(),
+          "not recorded, with the link to record it")
     # run now: as www-data, in its home, with cron's environment for www-data
     card.locator("[data-key='run:www-data:0']").click()
     check(page.inner_text("#run-intro") == "Dieser Befehl wird sofort als www-data ausgeführt:" and
@@ -779,12 +779,13 @@ with sync_playwright() as p:
     card.locator("label.az-switch").filter(has=page.locator("[data-key='toggle:www-data:0']")).click()
     wait_idle(page)
     check(mock(page, "sys.users['www-data']") == www, "switched on again: the bytes from before")
-    # edit: the dialog names the crontab, there is no recording, the help says as whom it runs
+    # edit: the dialog names the crontab, the help says as whom it runs
     card.locator("[data-key='edit:www-data:0']").click()
     check(page.inner_text("#edit-title") == "Job bearbeiten" and page.inner_text("#edit-sub") == "Crontab von www-data",
           "edit dialog names the crontab")
-    check(page.locator("#f-capture-field").is_hidden() and "Läuft als www-data" in page.inner_text("#f-command-help"),
-          "no recording; runs as www-data: " + page.inner_text("#f-command-help"))
+    check(page.locator("#f-capture-field").is_visible() and not page.is_checked("#f-capture") and
+          "Läuft als www-data" in page.inner_text("#f-command-help"),
+          "recording can be turned on; runs as www-data: " + page.inner_text("#f-command-help"))
     page.fill("#f-schedule", "*/10 * * * *")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
@@ -792,7 +793,8 @@ with sync_playwright() as p:
     check(mock(page, "sys.users['www-data']") == www.replace("*/5", "*/10"), "edited: " + repr(mock(page, "sys.users['www-data']")))
     # add, then delete
     card.locator("[data-key='add:www-data']").click()
-    check(page.inner_text("#edit-title") == "Job hinzufügen" and not page.is_checked("#f-capture"), "add dialog for www-data")
+    check(page.inner_text("#edit-title") == "Job hinzufügen" and page.is_checked("#f-capture"), "add dialog for www-data")
+    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()
     page.fill("#f-schedule", "0 4 * * *")
     page.fill("#f-command", "/usr/bin/php /var/www/nextcloud/occ files:scan --all")
     page.click("#edit-save")
@@ -804,7 +806,7 @@ with sync_playwright() as p:
     check("occ" in page.locator("#tl-card .cron-tl-name").all_inner_texts(), "the new job in the timeline right away")
     card.locator("[data-key='more:www-data:1']").click()
     items = page.locator("#row-menu [role=menuitem]").all_inner_texts()
-    check([x.strip() for x in items] == ["Löschen"], "menu of another user's job: delete only: " + repr(items))
+    check([x.strip() for x in items] == ["Läufe erfassen", "Löschen"], "menu of another user's job: " + repr(items))
     page.locator(".cron-menu__item", has_text="Löschen").click()
     check("aus der Crontab von www-data" in page.inner_text("#del-intro") and
           "/var/lib/cockpit-cronjobs/backups/users/www-data/" in page.inner_text("#del-backup"), "delete names the crontab")
@@ -837,6 +839,55 @@ with sync_playwright() as p:
     wait_idle(page)
     check(mock(page, "sys.users['www-data']") == www + "# by hand\n", "changed meanwhile: nothing written")
     check("Die Crontab von www-data wurde außerhalb" in page.inner_text("#alerts"), "conflict names the crontab: " + page.inner_text("#alerts"))
+    # recording a job of www-data: the user gets a directory for its runs, the line is wrapped
+    page.evaluate("() => { window.__mock.failUserRuns = 'chown: invalid user'; }")
+    card.locator("[data-key='capture:www-data:0']").click()
+    wait_idle(page)
+    check("Läufe der Jobs von www-data" in page.inner_text("#alerts") and "invalid user" in page.inner_text("#alerts") and
+          mock(page, "sys.users['www-data']") == www + "# by hand\n", "no directory: said so, nothing written")
+    page.evaluate("() => { window.__mock.failUserRuns = null; }")
+    card.locator("[data-key='capture:www-data:0']").click()
+    wait_idle(page)
+    wrapped = mock(page, "sys.users['www-data']")
+    m = re.match(r"\*/5 \* \* \* \* " + re.escape(WRAP) + r" (cron-[0-9a-f]{4}) 'php -f /var/www/nextcloud/cron\.php'\n# by hand\n$", wrapped)
+    check(m is not None and mock(page, "userRunsMade") == ["www-data"], "recorded through the run recorder: " + repr(wrapped))
+    rid = m.group(1) if m else "x"
+    page.evaluate("""id => {
+        const now = Math.floor(Date.now() / 1000);
+        window.__mock.runs['www-data/' + id] = { runs: [{ start: now - 300, end: now - 298, rc: 0, trigger: 'schedule', bytes: 12,
+                                                          truncated: false, out: '20261013T120000Z-77' }], running: [], kb: 4 };
+        window.__mock.outputs['www-data/' + id + '/20261013T120000Z-77'] = 'cron.php ok\\n';
+        window.__mock.runs['www-data/gone-4242'] = { runs: [], running: [], kb: 4 };
+    }""", rid)
+    page.click("#reload")
+    wait_idle(page)
+    check("OK" in card.locator("td[data-last='www-data:0']").inner_text(), "the last run of www-data's job")
+    card.locator("[data-key='runs:www-data:0']").click()
+    check("/var/lib/cockpit-cronjobs/users/www-data/runs/" in page.inner_text("#runs-note"), "runs dialog names the user's directory")
+    page.locator("#runs-body [data-key^='out:']").first.click()
+    wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('cron.php ok')")
+    check(True, "output of www-data's run read")
+    check(["www-data", "tail", "-c", "65536", f"/var/lib/cockpit-cronjobs/users/www-data/runs/{rid}/20261013T120000Z-77.out"]
+          in mock(page, "asUser"), "the output read as www-data: " + repr(mock(page, "asUser")))
+    page.click("#runs-close-btn")
+    # leftover runs of another user are offered with the user's name, and removed by key
+    page.click("[data-key=orphans]")
+    check("gone-4242" in page.inner_text("#orph-body") and "Crontab von www-data" in page.inner_text("#orph-body"),
+          "leftover runs of www-data: " + page.inner_text("#orph-body"))
+    page.click("[data-key='orph:www-data/gone-4242']")
+    wait_js(page, "!document.querySelector(\"[data-key='orph:www-data/gone-4242']\")")
+    check("www-data/gone-4242" in mock(page, "removedRuns"), "removed: " + repr(mock(page, "removedRuns")))
+    page.click("#orph-close-btn")
+    # turning recording off unwraps the line and deletes the runs
+    card.locator("[data-key='more:www-data:0']").click()
+    page.locator(".cron-menu__item", has_text="Erfassung ausschalten").click()
+    page.click("#confirm-ok")
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == www + "# by hand\n" and "www-data/" + rid in mock(page, "removedRuns"),
+          "recording off: the plain line, the runs gone: " + repr(mock(page, "removedRuns")))
+    check(["www-data", "rm", "-rf", "--", f"/var/lib/cockpit-cronjobs/users/www-data/runs/{rid}"] in mock(page, "asUser"),
+          "the runs removed as www-data: " + repr(mock(page, "asUser")))
+    check(all(a[0] == "www-data" for a in mock(page, "asUser")), "only www-data's runs as www-data")
     check(not page.problems, "no console problems (other users): " + repr(page.problems))
     page.context.close()
     # a user cron cannot read gets an error card; a name the page does not take stays read-only under System

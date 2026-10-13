@@ -5,9 +5,9 @@
 
 import {
     $, C, clock, codeSafe, fill, fmtDuration, fmtElapsed, fmtShort, h, icon, joinList, KEEP_RUNS, LOCALE, R, rich,
-    RUN_OUTPUT_LIMIT, RUNS_DIR, SD, setBusyButton, state, T,
+    RUN_OUTPUT_LIMIT, SD, setBusyButton, state, STATE_DIR, T,
 } from "./core.js";
-import { errText, isDenied, readOutput, removeOrphans, RUN_SCRIPT } from "./system.js";
+import { errText, isDenied, readOutput, removeOrphans, RUN_SCRIPT, runsDirOf } from "./system.js";
 import { crontabOf, jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
 import { labelEl, runLabel, showAlert } from "./page.js";
 import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
@@ -31,7 +31,7 @@ export function openRun(user, index, openerKey) {
     const e = base.entries[index];
     if (!e || e.kind !== "job") return;
     const info = jobInfo(e);
-    const capture = user === "root" ? info.capture : null;
+    const capture = info.capture;
     const env = runEnvironment(base, index, !!capture);
     const cron = C.cronCommand(e.command);
     run = { phase: "confirm", user, index, command: e.command, shown: info.command, capture,
@@ -158,14 +158,16 @@ function renderRunDialog() {
 
 /* ---------- recorded runs ---------- */
 
-export function openRuns(index, openerKey) {
-    if (state.root.status !== "ok") return;
-    const e = state.root.entries[index];
+/* The recorded runs of job index of user's crontab. */
+export function openRuns(user, index, openerKey) {
+    const tab = crontabOf(user);
+    if (!tab || tab.status !== "ok") return;
+    const e = tab.entries[index];
     if (!e || e.kind !== "job") return;
     const info = jobInfo(e);
     if (!info.capture) return;
     openDialog($("runs-dlg"), openerKey, {
-        kind: "runs", index, line: e.line, id: info.capture.id, command: info.command,
+        kind: "runs", user, index, line: e.line, id: info.capture.id, command: info.command,
         open: null, outputs: {},
     }, $("runs-close-btn"));
     renderRunsDialog();
@@ -176,10 +178,11 @@ export function renderRunsDialog() {
     const d = dialog;
     if (!d || d.kind !== "runs") return;
     $("runs-cmd").textContent = d.command;
-    const editable = state.root.status === "ok" && !state.root.locked;
+    const tab = crontabOf(d.user);
+    const editable = !!tab && tab.status === "ok" && !tab.locked;
     $("runs-capture-off").hidden = !editable;
-    fill($("runs-note"), rich(T.runsNote(KEEP_RUNS, RUNS_DIR + "/")));
-    const job = runsOf(d.id);
+    fill($("runs-note"), rich(T.runsNote(KEEP_RUNS, runsDirOf(d.user) + "/")));
+    const job = runsOf(d.user, d.id);
     const body = $("runs-body");
     const focusedKey = document.activeElement && body.contains(document.activeElement)
         ? document.activeElement.dataset.key : null;
@@ -245,7 +248,7 @@ function toggleOutput(out) {
     if (!d || d.kind !== "runs") return;
     d.open = d.open === out ? null : out;
     if (d.open && d.outputs[out] === undefined) {
-        readOutput(d.id, out).then(text => { d.outputs[out] = text; }, () => { d.outputs[out] = null; })
+        readOutput(d.user, d.id, out).then(text => { d.outputs[out] = text; }, () => { d.outputs[out] = null; })
             .finally(() => { if (dialog === d) renderRunsDialog(); });
     }
     renderRunsDialog();
@@ -322,7 +325,7 @@ export function renderOrphansDialog() {
     const body = $("orph-body");
     const focusedKey = document.activeElement && body.contains(document.activeElement)
         ? document.activeElement.dataset.key : null;
-    fill($("orph-note"), rich(T.orphansNote(RUNS_DIR + "/")));
+    fill($("orph-note"), rich(T.orphansNote(STATE_DIR + "/")));
     $("orph-all").hidden = list.length < 2;
     if (list.length === 0) {
         fill(body, h("p", { class: "cron-state" }, T.orphansNone));
@@ -331,7 +334,10 @@ export function renderOrphansDialog() {
     const rows = list.map(o => {
         const l = o.last ? runLabel(o.last) : null;
         return h("tr", null,
-            h("td", { "data-label": T.colJobId }, h("span", { class: "az-mono" }, o.id)),
+            h("td", { "data-label": T.colJobId }, o.user === "root" ? h("span", { class: "az-mono" }, o.id)
+                : h("div", { class: "cron-cell" },
+                    h("span", { class: "az-mono" }, o.id),
+                    h("span", { class: "az-cell-sub" }, T.srcUser(o.user)))),
             h("td", { class: "az-nowrap", "data-label": T.colLast }, l
                 ? h("div", { class: "cron-cell" },
                     h("span", null, labelEl(l.kind, l.icon, l.text)),
@@ -340,9 +346,9 @@ export function renderOrphansDialog() {
             h("td", { class: "az-nowrap", "data-label": T.colRuns }, String(o.count)),
             h("td", { class: "az-nowrap", "data-label": T.colSize }, fmtSize(o.kb)),
             h("td", { class: "az-cell-actions" },
-                h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "data-key": "orph:" + o.id,
+                h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "data-key": "orph:" + o.key,
                               "aria-label": T.orphansRemove(o.id), title: T.orphansRemove(o.id), disabled: !!d.locked,
-                              onclick: () => removeOrphanRuns([o.id]) }, icon("trash"))));
+                              onclick: () => removeOrphanRuns([o.key]) }, icon("trash"))));
     });
     fill(body, h("div", { class: "cron-runs-table" },
         h("table", { class: "az-table az-table--stack" },
@@ -359,12 +365,12 @@ export function renderOrphansDialog() {
     }
 }
 
-/* Removes the runs of the given jobs; the root script checks each one again. Jobs
-   it keeps (used again, or running) are reported, and the page reloads, since a
-   crontab changed outside the page. */
-export async function removeOrphanRuns(ids) {
+/* Removes the runs of the given jobs (keys: ID or USER/ID); the root script checks
+   each one again. Jobs it keeps (used again, or running) are reported, and the page
+   reloads, since a crontab changed outside the page. */
+export async function removeOrphanRuns(keys) {
     const d = dialog;
-    if (!d || d.kind !== "orphans" || d.locked || state.busy || loading || ids.length === 0) return;
+    if (!d || d.kind !== "orphans" || d.locked || state.busy || loading || keys.length === 0) return;
     const buttons = [$("orph-close"), $("orph-close-btn")];
     d.locked = true;
     state.busy = true;
@@ -375,7 +381,7 @@ export async function removeOrphanRuns(ids) {
     let res = null;
     let error = null;
     try {
-        res = await removeOrphans(ids);
+        res = await removeOrphans(keys);
     } catch (ex) {
         error = ex && ex.exit_status === 4 ? T.lockBusy : errText(ex);
     }

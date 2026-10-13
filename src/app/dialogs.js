@@ -5,7 +5,7 @@
  */
 
 import { $, backupDirOf, C, fill, fmtLocal, fmtWhen, h, icon, keyOf, rich, setBusyButton, state, T } from "./core.js";
-import { errText, installWrapper, removeRunsIfUnused, wrapperCurrent } from "./system.js";
+import { ensureUserRuns, errText, installWrapper, removeRunsIfUnused, wrapperCurrent } from "./system.js";
 import {
     commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, setCapture, takenIds,
 } from "./crontab.js";
@@ -116,9 +116,9 @@ export function updateForm(showAll) {
     else setFieldState(form.schedule(), $("f-schedule-help"), true, T.scheduleHelp);
 
     const capture = form.capture();
-    const recorded = user === "root" && capture.checked && !capture.disabled;
+    const recorded = capture.checked && !capture.disabled;
     const cmdHelp = state.basics.mta === false && !mailto
-        ? (recorded ? T.commandHelpNoMtaRecorded : T.commandHelpNoMta(user))
+        ? (recorded ? T.commandHelpNoMtaRecorded(user) : T.commandHelpNoMta(user))
         : mailto ? T.commandHelpMailto(user) : T.commandHelp(user);
     if (!cmd.ok && (showCmd || !cmd.empty)) setFieldState(form.command(), $("f-command-help"), false, cmd.msg);
     else setFieldState(form.command(), $("f-command-help"), true, cmdHelp);
@@ -133,8 +133,7 @@ export function updateForm(showAll) {
     return { sched, cmd };
 }
 
-/* Add (index null) or edit a job of user's crontab. Recording is offered for root's
-   jobs only. */
+/* Add (index null) or edit a job of user's crontab. */
 export function openEdit(user, index, openerKey) {
     const base = crontabOf(user);
     if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
@@ -144,11 +143,10 @@ export function openEdit(user, index, openerKey) {
     $("edit-title").textContent = e ? T.editTitle : T.addTitle;
     $("edit-sub").textContent = user === "root" ? "" : T.userTitle(user);
     $("edit-sub").hidden = user === "root";
-    $("f-capture-field").hidden = user !== "root";
     form.schedule().value = e ? e.schedule : "";
     form.command().value = e ? info.command : "";
     form.active().checked = e ? e.enabled : true;
-    form.capture().checked = user === "root" && (e ? !!info.capture : true);
+    form.capture().checked = e ? !!info.capture : true;
     form.touched.schedule = false;
     form.touched.command = false;
     dialogError("edit-alert", null);
@@ -168,7 +166,7 @@ export async function submitEdit(ev) {
     if (!cmd.ok) { form.command().focus(); return; }
     const d = dialog;
     const user = d.base.user;
-    const capture = user === "root" && form.capture().checked && C.canCapture(cmd.text);
+    const capture = form.capture().checked && C.canCapture(cmd.text);
     const enabled = form.active().checked;
     dialogError("edit-alert", null);
     setBusyButton($("edit-save"), true, T.saving);
@@ -189,6 +187,10 @@ export async function submitEdit(ev) {
             dialogError("edit-alert", errText(ex), T.wrapperFailed);
             return;
         }
+    }
+    if (capture && user !== "root" && !(await ensureUserRuns(user))) {
+        done();
+        return;
     }
     const command = capture
         ? C.wrapCommand(d.capture ? d.capture.id : C.makeJobId(cmd.text, takenIds(d.base.entries)), cmd.text,
@@ -213,7 +215,7 @@ export async function submitEdit(ev) {
         return copy;
     }, index === null ? T.okAdded : T.okEdited);
     done();
-    if (res.ok && d.capture && !capture) await removeRunsIfUnused(d.capture.id);
+    if (res.ok && d.capture && !capture) await removeRunsIfUnused(user, d.capture.id);
     if (res.ok || res.conflict) {
         let key = d.openerKey;
         if (res.ok && index === null) {
@@ -265,7 +267,7 @@ export async function confirmDelete() {
     setBusyButton($("del-confirm"), false, T.deleting);
     $("del-cancel").disabled = false;
     $("del-close").disabled = false;
-    if (res.ok && capture) await removeRunsIfUnused(capture.id);
+    if (res.ok && capture) await removeRunsIfUnused(base.user, capture.id);
     if (res.ok) refreshRuns();
     if (res.ok || res.conflict) {
         const user = base.user;
@@ -280,9 +282,9 @@ export async function confirmDelete() {
 }
 
 /* Confirm turning recording off */
-export function openCaptureOff(index, openerKey) {
-    if (state.busy || loading || state.root.status !== "ok" || state.root.locked) return;
-    const base = state.root;
+export function openCaptureOff(user, index, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
     const e = base.entries[index];
     if (!e || e.kind !== "job" || !jobInfo(e).capture) return;
     $("confirm-title").textContent = T.captureOffTitle;
@@ -290,7 +292,7 @@ export function openCaptureOff(index, openerKey) {
     $("confirm-ok").textContent = T.captureOff;
     openDialog($("confirm-dlg"), openerKey, {
         kind: "confirm",
-        action: () => setCapture(index, false, openerKey, base),
+        action: () => setCapture(user, index, false, openerKey, base),
     }, $("confirm-cancel"));
 }
 

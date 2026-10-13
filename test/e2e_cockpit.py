@@ -12,7 +12,7 @@ DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
 
 Runs as root (the local session is root's). CI runs it the same way on the runner's
 throwaway VM (job e2e in .github/workflows/test.yml)."""
-import json, os, pwd, re, subprocess, sys, time
+import json, os, pwd, re, shutil, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
 if os.environ.get("CRONJOBS_E2E_DESTRUCTIVE") != "1":
@@ -409,6 +409,8 @@ with sync_playwright() as p:
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "* * * * *")
     page.fill("#f-command", "{ " + WHO + "; } > /tmp/cj-e2e-whoami")
+    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()   # the plain line; recording comes below
+    check(not page.is_checked("#f-capture"), "recording off for the plain job")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -442,6 +444,7 @@ with sync_playwright() as p:
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "0 5 1 1 *")
     page.fill("#f-command", WHO)
+    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -459,6 +462,93 @@ with sync_playwright() as p:
             print(f"note: {k} under cron {cron_ran[2].get(k)!r}, with run now {now_ran[2].get(k)!r}")
     page.screenshot(path=os.path.join(SHOTS, "e2e-user-run.png"))
     page.click("#run-close-btn")
+
+    # recording a job of the second user: the runs land in the user's own directory, written by the user
+    card.locator(f"[data-key='add:{USER}']").click()
+    page.fill("#f-schedule", "* * * * *")
+    page.fill("#f-command", "echo recorded-for-" + USER)
+    check(page.is_checked("#f-capture"), "recording on by default for the user's job")
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#edit-dlg').hidden")
+    wait_idle(page)
+    line = crontab_of(USER).decode().rstrip("\n").split("\n")[-1]
+    m = re.fullmatch(r"\* \* \* \* \* " + re.escape(WRAP) + r" ([a-z0-9_-]+-[0-9a-f]{4}) 'echo recorded-for-" + USER + "'", line)
+    check(m is not None, "the user's line goes through the run recorder: " + repr(line))
+    uid = pwd.getpwnam(USER).pw_uid
+    home = os.stat(f"{STATE}/users/{USER}")
+    check(oct(os.stat(STATE).st_mode & 0o777) == "0o711" and oct(os.stat(f"{STATE}/users").st_mode & 0o777) == "0o711" and
+          oct(home.st_mode & 0o777) == "0o700" and home.st_uid == uid,
+          "a directory of the user's own for its runs, reachable but not listable")
+    rec_dir = f"{STATE}/users/{USER}/runs/{m.group(1) if m else 'x'}"
+    deadline = time.time() + 75
+    recs = []
+    while time.time() < deadline and not recs:
+        if os.path.exists(rec_dir + "/runs.jsonl"):
+            recs = [json.loads(x) for x in open(rec_dir + "/runs.jsonl")]
+        if not recs:
+            time.sleep(2)
+    check(any(r["trigger"] == "schedule" and r["rc"] == 0 for r in recs) and os.stat(rec_dir).st_uid == uid,
+          "cron ran the user's job through the recorder, as the user: " + repr(recs))
+    if recs and recs[0]["out"]:
+        out_file = f"{rec_dir}/{recs[0]['out']}.out"
+        check(open(out_file).read() == f"recorded-for-{USER}\n" and os.stat(out_file).st_uid == uid, "the output recorded")
+    page.click("#reload")
+    wait_idle(page)
+    row = card.locator("tbody tr", has_text="recorded-for-" + USER)
+    check("OK" in row.locator("td[data-last]").inner_text(), "the last run in the user's card: " + row.inner_text())
+    # run now goes through the recorder too, as the user
+    row.locator("[data-key^='run:']").click()
+    page.click("#run-start")
+    wait_js(page, "!document.querySelector('#run-done-actions').hidden")
+    check("OK" in page.inner_text("#run-label") and "recorded-for-" + USER in page.inner_text("#run-log"),
+          "run now of the user's recorded job: " + page.inner_text("#run-log"))
+    page.click("#run-close-btn")
+    page.wait_for_timeout(800)
+    manual = [r for r in (json.loads(x) for x in open(rec_dir + "/runs.jsonl")) if r["trigger"] == "manual"]
+    check(len(manual) == 1 and manual[0]["rc"] == 0, "run now recorded in the user's directory: " + repr(manual))
+    row.locator("[data-key^='runs:']").click()
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1")
+    check(f"/var/lib/cockpit-cronjobs/users/{USER}/runs/" in page.inner_text("#runs-note"), "the runs dialog names the user's directory")
+    page.locator("#runs-body [data-key^='out:']").first.click()
+    wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('recorded-for-')")
+    check(True, "the user's output read through Cockpit")
+    page.screenshot(path=os.path.join(SHOTS, "e2e-user-runs.png"))
+    page.keyboard.press("Escape")
+    row.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Erfassung ausschalten").click()
+    page.click("#confirm-ok")
+    wait_idle(page)
+    check(crontab_of(USER).decode().rstrip("\n").split("\n")[-1] == "* * * * * echo recorded-for-" + USER and
+          not os.path.exists(rec_dir), "recording off: the plain line, the user's runs gone")
+
+    # the user's directory belongs to the user: a link there leads nowhere the user could not go.
+    # With the runs directory a link to a directory of root's, nothing there shows up as runs, and
+    # turning recording off for a line that names a directory there removes nothing of root's.
+    root_only = "/tmp/cj-e2e-root-only"
+    os.makedirs(root_only + "/trap-0001", exist_ok=True)
+    with open(root_only + "/trap-0001/runs.jsonl", "w") as fh:
+        fh.write('{"start":1,"end":2,"rc":0,"trigger":"schedule","bytes":0,"truncated":false,"out":""}\n')
+    user_runs = f"{STATE}/users/{USER}/runs"
+    shutil.rmtree(user_runs, ignore_errors=True)
+    os.symlink(root_only, user_runs)
+    os.lchown(user_runs, uid, -1)
+    r = sh(f"crontab -u {USER} -", input=crontab_of(USER).decode() + f"0 4 1 1 * {WRAP} trap-0001 'true'\n")
+    check(r.returncode == 0, "a recorded line of the user's own: " + r.stderr)
+    page.click("#reload")
+    wait_idle(page)
+    trap = card.locator("tbody tr", has_text="0 4 1 1 *")
+    check(trap.count() == 1 and "OK" not in trap.locator("td[data-last]").inner_text(),
+          "nothing behind the link shown as runs: " + trap.inner_text())
+    trap.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Erfassung ausschalten").click()
+    page.click("#confirm-ok")
+    wait_idle(page)
+    page.wait_for_timeout(1500)
+    check(crontab_of(USER).decode().rstrip("\n").split("\n")[-1] == "0 4 1 1 * true" and
+          os.path.isfile(root_only + "/trap-0001/runs.jsonl"),
+          "recording off: the plain line, root's directory behind the link untouched")
+    os.remove(user_runs)
+    shutil.rmtree(root_only)
     page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-user.png"))
 

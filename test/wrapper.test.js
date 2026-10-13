@@ -25,10 +25,18 @@ function run(shell, args, opts) {
     return { rc: r.status, out: r.stdout.toString(), err: r.stderr.toString() };
 }
 function records(state, id) {
-    const f = path.join(state, "runs", id, "runs.jsonl");
+    const f = runsDir(state, id, "runs.jsonl");
     return fs.existsSync(f) ? fs.readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)) : [];
 }
 function tmpState() { return fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-state-")); }
+
+/* Where the recorder keeps the runs of job id: root's under runs/, another user's
+   (as these tests run in CI) under users/USER/runs/. */
+const ME = os.userInfo().username;
+const AS_ROOT = typeof process.getuid === "function" && process.getuid() === 0;
+function runsDir(state, id, ...rest) {
+    return AS_ROOT ? path.join(state, "runs", id, ...rest) : path.join(state, "users", ME, "runs", id, ...rest);
+}
 
 t("version marker matches the page", () => {
     const text = fs.readFileSync(WRAPPER, "utf8");
@@ -50,10 +58,10 @@ for (const sh of SHELLS) {
         assert.strictEqual(x.bytes, 11);
         assert.strictEqual(x.truncated, false);
         assert.ok(x.end >= x.start && x.start > 1.7e9);
-        assert.strictEqual(fs.readFileSync(path.join(state, "runs", "job-1", x.out + ".out"), "utf8"), "hello\noops\n");
-        const dir = fs.readdirSync(path.join(state, "runs", "job-1")).filter(f => !f.startsWith("."));
+        assert.strictEqual(fs.readFileSync(runsDir(state, "job-1", x.out + ".out"), "utf8"), "hello\noops\n");
+        const dir = fs.readdirSync(runsDir(state, "job-1")).filter(f => !f.startsWith("."));
         assert.deepStrictEqual(dir.sort(), [x.out + ".out", "runs.jsonl"].sort());
-        assert.strictEqual(fs.statSync(path.join(state, "runs", "job-1")).mode & 0o777, 0o700);
+        assert.strictEqual(fs.statSync(runsDir(state, "job-1")).mode & 0o777, 0o700);
     });
 
     t(sh + ": big output is cut to the last 64 KiB, but passed through in full", () => {
@@ -64,7 +72,7 @@ for (const sh of SHELLS) {
         const x = records(state, "big")[0];
         assert.strictEqual(x.truncated, true);
         assert.strictEqual(x.bytes, 65536);
-        const kept = fs.readFileSync(path.join(state, "runs", "big", x.out + ".out"), "utf8");
+        const kept = fs.readFileSync(runsDir(state, "big", x.out + ".out"), "utf8");
         assert.strictEqual(kept, r.out.slice(-65536));
     });
 
@@ -75,7 +83,7 @@ for (const sh of SHELLS) {
         const x = records(state, "quiet")[0];
         assert.strictEqual(x.out, "");
         assert.strictEqual(x.bytes, 0);
-        assert.deepStrictEqual(fs.readdirSync(path.join(state, "runs", "quiet")).filter(f => !f.startsWith(".")), ["runs.jsonl"]);
+        assert.deepStrictEqual(fs.readdirSync(runsDir(state, "quiet")).filter(f => !f.startsWith(".")), ["runs.jsonl"]);
     });
 
     t(sh + ": keeps the last 20 runs and their output", () => {
@@ -83,10 +91,10 @@ for (const sh of SHELLS) {
         for (let k = 0; k < 25; k++) run(sh, ["many", "echo run " + k], { state });
         const recs = records(state, "many");
         assert.strictEqual(recs.length, 20);
-        const outs = fs.readdirSync(path.join(state, "runs", "many")).filter(f => f.endsWith(".out"));
+        const outs = fs.readdirSync(runsDir(state, "many")).filter(f => f.endsWith(".out"));
         assert.strictEqual(outs.length, 20);
         assert.deepStrictEqual(outs.sort(), recs.map(x => x.out + ".out").sort());
-        assert.strictEqual(fs.readFileSync(path.join(state, "runs", "many", recs[19].out + ".out"), "utf8"), "run 24\n");
+        assert.strictEqual(fs.readFileSync(runsDir(state, "many", recs[19].out + ".out"), "utf8"), "run 24\n");
     });
 
     t(sh + ": manual trigger is recorded and not passed on", () => {
@@ -116,11 +124,34 @@ for (const sh of SHELLS) {
         assert.strictEqual(r.out, "still\n");
     });
 
+    if (!AS_ROOT) {
+        t(sh + ": another user's job: its runs in users/USER/runs, root's directory untouched", () => {
+            const state = tmpState();
+            const r = run(sh, ["mine-1", "echo mine"], { state });
+            assert.strictEqual(r.rc, 0, r.err);
+            assert.strictEqual(r.out, "mine\n");
+            assert.strictEqual(records(state, "mine-1").length, 1);
+            assert.ok(fs.existsSync(path.join(state, "users", ME, "runs", "mine-1", "runs.jsonl")));
+            assert.ok(!fs.existsSync(path.join(state, "runs")));
+        });
+
+        t(sh + ": a user directory that cannot be written: the command runs anyway", () => {
+            const state = tmpState();
+            fs.mkdirSync(path.join(state, "users"));
+            fs.mkdirSync(path.join(state, "users", ME), { mode: 0o500 });
+            const r = run(sh, ["ro-1", "echo still; exit 3"], { state });
+            assert.strictEqual(r.rc, 3);
+            assert.strictEqual(r.out, "still\n");
+            assert.deepStrictEqual(fs.readdirSync(path.join(state, "users", ME)), []);
+            fs.chmodSync(path.join(state, "users", ME), 0o700);
+        });
+    }
+
     t(sh + ": bad id runs without recording", () => {
         const state = tmpState();
         const r = run(sh, ["../evil", "echo ok"], { state });
         assert.strictEqual(r.out, "ok\n");
-        assert.ok(!fs.existsSync(path.join(state, "runs")));
+        assert.deepStrictEqual(fs.readdirSync(state), [], "nothing made");
     });
 
     t(sh + ": wrong usage", () => {
@@ -135,7 +166,7 @@ for (const sh of SHELLS) {
                             { env: { PATH: "/usr/bin:/bin", SHELL: "/bin/sh", CRONJOBS_STATE_DIR: state } });
         assert.strictEqual(r.stdout.toString(), "0022\n");
         assert.strictEqual(fs.statSync(path.join(state, "made")).mode & 0o777, 0o644);
-        assert.strictEqual(fs.statSync(path.join(state, "runs", "um")).mode & 0o777, 0o700);
+        assert.strictEqual(fs.statSync(runsDir(state, "um")).mode & 0o777, 0o700);
     });
 
     t(sh + ": the job keeps its environment", () => {
@@ -158,7 +189,7 @@ for (const sh of SHELLS) {
 
     t(sh + ": a run that died is recorded as aborted", () => {
         const state = tmpState();
-        const dir = path.join(state, "runs", "dead");
+        const dir = runsDir(state, "dead");
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         fs.writeFileSync(path.join(dir, "20261012T020000Z-999999.running"), '{"start":1791770400,"pid":999999,"trigger":"schedule"}\n');
         run(sh, ["dead", "echo next"], { state });
@@ -201,7 +232,7 @@ t("running marker", () => {
     const state = tmpState();
     const sh = SHELLS[0];
     const child = spawn(sh, [WRAPPER, "slow", "sleep 1"], { env: { PATH: "/usr/bin:/bin", SHELL: "/bin/sh", CRONJOBS_STATE_DIR: state } });
-    const dir = path.join(state, "runs", "slow");
+    const dir = runsDir(state, "slow");
     const until = Date.now() + 3000;
     let marker = null;
     while (Date.now() < until && !marker) {
@@ -270,12 +301,15 @@ t("orphans: recorded jobs that no crontab mentions, not while running", () => {
                  "0 2 * * * root echo xgone-0004 gone-00041 gone-0004x\n";
     const o = R.orphans(byId, text);
     assert.deepStrictEqual(o.map(x => x.id), ["gone-0003", "gone-0004", "dead-0006", "never-0007"]);
-    assert.deepStrictEqual(o[0], { id: "gone-0003", count: 1, last: byId["gone-0003"].runs[0], kb: 12 });
+    assert.deepStrictEqual(o[0], { key: "gone-0003", user: "root", id: "gone-0003", count: 1, last: byId["gone-0003"].runs[0], kb: 12 });
     assert.strictEqual(o[1].count, 2);
     assert.strictEqual(o[1].last.start, 200);
     assert.strictEqual(o[2].last.aborted, true);
     assert.strictEqual(o[3].last, null);
     assert.deepStrictEqual(R.orphans({}, text), []);
+    const users = R.orphans(R.parseRuns("\x1ealice/gone-0008\n" + '{"start":600,"end":601,"rc":0}\n' + "\x1ealice/used-0001\n"), text);
+    assert.deepStrictEqual(users.map(x => [x.key, x.user, x.id]), [["alice/gone-0008", "alice", "gone-0008"]],
+                           "another user's runs by USER/ID, used when a crontab mentions the ID");
 });
 
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
