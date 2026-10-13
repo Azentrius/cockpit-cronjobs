@@ -701,7 +701,13 @@ with sync_playwright() as p:
     wait_js(page, "!document.querySelector('#bk-alert').hidden")
     check("an anderer Stelle" in page.inner_text("#bk-alert") and page.locator("#bk-body tbody tr").count() == 0,
           "list locked: " + page.inner_text("#bk-alert"))
-    page.evaluate("() => { window.__mock.lockBusy = false; }")
+    page.evaluate("() => { window.__mock.lockBusy = false; window.__mock.failBackups = 'cat: Input/output error'; }")
+    page.click("#bk-close")
+    page.click("#backups")
+    wait_js(page, "!document.querySelector('#bk-alert').hidden")
+    check("konnten nicht gelesen werden" in page.inner_text("#bk-alert") and "Input/output error" in page.inner_text("#bk-alert"),
+          "list unreadable: " + page.inner_text("#bk-alert"))
+    page.evaluate("() => { window.__mock.failBackups = null; }")
     page.click("#bk-close")
     check(not page.problems, "no console problems (backups): " + repr(page.problems))
     page.context.close()

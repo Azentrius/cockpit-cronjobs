@@ -16,15 +16,17 @@
 }(typeof self !== "undefined" ? self : this, function () {
     "use strict";
 
-    const NAME_RE = /^root-(\d{8})-(\d{6})(?:-(\d+))?\.crontab$/;
+    const NAME_RE = /^root-\d{8}-\d{6}(?:-\d+)?\.crontab$/;
 
     /* ---------- the list ---------- */
 
-    /* Output of BACKUPS_SCRIPT (bytes): for each backup a header line
+    /* Output of BACKUPS_SCRIPT (bytes): for each backup, newest first, a header line
        "\x1eMTIME SIZE NAME\n" (MTIME in seconds), then exactly SIZE bytes of the file.
-       Result: the backups, newest first: { name, mtime (ms), size, text } where text
-       is null when the file is not UTF-8 (it can then neither be compared nor
-       restored here). Throws when the output does not have this shape. */
+       Result: the backups in that order (the script knows it to the nanosecond, as
+       SAVE_SCRIPT does; names are reused once old ones are gone): { name, mtime (ms),
+       size, text } where text is null when the file is not UTF-8 (it can then neither
+       be compared nor restored here). Throws when the output does not have this
+       shape. */
     function parseBackups(bytes) {
         const list = [];
         let pos = 0;
@@ -43,23 +45,13 @@
             try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body); } catch (_) { text = null; }
             list.push({ name: m[3], mtime: +m[1] * 1000, size, text });
         }
-        return list.sort(newestFirst);
+        return list;
     }
 
     function latin1(bytes) {
         let s = "";
         for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
         return s;
-    }
-
-    /* As SAVE_SCRIPT sees it (ls -t): newest first; within one second the name decides
-       (time stamp, then the number added to a second backup in the same second). */
-    function newestFirst(a, b) {
-        if (a.mtime !== b.mtime) return b.mtime - a.mtime;
-        const x = NAME_RE.exec(a.name);
-        const y = NAME_RE.exec(b.name);
-        const stamp = (y[1] + y[2]).localeCompare(x[1] + x[2]);
-        return stamp || (+(y[3] || 1)) - (+(x[3] || 1));
     }
 
     /* ---------- difference ---------- */

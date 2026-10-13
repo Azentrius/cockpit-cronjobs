@@ -162,22 +162,24 @@ function listing(files) {
     }));
 }
 
-t("the list: newest first, files byte for byte, other names left out", () => {
+/* In the order the script prints (it knows the times to the nanosecond; within one
+   second names do not tell the order, as SAVE_SCRIPT reuses a name once it is gone). */
+t("the list: in the order given, files byte for byte, other names left out", () => {
     const list = B.parseBackups(new Uint8Array(listing([
+        ["root-20261013-080000.crontab", 1791878400, Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a])],
         ["root-20261012-101010.crontab", 1791770410, "a\n"],
         ["root-20261012-101010-3.crontab", 1791770410, "c\n\x1e 9 9 fake\n"],
         ["notes.txt", 1791770500, "x\n"],
         ["root-20261012-101010-2.crontab", 1791770410, "b\n"],
-        ["root-20261013-080000.crontab", 1791878400, Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a])],
-        ["root-20261011-235959.crontab", 1791763199, "﻿bom\n"],
         ["root-20261012-120000.crontab", 1791777600, ""],
+        ["root-20261011-235959.crontab", 1791763199, "﻿bom\n"],
     ])));
     assert.deepStrictEqual(list.map(b => [b.name, b.text]), [
         ["root-20261013-080000.crontab", null],
-        ["root-20261012-120000.crontab", ""],
+        ["root-20261012-101010.crontab", "a\n"],
         ["root-20261012-101010-3.crontab", "c\n\x1e 9 9 fake\n"],
         ["root-20261012-101010-2.crontab", "b\n"],
-        ["root-20261012-101010.crontab", "a\n"],
+        ["root-20261012-120000.crontab", ""],
         ["root-20261011-235959.crontab", "﻿bom\n"],
     ]);
     assert.strictEqual(list[0].mtime, 1791878400000);

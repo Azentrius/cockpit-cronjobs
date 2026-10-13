@@ -131,8 +131,9 @@ export function saveRoot(expected, next, timer, stop) {
     return spawn(args, SPAWN_ROOT, next).then(out => String(out || "").trim());
 }
 
-/* All backups of the root crontab, under the crontab lock (shared), so that none is
-   written or removed meanwhile. For each file a header "\\036MTIME SIZE NAME" (MTIME in
+/* All backups of the root crontab, newest first as SAVE_SCRIPT sees them (ls -t, so
+   also within one second), under the crontab lock (shared), so that none is written
+   or removed meanwhile. For each file a header "\\036MTIME SIZE NAME" (MTIME in
    seconds), then the file byte for byte (see lib/backups.js). Links and other names
    are left out. Exit 4 = locked. */
 const BACKUPS_SCRIPT = `set -u
@@ -141,14 +142,15 @@ dir='${BACKUP_DIR}'
 [ -d "$dir" ] || exit 0
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -s -w 10 9 || exit 4
-for f in "$dir"/root-*.crontab; do
+ls -1t "$dir"/root-*.crontab 2>/dev/null | while IFS= read -r f; do
   [ -f "$f" ] && [ ! -L "$f" ] || continue
   n=\${f##*/}
+  case $n in root-*.crontab) ;; *) continue ;; esac
   case $n in *[!A-Za-z0-9.-]*) continue ;; esac
   s=$(stat -c '%Y %s' "$f") || exit 1
   printf '\\036%s %s\\n' "$s" "$n"
   cat -- "$f" || exit 1
-done
+done || exit 1
 exit 0
 `;
 

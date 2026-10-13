@@ -276,12 +276,12 @@
             else if (timer) M.enabled.push(timer);
             return path + "\n";
         }
-        /* The backups: header "\x1eMTIME SIZE NAME", then the file. */
+        /* The backups, newest first (ls -t): header "\x1eMTIME SIZE NAME", then the file. */
         if (/flock -s -w 10 9/.test(script)) {
             if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
             if (M.failBackups) fail({ exit_status: 1, problem: null, message: M.failBackups });
             const parts = [];
-            M.backups.forEach(b => {
+            M.backups.slice().reverse().sort((a, b) => b.mtime - a.mtime).forEach(b => {
                 let bytes = new TextEncoder().encode(b.content);
                 if (b.latin1) bytes = bytes.map(x => x === 0x01 ? 0xE9 : x);
                 parts.push(new TextEncoder().encode("\x1e" + b.mtime + " " + bytes.length + " " + b.path.replace(/^.*\//, "") + "\n"), bytes);
