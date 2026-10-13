@@ -187,6 +187,14 @@ t("Environment quoting", () => {
     assert.strictEqual(SD.envLine("P", "50%"), 'Environment="P=50%%"');
     assert.strictEqual(SD.envLine("Q", 'say "hi" \\o/'), 'Environment="Q=say \\"hi\\" \\\\o/"');
 });
+t("job environment: cron's defaults for root and for another user", () => {
+    assert.deepStrictEqual(SD.jobEnvironment({ MAILTO: "", X: "1" }, null),
+                           { SHELL: "/bin/sh", PATH: "/usr/bin:/bin", HOME: "/root", LOGNAME: "root", USER: "root", X: "1" });
+    assert.deepStrictEqual(SD.jobEnvironment({ CRON_TZ: "UTC", PATH: "/opt/bin:/usr/bin" }, "/var/www", "www-data"),
+                           { SHELL: "/bin/sh", PATH: "/opt/bin:/usr/bin", HOME: "/var/www", LOGNAME: "www-data", USER: "www-data" });
+    assert.strictEqual(SD.jobEnvironment({}, null, "nobody").HOME, "/", "no home known: /");
+    assert.strictEqual(SD.jobEnvironment({ HOME: "/srv" }, "/var/www", "www-data").HOME, "/srv", "the crontab's HOME wins");
+});
 t("service unit", () => {
     const env = SD.serviceEnvironment({ MAILTO: "", PATH: "/usr/local/bin:/usr/bin:/bin", SHELL: "/bin/bash" });
     assert.deepStrictEqual(env, { SHELL: "/bin/bash", PATH: "/usr/local/bin:/usr/bin:/bin" });

@@ -98,6 +98,8 @@
         backups: [],
         backupSeq: 0,
         userWrites: [],
+        /* getent passwd, after the name */
+        passwd: { "www-data": "33:33:www-data:/var/www:/usr/sbin/nologin", "ghost": "1001:1001::/home/ghost:/bin/sh" },
         userConflictNext: null,
         calls: [],
         jumps: [],
@@ -320,6 +322,10 @@
             parts.forEach(p => { out.set(p, pos); pos += p.length; });
             return out;
         }
+        /* The user database: getent passwd for each name */
+        if (/getent passwd/.test(script)) {
+            return args.slice(4).filter(u => M.passwd[u]).map(u => u + ":x:" + M.passwd[u] + "\n").join("");
+        }
         if (/sec host/.test(script)) return basicsOutput();
         if (/sec etc/.test(script)) {
             if (M.failSystem) fail({ exit_status: 2, problem: null, message: "sh: broken" });
@@ -376,12 +382,12 @@
         fail({ problem: "not-found", message: "unexpected command " + JSON.stringify(args) });
     }
 
-    /* "Run now": /bin/sh -c RUN_SCRIPT name home shell command NAME=value… */
+    /* "Run now": /bin/sh -c RUN_SCRIPT name user home shell command NAME=value… */
     function startJob(args, opts, proc, api, getInput) {
-        const env = args.slice(7);
-        const command = args[6];
+        const env = args.slice(8);
+        const command = args[7];
         const input = getInput();
-        M.runs_started.push({ env, command, shell: args[5], home: args[4], opts,
+        M.runs_started.push({ env, command, user: args[4], shell: args[6], home: args[5], opts,
                               input: input === null ? null : new TextDecoder().decode(input) });
         if (opts.superuser === "require" && M.superuser === "none") { api.reject({ problem: "access-denied", message: "" }); return; }
         const lines = /fail/.test(command) ? ["Loading …", "Error: broken"] : ["Loading 12 feeds …", "news.example.org 34 new entries", "done"];

@@ -23,8 +23,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
   after a backup of the previous version; afterwards it is read back and compared.
 - **Crontabs of other users.** With administrative access, every other user's crontab gets a card of its
   own and is changed the same way, through `crontab -u USER`, with backups of its own; its jobs run as
-  that user. Without administrative access they are not shown at all. Run now, recording and conversion
-  are for root's jobs so far.
+  that user. Without administrative access they are not shown at all. Run now starts their jobs as that
+  user, in the user's home with cron's environment; recording and conversion are for root's jobs so far.
 - **Backups you can use.** The last ten versions of the root crontab, each with what restoring it would
   change, line by line as `diff` shows it. Restoring goes through the same locked step, after a backup of
   the current version, so a restore can be undone the same way.

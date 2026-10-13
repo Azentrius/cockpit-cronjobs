@@ -77,6 +77,8 @@ sh("crontab -u root -", input="MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fs
 USER = "cjuser"
 sh(f"id -u {USER} || useradd -m -s /bin/sh {USER}")
 USER_TAB = "MAILTO=\"\"\n# reports for cjuser\n15 3 * * * /bin/true\n"
+# Who runs a job, where and with which environment: once from cron, once with run now.
+WHO = "id -un; pwd; printenv HOME LOGNAME USER SHELL PATH"
 sh(f"crontab -u {USER} -", input=USER_TAB)
 if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
     sys.exit("cron is not running")
@@ -399,11 +401,12 @@ with sync_playwright() as p:
     check(crontab_of(USER) == start, "switched on again: the bytes from before")
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "* * * * *")
-    page.fill("#f-command", "id -un > /tmp/cj-e2e-whoami")
+    page.fill("#f-command", "{ " + WHO + "; } > /tmp/cj-e2e-whoami")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
-    check(crontab_of(USER) == start + b"* * * * * id -un > /tmp/cj-e2e-whoami\n", "job added: " + repr(crontab_of(USER)))
+    check(crontab_of(USER) == start + ("* * * * * { " + WHO + "; } > /tmp/cj-e2e-whoami\n").encode(),
+          "job added: " + repr(crontab_of(USER)))
     user_backups = f"{STATE}/backups/users/{USER}"
     names = sorted(os.listdir(user_backups)) if os.path.isdir(user_backups) else []
     check(len(names) == 3 and all(n.startswith(USER + "-") for n in names) and
@@ -413,8 +416,9 @@ with sync_playwright() as p:
     deadline = time.time() + 75
     while time.time() < deadline and not os.path.exists("/tmp/cj-e2e-whoami"):
         time.sleep(2)
+    time.sleep(1)   # the job may still be writing
     who = open("/tmp/cj-e2e-whoami").read() if os.path.exists("/tmp/cj-e2e-whoami") else None
-    check(who == USER + "\n" and os.stat("/tmp/cj-e2e-whoami").st_uid == pwd.getpwnam(USER).pw_uid,
+    check(who is not None and who.split("\n")[0] == USER and os.stat("/tmp/cj-e2e-whoami").st_uid == pwd.getpwnam(USER).pw_uid,
           "cron ran the new job as " + USER + ": " + repr(who))
     card.locator(f"[data-key='backups:{USER}']").click()
     wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 3")
@@ -427,6 +431,22 @@ with sync_playwright() as p:
     wait_idle(page)
     check(crontab_of(USER) == start, "restored byte for byte: " + repr(crontab_of(USER)))
     check(crontab() == "MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fstrim -a\n", "root's crontab untouched")
+    # run now: as cron ran it above, the same user, working directory and environment
+    card.locator(f"[data-key='add:{USER}']").click()
+    page.fill("#f-schedule", "0 5 1 1 *")
+    page.fill("#f-command", WHO)
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#edit-dlg').hidden")
+    wait_idle(page)
+    card.locator("tbody tr", has_text="printenv").locator("[data-key^='run:']").click()
+    check(f"als {USER} ausgeführt" in page.inner_text("#run-intro"), "run dialog names the user: " + page.inner_text("#run-intro"))
+    page.click("#run-start")
+    wait_js(page, "!document.querySelector('#run-done-actions').hidden")
+    log = page.inner_text("#run-log")
+    check("OK" in page.inner_text("#run-label") and who is not None and log.strip() == who.strip(),
+          "run now gives what cron gave: " + repr(log) + " vs " + repr(who))
+    page.screenshot(path=os.path.join(SHOTS, "e2e-user-run.png"))
+    page.click("#run-close-btn")
     page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-user.png"))
 

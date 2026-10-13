@@ -228,7 +228,7 @@
 
         /* run now */
         runTitle: "Run now",
-        runIntro: "This command runs as root right away:",
+        runIntro: user => `This command runs as ${user} right away:`,
         runEnv: (path, home, shell) => `With cron's environment: \`${path}\`, \`${home}\`, shell \`${shell}\`.`,
         runRecorded: "Result and output are recorded.",
         runStdin: "The text after % in the line is passed as input, as cron does.",

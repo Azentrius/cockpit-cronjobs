@@ -209,9 +209,9 @@ function renderUserCards() {
     }));
 }
 
-/* One crontab r into els.body, with its buttons els.add and els.backups. Root's jobs
-   can also be run now, recorded and converted; those of other users can be switched,
-   edited and deleted. */
+/* One crontab r into els.body, with its buttons els.add and els.backups. Every job
+   can be switched, edited, deleted and run now; root's can also be recorded and
+   converted. */
 function renderCrontab(r, els) {
     const user = r.user;
     const body = els.body;
@@ -291,7 +291,7 @@ function renderCrontab(r, els) {
                           timer + ".timer"))
                         : note ? h("span", { class: "az-cell-sub" }, note) : null)),
             h("td", { class: "az-cell-actions" },
-                isRoot && !r.notUtf8 ? btn("run", T.actRun, "play", () => openRun(i, "run:" + i)) : null,
+                r.notUtf8 ? null : btn("run", T.actRun, "play", () => openRun(user, i, keyOf(user, "run", i))),
                 editable ? btn("edit", T.actEdit, "pencil-alt", () => openEdit(user, i, keyOf(user, "edit", i))) : null,
                 menuItems(r, i).length ? btn("more", T.actMore, "ellipsis-v", ev => openRowMenu(r, i, ev.currentTarget),
                     { "aria-haspopup": "menu", "aria-expanded": "false" }) : null));

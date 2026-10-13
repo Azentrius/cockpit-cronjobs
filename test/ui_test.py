@@ -747,8 +747,23 @@ with sync_playwright() as p:
     check("crontab -u www-data" in card.locator(".az-card__desc").inner_text() and "als www-data" in card.inner_text(),
           "the card says how it is changed and as whom the jobs run: " + card.locator(".az-card__desc").inner_text())
     check(card.locator("tbody tr").count() == 1 and "Alle 5 Minuten" in card.inner_text(), "its job")
-    check(card.locator("[data-key^='run:'], [data-key^='capture:']").count() == 0 and "Nicht erfasst" in card.inner_text(),
-          "no run now and no recording for other users (yet)")
+    check(card.locator("[data-key^='capture:']").count() == 0 and "Nicht erfasst" in card.inner_text(),
+          "no recording for other users (yet)")
+    # run now: as www-data, in its home, with cron's environment for www-data
+    card.locator("[data-key='run:www-data:0']").click()
+    check(page.inner_text("#run-intro") == "Dieser Befehl wird sofort als www-data ausgeführt:" and
+          "HOME=/var/www" in page.inner_text("#run-env") and "erfasst" not in page.inner_text("#run-env"),
+          "run dialog for www-data: " + page.inner_text("#run-intro") + " " + page.inner_text("#run-env"))
+    page.click("#run-start")
+    wait_js(page, "!document.querySelector('#run-done-actions').hidden")
+    st = mock(page, "runs_started[window.__mock.runs_started.length - 1]")
+    check(st["user"] == "www-data" and st["home"] == "/var/www" and st["command"] == "php -f /var/www/nextcloud/cron.php",
+          "started as www-data in its home: " + repr(st))
+    check(sorted(e for e in st["env"] if e.split("=")[0] in ("HOME", "LOGNAME", "USER", "SHELL", "PATH")) ==
+          ["HOME=/var/www", "LOGNAME=www-data", "PATH=/usr/bin:/bin", "SHELL=/bin/sh", "USER=www-data"] and
+          not any(e.startswith("CRONJOBS_TRIGGER=") for e in st["env"]), "cron's environment for www-data: " + repr(st["env"]))
+    page.click("#run-close-btn")
+    check(focused_key(page) == "run:www-data:0", "focus back on the run button: " + repr(focused_key(page)))
     show_tab(page, "system")
     check(page.locator("#users-card").is_hidden(), "nothing left for the read-only list of other users")
     show_tab(page, "overview")
