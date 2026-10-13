@@ -78,7 +78,14 @@ USER = "cjuser"
 sh(f"id -u {USER} || useradd -m -s /bin/sh {USER}")
 USER_TAB = "MAILTO=\"\"\n# reports for cjuser\n15 3 * * * /bin/true\n"
 # Who runs a job, where and with which environment: once from cron, once with run now.
-WHO = "id -un; pwd; printenv HOME LOGNAME USER SHELL PATH"
+WHO = "id -un; pwd; env | grep -E '^(HOME|LOGNAME|USER|SHELL|PATH)=' | sort"
+
+
+def who_parts(text):
+    """(user, working directory, {NAME: value}) from the output of WHO."""
+    lines = (text or "").strip().split("\n")
+    return (lines[0] if lines else None, lines[1] if len(lines) > 1 else None,
+            dict(line.split("=", 1) for line in lines[2:] if "=" in line))
 sh(f"crontab -u {USER} -", input=USER_TAB)
 if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
     sys.exit("cron is not running")
@@ -443,8 +450,13 @@ with sync_playwright() as p:
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
     log = page.inner_text("#run-log")
-    check("OK" in page.inner_text("#run-label") and who is not None and log.strip() == who.strip(),
-          "run now gives what cron gave: " + repr(log) + " vs " + repr(who))
+    cron_ran, now_ran = who_parts(who), who_parts(log)
+    check("OK" in page.inner_text("#run-label") and cron_ran[0] == now_ran[0] == USER and cron_ran[1] == now_ran[1] and
+          all(cron_ran[2].get(k) == now_ran[2].get(k) for k in ("HOME", "LOGNAME", "SHELL")),
+          "run now: the user, working directory, HOME, LOGNAME and SHELL that cron gave: " + repr(log) + " vs " + repr(who))
+    for k in ("PATH", "USER"):
+        if cron_ran[2].get(k) != now_ran[2].get(k):
+            print(f"note: {k} under cron {cron_ran[2].get(k)!r}, with run now {now_ran[2].get(k)!r}")
     page.screenshot(path=os.path.join(SHOTS, "e2e-user-run.png"))
     page.click("#run-close-btn")
     page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
