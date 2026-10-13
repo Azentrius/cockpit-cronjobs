@@ -445,7 +445,7 @@ with sync_playwright() as p:
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
-    card.locator("tbody tr", has_text="printenv").locator("[data-key^='run:']").click()
+    card.locator("tbody tr", has_text="0 5 1 1 *").locator("[data-key^='run:']").click()
     check(f"als {USER} ausgeführt" in page.inner_text("#run-intro"), "run dialog names the user: " + page.inner_text("#run-intro"))
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
