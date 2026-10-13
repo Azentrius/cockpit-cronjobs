@@ -1,13 +1,14 @@
 /* Cron Jobs: Cockpit page.
  *
- * The root crontab is read and written through `crontab -u root`. Saving happens in
- * one locked step (SAVE_SCRIPT): only if the crontab is still the one shown (cksum),
- * with a backup first; afterwards it is read back and compared. Lines that are not
- * changed stay byte for byte (see lib/cron.js).
+ * Root's crontab, and with administrative access those of the other users, are read
+ * and written through `crontab -u USER`. Saving happens in one locked step
+ * (SAVE_SCRIPT): only if the crontab is still the one shown (cksum), with a backup
+ * first; afterwards it is read back and compared. Lines that are not changed stay byte
+ * for byte (see lib/cron.js).
  *
- * /etc/crontab, /etc/cron.d, other users' crontabs, run-parts directories and systemd
- * timers are shown read-only. Jobs can record their runs (cockpit-cronjobs-run), be
- * started right away, and be converted into systemd timers.
+ * /etc/crontab, /etc/cron.d, run-parts directories and systemd timers are shown
+ * read-only. Root's jobs can record their runs (cockpit-cronjobs-run), be started
+ * right away, and be converted into systemd timers.
  *
  * This file starts the page; its parts are ES modules in app/ (no build step, and
  * Cockpit's CSP allows them):
@@ -19,7 +20,7 @@
  *   dialogs.js   dialogs in general; add, edit, delete, confirm
  *   runs.js      run now, recorded runs, leftover runs
  *   convert.js   convert to a systemd timer and back to cron
- *   backups.js   backups of the root crontab: what restoring one changes, restoring
+ *   backups.js   backups of a crontab: what restoring one changes, restoring
  *   tabs.js      the tabs under the page header
  * The libraries in lib/ and the texts in i18n/ stay plain scripts (window.Cron*),
  * so that the unit tests can load them in Node.
@@ -57,8 +58,8 @@ function init() {
     initTabs();
 
     $("reload").addEventListener("click", () => { clearAlerts(); requestLoad(); });
-    $("add").addEventListener("click", () => openEdit(null, "add"));
-    $("backups").addEventListener("click", () => openBackups("backups"));
+    $("add").addEventListener("click", () => openEdit("root", null, "add"));
+    $("backups").addEventListener("click", () => openBackups("root", "backups"));
 
     $("edit-form").addEventListener("submit", submitEdit);
     $("edit-cancel").addEventListener("click", () => closeDialog());

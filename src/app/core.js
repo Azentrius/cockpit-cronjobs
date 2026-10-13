@@ -16,6 +16,18 @@ export const RUNS_DIR = STATE_DIR + "/runs";
 export const KEEP_BACKUPS = 10;
 export const KEEP_RUNS = 20;
 export const RUN_OUTPUT_LIMIT = 256 * 1024;
+/* User names whose crontabs the page can change (as the root scripts check them). */
+export const USER_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}$/;
+
+/* Where SAVE_SCRIPT keeps the backups of a user's crontab. */
+export const backupDirOf = user => user === "root" ? BACKUP_DIR : BACKUP_DIR + "/users/" + user;
+
+/* data-key of a control: root's keep their old form ("edit:25", "add"), those of other
+   users name the user ("edit:alice:25", "add:alice"). */
+export function keyOf(user, action, i) {
+    return action + (user === "root" ? "" : ":" + user) + (i === undefined ? "" : ":" + i);
+}
+
 const HOUR = 3600000;
 export const DAY = 24 * HOUR;
 
@@ -195,11 +207,12 @@ export const state = {
     host: "",
     loadedAt: 0,
     busy: false,
-    root: { status: "loading" },   /* loading | ok | denied | error | missing */
+    root: { status: "loading", user: "root" },   /* loading | ok | denied | error | missing */
+    users: {},   /* the crontabs of other users by name, as root (see setCrontab); with administrative access only */
     sys: null,
     sysError: null,
     basics: { mta: null, crontab: true, flavor: "debian", systemd: false, cron: null, wrapper: null },
-    runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setRoot */
+    runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setCrontab */
     timers: { status: "none", list: [] },   /* none | ok | error */
     suAtLoad: undefined,
 };

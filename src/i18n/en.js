@@ -9,6 +9,9 @@
 (function (root) {
     "use strict";
 
+    /* "root crontab", "crontab of alice" */
+    const crontabName = user => user === "root" ? "root crontab" : `crontab of ${user}`;
+
     const ui = {
         loadedAt: t => `Loaded at ${t}`,
         serverTz: tz => `Server time ${tz}`,
@@ -69,6 +72,9 @@
         /* root crontab */
         rootTitle: "root crontab",
         rootDesc: "Changes go through `crontab -u root`. A backup is written before every change.",
+        userTitle: user => `crontab of ${user}`,
+        userDesc: user => `Changes go through \`crontab -u ${user}\`; its jobs run as ${user}. A backup is written ` +
+                          "before every change.",
         add: "Add job",
         colActive: "Active",
         colSchedule: "Schedule",
@@ -108,11 +114,11 @@
         nextBoot: "At next boot",
         neverRuns: "Never",
         emptyTitle: "No jobs",
-        emptyBody: "The root crontab has no jobs yet.",
+        emptyBody: user => `The ${crontabName(user)} has no jobs yet.`,
         deniedTitle: "Administrative access required",
         deniedBody: "The root crontab can only be read and changed with administrative access. Turn it on with " +
                     "“Limited access” at the top of Cockpit; this page reloads by itself.",
-        readErrorTitle: "Could not read the root crontab",
+        readErrorTitle: user => `Could not read the ${crontabName(user)}`,
         sysErrorTitle: "Could not read the system crontabs",
         lockedTitle: "Opened read-only",
         lockedBody: "This crontab contains lines that would not survive being written back exactly. " +
@@ -146,7 +152,7 @@
             links: "cron skips this file because it has more than one hard link.",
         },
         usersTitle: "Other users",
-        usersDesc: "Crontabs of other users on this server.",
+        usersDesc: "Crontabs of other users that this page can only show.",
         periodicTitle: "Periodic scripts",
         periodicDesc: "The scripts in `/etc/cron.hourly` to `/etc/cron.monthly` are started by run-parts from " +
                       "/etc/crontab or by anacron. Many system tasks run as systemd timers instead.",
@@ -176,18 +182,19 @@
         errCommand: "Please enter a command.",
         errNewline: "A command must fit on one line.",
         errLine: "cron would read this line differently than entered. Please check schedule and command.",
-        commandHelp: "Runs as root. Output goes to root's local mail.",
-        commandHelpMailto: "Runs as root. Output goes to root's local mail unless MAILTO in the crontab says otherwise.",
-        commandHelpNoMta: "Runs as root. No mail program is installed on this server, so the job's output is lost " +
-                          "unless it records its runs or redirects it, e.g. `>> /var/log/myjob.log 2>&1`.",
+        commandHelp: user => `Runs as ${user}. Output goes to ${user}'s local mail.`,
+        commandHelpMailto: user => `Runs as ${user}. Output goes to ${user}'s local mail unless MAILTO in the crontab says otherwise.`,
+        commandHelpNoMta: user => `Runs as ${user}. No mail program is installed on this server, so the job's output is lost ` +
+            (user === "root" ? "unless it records its runs or redirects it, e.g. `>> /var/log/myjob.log 2>&1`."
+                : "unless it redirects it, e.g. `>> $HOME/myjob.log 2>&1`."),
         commandHelpNoMtaRecorded: "Runs as root. Its result and output are recorded.",
         percentWarn: "cron reads % as a line break and passes the rest as input. Write `\\%` for a percent sign, " +
                      "e.g. `date +\\%F`.",
 
         /* delete */
         delTitle: "Delete job?",
-        delIntro: "This job will be removed from the root crontab:",
-        delIntroNote: "This job and the comment above it will be removed from the root crontab:",
+        delIntro: user => `This job will be removed from the ${crontabName(user)}:`,
+        delIntroNote: user => `This job and the comment above it will be removed from the ${crontabName(user)}:`,
         delBackup: path => `The current crontab is saved to \`${path}\` first. The last ten backups are kept.`,
         delRuns: "Its recorded runs are deleted as well.",
         delConfirm: "Delete job",
@@ -202,10 +209,10 @@
         okCaptureOn: "The job now records its runs",
         okCaptureOff: "The job no longer records its runs",
         backupAt: path => `Backup of the previous version at \`${path}\``,
-        noBackup: "There was no root crontab before, so no backup was needed.",
+        noBackup: user => `There was no ${crontabName(user)} before, so no backup was needed.`,
         conflictTitle: "The crontab has changed in the meantime",
-        conflictBody: "The root crontab was changed outside this page. Your change was not saved; " +
-                      "the page now shows the current state.",
+        conflictBody: user => `The ${crontabName(user)} was changed outside this page. Your change was not saved; ` +
+                              "the page now shows the current state.",
         saveErrorTitle: "Saving failed",
         backupFailed: "The backup could not be written; the crontab was left unchanged.",
         unverifiedTitle: "Saved, but not confirmed",
@@ -277,9 +284,9 @@
 
         /* Backups */
         backups: "Backups",
-        backupsTitle: "Backups of the root crontab",
-        backupsIntro: "Before every change, Cron Jobs saves the root crontab. Open a version to see what " +
-                      "restoring it would change.",
+        backupsTitle: user => `Backups of the ${crontabName(user)}`,
+        backupsIntro: user => `Before every change, Cron Jobs saves the ${crontabName(user)}. Open a version to see what ` +
+                              "restoring it would change.",
         backupsNote: (n, path) => `Restoring saves the current crontab as a backup first, so a restore can be undone ` +
                                   `the same way. The last ${n} backups are kept in \`${path}\`.`,
         backupsNone: "No backups yet. The first one is made with the first change on this page.",
@@ -287,7 +294,7 @@
         colSaved: "Saved",
         colRestoring: "Restoring changes",
         backupSame: "Nothing, it is the current crontab",
-        backupSameBody: "This version is the same as the current root crontab.",
+        backupSameBody: user => `This version is the same as the current ${crontabName(user)}.`,
         backupEncoding: "Not UTF-8, cannot be shown here",
         backupDelta: (removed, added) => [
             removed ? (removed === 1 ? "1 line removed" : `${removed} lines removed`) : null,
@@ -295,8 +302,8 @@
         ].filter(Boolean).join(", "),
         showChanges: "Show changes",
         hideChanges: "Hide changes",
-        diffIntro: "Restoring this version changes the root crontab like this: lines marked `-` are removed, " +
-                   "lines marked `+` are added.",
+        diffIntro: user => `Restoring this version changes the ${crontabName(user)} like this: lines marked ` +
+                           "`-` are removed, lines marked `+` are added.",
         diffLabel: "Changes",
         diffRemoved: "removed: ",
         diffAdded: "added: ",
@@ -304,7 +311,7 @@
         diffNoNewline: "(no newline at the end)",
         restore: "Restore this version",
         restoring: "Restoring …",
-        restoreEncoding: "The current root crontab is not UTF-8, so the page cannot replace it.",
+        restoreEncoding: user => `The current ${crontabName(user)} is not UTF-8, so the page cannot replace it.`,
         okRestored: when => `Version saved ${when} restored`,
         restoredUndo: "To undo it, restore the newest backup.",
         restoreFailed: "Restoring failed",

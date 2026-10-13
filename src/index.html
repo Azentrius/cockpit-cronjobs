@@ -68,6 +68,8 @@
       <div id="root-body"><p class="cron-state" data-t="loading">Loading …</p></div>
       <div class="cron-orphans" id="orphans" hidden></div>
     </section>
+
+    <div class="cron-users" id="user-crontabs" hidden></div>
   </section>
 
   <section class="cron-panel" id="panel-timers" role="tabpanel" aria-labelledby="tab-timers" hidden>
@@ -134,9 +136,12 @@
 
 <!-- Edit / add -->
 <div class="az-backdrop" id="edit-dlg" hidden>
-  <form class="az-modal" id="edit-form" role="dialog" aria-modal="true" aria-labelledby="edit-title" novalidate>
+  <form class="az-modal" id="edit-form" role="dialog" aria-modal="true" aria-labelledby="edit-title edit-sub" novalidate>
     <div class="az-modal__header">
-      <h2 class="az-modal__title" id="edit-title">Edit job</h2>
+      <div class="cron-modal-heading">
+        <h2 class="az-modal__title" id="edit-title">Edit job</h2>
+        <p class="cron-modal-sub" id="edit-sub" hidden></p>
+      </div>
       <button class="az-btn az-btn--plain az-btn--sm" type="button" id="edit-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
     </div>
     <div class="az-modal__body">
@@ -152,7 +157,7 @@
         <p class="az-field__help" id="f-command-help"></p>
         <p class="cron-field-warn" id="f-command-warn" hidden></p>
       </div>
-      <div class="az-field">
+      <div class="az-field" id="f-capture-field">
         <label class="az-switch"><input type="checkbox" role="switch" id="f-capture" aria-describedby="f-capture-help"><span class="az-switch__track"></span><span class="az-switch__label" data-t="fCapture">Record result and output</span></label>
         <p class="az-field__help" id="f-capture-help"></p>
       </div>
@@ -285,12 +290,12 @@
 <div class="az-backdrop" id="bk-dlg" hidden>
   <div class="az-modal cron-modal-wide" role="dialog" aria-modal="true" aria-labelledby="bk-title" aria-describedby="bk-intro">
     <div class="az-modal__header">
-      <h2 class="az-modal__title" id="bk-title" data-t="backupsTitle">Backups of the root crontab</h2>
+      <h2 class="az-modal__title" id="bk-title">Backups</h2>
       <button class="az-btn az-btn--plain az-btn--sm" type="button" id="bk-close" data-t-label="close" aria-label="Close"><span data-icon="times"></span></button>
     </div>
     <div class="az-modal__body">
       <div class="cron-dialog-alert" id="bk-alert" hidden></div>
-      <p id="bk-intro" data-t="backupsIntro"></p>
+      <p id="bk-intro"></p>
       <div id="bk-body"></div>
       <p class="cron-muted cron-small" id="bk-note"></p>
     </div>

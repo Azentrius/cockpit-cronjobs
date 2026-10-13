@@ -1,8 +1,8 @@
 # Cron Jobs for Cockpit
 
 A [Cockpit](https://cockpit-project.org) page for cron. It shows everything that is scheduled on a
-server, lets you change the root crontab safely, keeps the result of every run, starts jobs on demand
-and turns cron jobs into systemd timers.
+server, lets you change the root crontab and those of other users safely, keeps the result of every run,
+starts jobs on demand and turns cron jobs into systemd timers.
 
 ![Overview: the next 24 hours and the root crontab](docs/overview.png)
 
@@ -13,14 +13,18 @@ and turns cron jobs into systemd timers.
   written out in words; next runs are shown in server time, and in your own time when that differs.
   Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links) are marked
   with the reason, by the rules of the cron that is installed.
-- **Three tabs.** Overview (the next 24 hours and the root crontab), systemd timers, and System
-  (`/etc/crontab`, `/etc/cron.d`, other users' crontabs, the periodic scripts). Notices stay visible in
-  every tab; switching tabs loads nothing.
+- **Three tabs.** Overview (the next 24 hours, the root crontab and those of other users), systemd timers,
+  and System (`/etc/crontab`, `/etc/cron.d`, the periodic scripts). Notices stay visible in every tab;
+  switching tabs loads nothing.
 - **The next 24 hours.** A timeline of all cron jobs and timers. Jobs that start in the same minute are
   pointed out.
 - **Safe changes to the root crontab.** Add, edit, switch off and on, delete. Lines you do not touch stay
   byte for byte. Each change is written in one locked step, only if the crontab is still the one you see,
   after a backup of the previous version; afterwards it is read back and compared.
+- **Crontabs of other users.** With administrative access, every other user's crontab gets a card of its
+  own and is changed the same way, through `crontab -u USER`, with backups of its own; its jobs run as
+  that user. Without administrative access they are not shown at all. Run now, recording and conversion
+  are for root's jobs so far.
 - **Backups you can use.** The last ten versions of the root crontab, each with what restoring it would
   change, line by line as `diff` shows it. Restoring goes through the same locked step, after a backup of
   the current version, so a restore can be undone the same way.
@@ -49,7 +53,7 @@ and turns cron jobs into systemd timers.
 With cronie, `CRON_TZ` is taken into account for next runs, the timeline and the conversion.
 
 Changes need administrative access in Cockpit (“Limited access” turned off). Without it the page shows
-the system crontabs and timers.
+the system crontabs and timers, and nothing of other users' crontabs.
 
 ## Installation
 
@@ -110,6 +114,7 @@ from cron keeps working. It keeps the last 20 runs, each with up to 64 KiB of ou
 | Path | What |
 |---|---|
 | `/var/lib/cockpit-cronjobs/backups/` | The last 10 versions of the root crontab (directory 700, files 600) |
+| `/var/lib/cockpit-cronjobs/backups/users/USER/` | The last 10 versions of the crontab of USER |
 | `/var/lib/cockpit-cronjobs/runs/` | Recorded runs |
 | `/usr/local/libexec/cockpit-cronjobs-run` | The run recorder |
 | `/etc/systemd/system/NAME.service`, `NAME.timer` | Jobs converted to systemd timers |
@@ -129,8 +134,9 @@ sudo rm -rf /var/lib/cockpit-cronjobs
 
 - Everything that needs root goes through Cockpit's administrative access, like Cockpit's own pages.
 - Commands, names and texts are passed to programs as arguments, never pasted into shell code.
-- The root crontab is replaced only if it is still exactly the version shown (checksum), under a lock,
-  after a verified backup.
+- A crontab is replaced only if it is still exactly the version shown (checksum), under a lock, after a
+  verified backup. User names are checked in the page and again as root (letters, digits, `.`, `_`,
+  `-`, and a user the system knows); other names stay read-only.
 - A crontab that could not be written back exactly is opened read-only.
 - Restoring a backup writes it byte for byte through the same step, and shows first what it changes.
 - Converting to a timer refuses to go on if systemd would run the job at other times than cron, or reads

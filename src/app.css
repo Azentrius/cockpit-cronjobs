@@ -10,6 +10,9 @@ html { background: var(--bg-page); }
 .cron-alerts:empty { display: none; }
 /* A tab's panel: its cards with the page's spacing. */
 .cron-panel { display: flex; flex-direction: column; gap: var(--space-lg); }
+/* the cards of other users' crontabs, under root's */
+.cron-users { display: flex; flex-direction: column; gap: var(--space-lg); }
+.cron-users[hidden] { display: none; }
 .az-alert__body code, .az-card__desc code, .cron-muted code { overflow-wrap: anywhere; }
 .az-alert__body { white-space: pre-line; }
 

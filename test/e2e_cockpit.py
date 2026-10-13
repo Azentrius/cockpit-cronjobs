@@ -12,7 +12,7 @@ DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
 
 Runs as root (the local session is root's). CI runs it the same way on the runner's
 throwaway VM (job e2e in .github/workflows/test.yml)."""
-import json, os, re, subprocess, sys, time
+import json, os, pwd, re, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
 if os.environ.get("CRONJOBS_E2E_DESTRUCTIVE") != "1":
@@ -47,6 +47,12 @@ def crontab():
     return r.stdout if r.returncode == 0 else None
 
 
+def crontab_of(user):
+    """The crontab of user, as bytes (None when there is none)."""
+    r = subprocess.run(["crontab", "-l", "-u", user], capture_output=True)
+    return r.stdout if r.returncode == 0 else None
+
+
 def wait_js(page, expr, timeout=15):
     end = time.time() + timeout
     while time.time() < end:
@@ -65,9 +71,13 @@ def row_of(page, text):
     return page.locator("#root-body tbody tr", has_text=text)
 
 
-# A clean start: no wrapper, no state, a known crontab.
-sh(f"rm -rf {STATE} {WRAP}")
+# A clean start: no wrapper, no state, a known crontab; a second user with a crontab.
+sh(f"rm -rf {STATE} {WRAP} /tmp/cj-e2e-whoami")
 sh("crontab -u root -", input="MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fstrim -a\n")
+USER = "cjuser"
+sh(f"id -u {USER} || useradd -m -s /bin/sh {USER}")
+USER_TAB = "MAILTO=\"\"\n# reports for cjuser\n15 3 * * * /bin/true\n"
+sh(f"crontab -u {USER} -", input=USER_TAB)
 if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
     sys.exit("cron is not running")
 
@@ -374,6 +384,52 @@ with sync_playwright() as p:
     check(crontab_bytes() == original, "restoring back gives the original bytes: " + repr(crontab_bytes()))
     os.remove("/tmp/cj-e2e-current")
 
+    # another user's crontab: a card of its own, written as that user's crontab with backups of its own,
+    # and cron runs the jobs as that user
+    card = page.locator(f"#user-crontabs section[data-user='{USER}']")
+    check(card.count() == 1 and f"Crontab von {USER}" in card.inner_text() and "Täglich um 03:15" in card.inner_text(),
+          "a card for the crontab of " + USER)
+    start = crontab_of(USER)
+    check(start == USER_TAB.encode(), "the user's crontab as written: " + repr(start))
+    card.locator("label.az-switch").filter(has=page.locator(f"[data-key='toggle:{USER}:2']")).click()
+    wait_idle(page)
+    check(crontab_of(USER) == start.replace(b"15 3 * * *", b"#[cronjobs:off] 15 3 * * *"), "switched off: " + repr(crontab_of(USER)))
+    card.locator("label.az-switch").filter(has=page.locator(f"[data-key='toggle:{USER}:2']")).click()
+    wait_idle(page)
+    check(crontab_of(USER) == start, "switched on again: the bytes from before")
+    card.locator(f"[data-key='add:{USER}']").click()
+    page.fill("#f-schedule", "* * * * *")
+    page.fill("#f-command", "id -un > /tmp/cj-e2e-whoami")
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#edit-dlg').hidden")
+    wait_idle(page)
+    check(crontab_of(USER) == start + b"* * * * * id -un > /tmp/cj-e2e-whoami\n", "job added: " + repr(crontab_of(USER)))
+    user_backups = f"{STATE}/backups/users/{USER}"
+    names = sorted(os.listdir(user_backups)) if os.path.isdir(user_backups) else []
+    check(len(names) == 3 and all(n.startswith(USER + "-") for n in names) and
+          oct(os.stat(user_backups).st_mode & 0o777) == "0o700" and
+          all(oct(os.stat(f"{user_backups}/{n}").st_mode & 0o777) == "0o600" for n in names),
+          "backups of the user's own, with tight permissions: " + repr(names))
+    deadline = time.time() + 75
+    while time.time() < deadline and not os.path.exists("/tmp/cj-e2e-whoami"):
+        time.sleep(2)
+    who = open("/tmp/cj-e2e-whoami").read() if os.path.exists("/tmp/cj-e2e-whoami") else None
+    check(who == USER + "\n" and os.stat("/tmp/cj-e2e-whoami").st_uid == pwd.getpwnam(USER).pw_uid,
+          "cron ran the new job as " + USER + ": " + repr(who))
+    card.locator(f"[data-key='backups:{USER}']").click()
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 3")
+    oldest = page.locator("#bk-body tbody tr td:first-child .az-mono").last.inner_text()
+    with open(f"{user_backups}/{oldest}", "rb") as fh:
+        check(fh.read() == start, "the oldest backup is the crontab from the start")
+    page.click(f"[data-key='bk:{oldest}']")
+    page.click(f"[data-key='restore:{oldest}']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(crontab_of(USER) == start, "restored byte for byte: " + repr(crontab_of(USER)))
+    check(crontab() == "MAILTO=\"\"\n# Disk trim\n30 1 * * 0 /usr/sbin/fstrim -a\n", "root's crontab untouched")
+    page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
+    page.screenshot(path=os.path.join(SHOTS, "e2e-user.png"))
+
     # /etc/cron.d: the page marks exactly what cron skips, with cron's reason, and cron's log agrees
     page.click("#reload")
     wait_idle(page)
@@ -409,6 +465,7 @@ with sync_playwright() as p:
         else:
             check(not any(m in line for line in said for _, m in expected), f"cron reads {name}: {said!r}")
     sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
+    sh(f"crontab -r -u {USER}; userdel -r {USER}; rm -f /tmp/cj-e2e-whoami")
 
     page.click("#tab-overview")
     page.screenshot(path=os.path.join(SHOTS, "e2e-end.png"), full_page=True)

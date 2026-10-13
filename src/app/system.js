@@ -36,10 +36,12 @@ function sections(out) {
 }
 const decode = out => typeof out === "string" ? out : new TextDecoder("utf-8").decode(out);
 
-/* The root crontab as text; read as bytes, so that a crontab that is not UTF-8 can
-   still be shown (read-only, see setRoot). Resolves to { text, utf8 }. */
-export function readRoot() {
-    return spawn(["crontab", "-l", "-u", "root"], Object.assign({}, SPAWN_ROOT, { binary: true })).then(
+/* A user's crontab as text (root's or another user's); read as bytes, so that a
+   crontab that is not UTF-8 can still be shown (read-only, see setCrontab). The
+   name is checked by the caller (USER_RE). Resolves to { text, utf8 }; no crontab
+   at all gives the empty text. */
+export function readCrontab(user) {
+    return spawn(["crontab", "-l", "-u", user], Object.assign({}, SPAWN_ROOT, { binary: true })).then(
         out => {
             const bytes = typeof out === "string" ? new TextEncoder().encode(out) : out;
             try {
@@ -54,34 +56,41 @@ export function readRoot() {
         });
 }
 
-/* Replaces the root crontab in one step under a lock:
-     $1    = cksum of the version the page shows (else exit 3)
-     $2    = optional: a systemd timer to enable and start right after (for a
-             conversion), or with $3 = stop to stop and disable (back to cron); if
+/* Replaces a user's crontab in one step under a lock:
+     $1    = the user: root, or a name of letters, digits, ".", "_" and "-" that the
+             system knows (else exit 2)
+     $2    = cksum of the version the page shows (else exit 3)
+     $3    = optional: a systemd timer to enable and start right after (for a
+             conversion), or with $4 = stop to stop and disable (back to cron); if
              that fails, the previous crontab is put back (exit 7)
      stdin = the new version
-   The current version is backed up first (directory 700, files 600, the last ten are
-   kept; a version that already is the newest backup is not stored twice).
-   The lock lives in a directory only root can write to. Closing the page does not
-   interrupt the script (SIGTERM and SIGHUP are ignored).
+   The current version is backed up first: root's in BACKUP_DIR, another user's in
+   BACKUP_DIR/users/USER (directories 700, files 600, the last ten of each user are
+   kept; a version that already is the newest backup is not stored twice). One lock
+   for all crontabs; it lives in a directory only root can write to. Closing the page
+   does not interrupt the script (SIGTERM and SIGHUP are ignored).
    Output: path of the backup, empty when there was no crontab before.
-   Exit 3 = changed meanwhile, 4 = locked, 5 = backup failed, 7 = timer failed,
-   else crontab's error. */
+   Exit 2 = not a user, 3 = changed meanwhile, 4 = locked, 5 = backup failed,
+   7 = timer failed, else crontab's error. */
 const SAVE_SCRIPT = `set -eu
 trap '' TERM HUP INT
 umask 077
-expect="$1"
-timer="\${2-}"
+user=$1
+expect=$2
+timer="\${3-}"
 verb=enable
-if [ "\${3-}" = stop ]; then verb=disable; fi
+if [ "\${4-}" = stop ]; then verb=disable; fi
+case $user in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
+id -u "$user" > /dev/null 2>&1 || exit 2
 dir='${BACKUP_DIR}'
+if [ "$user" != root ]; then dir=$dir/users/$user; fi
 install -d -m 700 '${STATE_DIR}' || exit 5
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -w 10 9 || exit 4
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/new"
-if crontab -l -u root > "$tmp/cur" 2> "$tmp/err"; then
+if crontab -l -u "$user" > "$tmp/cur" 2> "$tmp/err"; then
   have=1
 elif grep -q "no crontab for" "$tmp/err"; then
   have=0
@@ -95,12 +104,13 @@ sum=$(cksum < "$tmp/cur")
 f=
 if [ "$have" = 1 ]; then
   install -d -m 700 "$dir" || exit 5
-  chmod 700 '${STATE_DIR}' "$dir" || exit 5
-  last=$(ls -1t "$dir"/root-*.crontab 2>/dev/null | head -n 1)
+  chmod 700 '${STATE_DIR}' '${BACKUP_DIR}' "$dir" || exit 5
+  if [ "$user" != root ]; then chmod 700 '${BACKUP_DIR}/users' || exit 5; fi
+  last=$(ls -1t "$dir/$user"-*.crontab 2>/dev/null | head -n 1)
   if [ -n "$last" ] && [ "$(cksum < "$last")" = "$sum" ]; then
     f=$last
   else
-    stamp="$dir/root-$(date +%Y%m%d-%H%M%S)"
+    stamp="$dir/$user-$(date +%Y%m%d-%H%M%S)"
     f="$stamp.crontab"
     n=1
     while [ -e "$f" ]; do n=$((n + 1)); f="$stamp-$n.crontab"; done
@@ -108,13 +118,13 @@ if [ "$have" = 1 ]; then
     [ "$(cksum < "$f.tmp")" = "$sum" ] || { rm -f "$f.tmp"; exit 5; }
     mv "$f.tmp" "$f" || exit 5
   fi
-  chmod 600 "$dir"/root-*.crontab || exit 5
-  ls -1t "$dir"/root-*.crontab | tail -n +${KEEP_BACKUPS + 1} | while IFS= read -r old; do rm -f -- "$old"; done
+  chmod 600 "$dir/$user"-*.crontab || exit 5
+  ls -1t "$dir/$user"-*.crontab | tail -n +${KEEP_BACKUPS + 1} | while IFS= read -r old; do rm -f -- "$old"; done
 fi
-crontab -u root "$tmp/new"
+crontab -u "$user" "$tmp/new"
 if [ -n "$timer" ]; then
   if ! systemctl "$verb" --now "$timer" > /dev/null 2> "$tmp/err"; then
-    if [ "$have" = 1 ]; then crontab -u root "$tmp/cur"; else crontab -r -u root; fi
+    if [ "$have" = 1 ]; then crontab -u "$user" "$tmp/cur"; else crontab -r -u "$user"; fi
     cat "$tmp/err" >&2
     exit 7
   fi
@@ -122,31 +132,35 @@ fi
 printf '%s\\n' "$f"
 `;
 
-/* expected: the text shown (exactly as crontab -l gave it), next: the new text,
-   timer: optional unit to enable and start once the crontab is written, or to stop
-   and disable when stop is set. */
-export function saveRoot(expected, next, timer, stop) {
-    const args = ["sh", "-c", SAVE_SCRIPT, "cockpit-cronjobs", C.cksum(expected)]
+/* user: whose crontab; expected: the text shown (exactly as crontab -l gave it),
+   next: the new text, timer: optional unit to enable and start once the crontab is
+   written, or to stop and disable when stop is set. */
+export function saveCrontab(user, expected, next, timer, stop) {
+    const args = ["sh", "-c", SAVE_SCRIPT, "cockpit-cronjobs", user, C.cksum(expected)]
         .concat(timer ? [timer].concat(stop ? ["stop"] : []) : []);
     return spawn(args, SPAWN_ROOT, next).then(out => String(out || "").trim());
 }
 
-/* All backups of the root crontab, newest first as SAVE_SCRIPT sees them (ls -t, so
-   also within one second), under the crontab lock (shared), so that none is written
-   or removed meanwhile. For each file a header "\\036MTIME SIZE NAME" (MTIME in
-   seconds), then the file byte for byte (see lib/backups.js). Links and other names
-   are left out. Exit 4 = locked. */
+/* All backups of a user's crontab ($1, checked as in SAVE_SCRIPT), newest first as
+   SAVE_SCRIPT sees them (ls -t, so also within one second), under the crontab lock
+   (shared), so that none is written or removed meanwhile. For each file a header
+   "\\036MTIME SIZE NAME" (MTIME in seconds), then the file byte for byte (see
+   lib/backups.js). Links and other names are left out. Exit 2 = not a user name,
+   4 = locked. */
 const BACKUPS_SCRIPT = `set -u
 umask 077
+user=$1
+case $user in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
 dir='${BACKUP_DIR}'
+if [ "$user" != root ]; then dir=$dir/users/$user; fi
 [ -d "$dir" ] || exit 0
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -s -w 10 9 || exit 4
-ls -1t "$dir"/root-*.crontab 2>/dev/null | while IFS= read -r f; do
+ls -1t "$dir/$user"-*.crontab 2>/dev/null | while IFS= read -r f; do
   [ -f "$f" ] && [ ! -L "$f" ] || continue
   n=\${f##*/}
-  case $n in root-*.crontab) ;; *) continue ;; esac
-  case $n in *[!A-Za-z0-9.-]*) continue ;; esac
+  case $n in "$user"-*.crontab) ;; *) continue ;; esac
+  case $n in *[!A-Za-z0-9._-]*) continue ;; esac
   s=$(stat -c '%Y %s' "$f") || exit 1
   printf '\\036%s %s\\n' "$s" "$n"
   cat -- "$f" || exit 1
@@ -154,10 +168,10 @@ done || exit 1
 exit 0
 `;
 
-/* Resolves to the backups, newest first (see B.parseBackups). */
-export function readBackups() {
-    return spawn(["sh", "-c", BACKUPS_SCRIPT], Object.assign({}, SPAWN_ROOT, { binary: true }))
-        .then(out => B.parseBackups(typeof out === "string" ? new TextEncoder().encode(out) : out));
+/* Resolves to the backups of user's crontab, newest first (see B.parseBackups). */
+export function readBackups(user) {
+    return spawn(["sh", "-c", BACKUPS_SCRIPT, "cockpit-cronjobs", user], Object.assign({}, SPAWN_ROOT, { binary: true }))
+        .then(out => B.parseBackups(typeof out === "string" ? new TextEncoder().encode(out) : out, user));
 }
 
 /* Host name, time zone as cron sees it, and what is installed. */
@@ -287,9 +301,9 @@ export function readSystem(flavor) {
 }
 
 /* sys.texts: every crontab as read, for finding the recorded jobs no line uses
-   any more (see orphanList). */
+   any more (see orphanList). sys.userNames: whose crontabs there are (as root only). */
 function parseSystem(out, flavor) {
-    const sys = { etc: [], crond: [], users: [], periodic: [], root: false, texts: [] };
+    const sys = { etc: [], crond: [], users: [], userNames: [], periodic: [], root: false, texts: [] };
     sections(out).forEach(({ name, body }) => {
         if (name === "etc" || name === "anacron" || /^[du]:/.test(name)) sys.texts.push(body);
         if (name === "uid") sys.root = body.trim() === "0";
@@ -312,6 +326,7 @@ function parseSystem(out, flavor) {
             if (!jobs.length && ignored) sys.crond.push({ file, ignored, schedule: null, user: null, command: null });
         } else if (name.startsWith("u:")) {
             const user = name.slice(2);
+            sys.userNames.push(user);
             const entries = C.parseUserCrontab(body);
             entries.forEach((e, i) => {
                 if (e.kind !== "job") return;

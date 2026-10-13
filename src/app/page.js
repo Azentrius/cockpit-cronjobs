@@ -1,21 +1,23 @@
-/* Cron Jobs: the page itself: alerts and notices, the root crontab, systemd timers
- * and the read-only crontabs, focus, and the row menu.
+/* Cron Jobs: the page itself: alerts and notices, the crontabs (root's and, with
+ * administrative access, those of other users), systemd timers and the read-only
+ * crontabs, focus, and the row menu.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import {
-    $, C, cap, clock, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon, R, rich, S,
-    SD, state, T, tzLabel,
+    $, C, cap, clock, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon, keyOf, R, rich,
+    S, SD, state, T, tzLabel,
 } from "./core.js";
 import { errText, installWrapper } from "./system.js";
 import {
-    convertedTo, jobInfo, jobTz, loading, noteFor, requestLoad, rootJobs, runsOf, setCapture, toggle,
+    convertedTo, crontabOf, jobInfo, jobsOf, jobTz, loading, noteFor, requestLoad, rootJobs, runsOf, setCapture, toggle,
 } from "./crontab.js";
 import { renderTimeline } from "./timeline.js";
 import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
 import { openRun, openRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
 import { convertBlocker, openBack, openConvert } from "./convert.js";
+import { openBackups } from "./backups.js";
 import { hiddenBesidesTabs, showTabOf } from "./tabs.js";
 
 /* ---------- alerts ---------- */
@@ -83,7 +85,7 @@ export function renderAll() {
     renderHeader();
     renderNotices();
     renderTimeline();
-    renderRoot();
+    renderCrontabs();
     renderOrphans();
     renderTimers();
     renderSystem();
@@ -113,11 +115,11 @@ function scheduleCell(schedule, tz) {
         h("span", { class: "az-cell-sub az-mono" }, schedule + (tz && tz !== state.tz ? " · " + tzLabel(tz) : "")));
 }
 
-function nextCell(e, i) {
+function nextCell(r, e, i) {
     if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
     const p = C.parseSchedule(e.schedule);
     if (p.reboot) return h("span", null, T.nextBoot);
-    const ms = C.nextRun(p, Date.now(), jobTz(state.root.entries, i));
+    const ms = C.nextRun(p, Date.now(), jobTz(r.entries, i));
     if (ms === null) return h("span", null, T.neverRuns);
     return whenCell(ms);
 }
@@ -143,6 +145,7 @@ export function labelEl(kind, iconName, text, attrs) {
     return attrs ? h("button", Object.assign({ type: "button", class: "cron-label-btn" }, attrs), label) : label;
 }
 
+/* The last run of a root job. Jobs of other users are not recorded (yet). */
 function lastCell(e, i, editable, frozen) {
     const info = jobInfo(e);
     if (!info.capture) {
@@ -173,17 +176,52 @@ function lastCell(e, i, editable, frozen) {
         h("span", { class: "az-cell-sub" }, fmtShort(last.start * 1000) + (d !== null ? " · " + fmtDuration(d) : "")));
 }
 
-export function renderRoot() {
-    const body = $("root-body");
-    const r = state.root;
-    const jobs = rootJobs();
+/* The crontabs: root's card (in index.html), then one card for each other user. */
+export function renderCrontabs() {
+    renderCrontab(state.root, { body: $("root-body"), add: $("add"), backups: $("backups") });
+    renderUserCards();
+}
+
+/* The cards of the other users' crontabs, only with administrative access; built
+   afresh each time, like the rows. */
+function renderUserCards() {
+    const box = $("user-crontabs");
+    const users = Object.keys(state.users).sort();
+    box.hidden = users.length === 0;
+    fill(box, users.map(user => {
+        const id = "ut-" + user;
+        const button = (action, iconName, text, onclick) => h("button", {
+            class: "az-btn az-btn--secondary az-btn--sm", type: "button", "data-key": keyOf(user, action), onclick,
+        }, icon(iconName), text);
+        const els = {
+            body: h("div", { id: id + "-body" }),
+            add: button("add", "plus", T.add, () => openEdit(user, null, keyOf(user, "add"))),
+            backups: button("backups", "history", T.backups, () => openBackups(user, keyOf(user, "backups"))),
+        };
+        renderCrontab(state.users[user], els);
+        return h("section", { class: "az-card", "aria-labelledby": id + "-title", "data-user": user },
+            h("div", { class: "az-card__header" },
+                h("div", null,
+                    h("h2", { class: "az-card__title", id: id + "-title" }, T.userTitle(user)),
+                    h("p", { class: "az-card__desc" }, rich(T.userDesc(user)))),
+                h("div", { class: "az-card__actions" }, els.backups, els.add)),
+            els.body);
+    }));
+}
+
+/* One crontab r into els.body, with its buttons els.add and els.backups. Root's jobs
+   can also be run now, recorded and converted; those of other users can be switched,
+   edited and deleted. */
+function renderCrontab(r, els) {
+    const user = r.user;
+    const body = els.body;
+    const jobs = jobsOf(r);
     const editable = r.status === "ok" && !r.locked;
-    const add = $("add");
-    add.hidden = !(editable && jobs.length > 0);
     const frozen = state.busy || loading;
-    add.disabled = frozen;
-    $("backups").hidden = r.status !== "ok";
-    $("backups").disabled = frozen;
+    els.add.hidden = !(editable && jobs.length > 0);
+    els.add.disabled = frozen;
+    els.backups.hidden = r.status !== "ok";
+    els.backups.disabled = frozen;
 
     if (r.status === "loading") {
         fill(body, h("p", { class: "cron-state" }, T.loading));
@@ -202,55 +240,60 @@ export function renderRoot() {
     }
     if (r.status === "error") {
         fill(body, h("div", { class: "cron-card-alert" },
-            alertEl("danger", T.readErrorTitle, r.message,
+            alertEl("danger", T.readErrorTitle(user), r.message,
                     h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, T.retry))));
         return;
     }
     if (jobs.length === 0) {
+        const key = keyOf(user, "add-empty");
         fill(body, h("div", { class: "az-empty" },
             h("span", { class: "az-empty__icon" }, icon("clock")),
             h("h3", { class: "az-empty__title" }, T.emptyTitle),
-            h("p", { class: "az-empty__body" }, T.emptyBody),
+            h("p", { class: "az-empty__body" }, T.emptyBody(user)),
             editable ? h("div", { class: "az-empty__actions" },
-                h("button", { class: "az-btn az-btn--secondary az-btn--sm", type: "button", "data-key": "add-empty",
-                              disabled: frozen, onclick: () => openEdit(null, "add-empty") },
+                h("button", { class: "az-btn az-btn--secondary az-btn--sm", type: "button", "data-key": key,
+                              disabled: frozen, onclick: () => openEdit(user, null, key) },
                   icon("plus"), T.add)) : null));
         return;
     }
 
+    const isRoot = user === "root";
     const rows = jobs.map(({ e, i }) => {
-        const cmdId = "cmd-" + i;
+        const cmdId = isRoot ? "cmd-" + i : "cmd-" + user + "-" + i;
         const note = noteFor(r, i);
         const timer = convertedTo(r, i);
         const info = jobInfo(e);
         const toggleCell = editable
             ? h("label", { class: "az-switch" },
                 h("input", { type: "checkbox", role: "switch", checked: e.enabled, disabled: frozen,
-                             "aria-describedby": cmdId, "data-key": "toggle:" + i,
-                             onchange: ev => toggle(i, ev.target.checked) }),
+                             "aria-describedby": cmdId, "data-key": keyOf(user, "toggle", i),
+                             onchange: ev => toggle(user, i, ev.target.checked) }),
                 h("span", { class: "az-switch__track" }),
                 h("span", { class: "az-sr" }, T.activeSr))
             : h("span", { class: "cron-muted" }, e.enabled ? T.on : T.off);
-        const btn = (key, label, iconName, onclick, extra) => h("button", Object.assign({
+        const btn = (action, label, iconName, onclick, extra) => h("button", Object.assign({
             class: "az-btn az-btn--plain az-btn--sm", type: "button", "aria-label": label, title: label,
-            "aria-describedby": cmdId, disabled: frozen, "data-key": key + ":" + i, onclick }, extra || {}), icon(iconName));
+            "aria-describedby": cmdId, disabled: frozen, "data-key": keyOf(user, action, i), onclick }, extra || {}),
+            icon(iconName));
         return h("tr", { class: e.enabled ? null : "is-off" },
             h("td", { class: "az-cell-toggle", "data-label": T.colActive }, toggleCell),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(e.schedule, jobTz(r.entries, i))),
-            h("td", { class: "az-nowrap", "data-label": T.colNext, "data-next": i }, nextCell(e, i)),
-            h("td", { class: "az-nowrap", "data-label": T.colLast, "data-last": i }, lastCell(e, i, editable, frozen)),
+            h("td", { class: "az-nowrap", "data-label": T.colNext, "data-next": isRoot ? i : user + ":" + i }, nextCell(r, e, i)),
+            isRoot ? h("td", { class: "az-nowrap", "data-label": T.colLast, "data-last": i }, lastCell(e, i, editable, frozen))
+                : h("td", { class: "az-nowrap", "data-label": T.colLast },
+                    h("span", { class: "cron-muted" }, e.enabled ? T.notRecorded : "—")),
             h("td", { "data-label": T.colCommand },
                 h("div", { class: "cron-cell" },
                     h("span", { class: "az-mono", id: cmdId }, info.command),
                     timer ? h("span", { class: "az-cell-sub" }, T.convertedTo, " ",
-                        h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", "data-key": "timer:" + i,
+                        h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", "data-key": keyOf(user, "timer", i),
                                       title: T.openInCockpit(timer + ".timer"), onclick: () => jumpToUnit(timer + ".timer") },
                           timer + ".timer"))
                         : note ? h("span", { class: "az-cell-sub" }, note) : null)),
             h("td", { class: "az-cell-actions" },
-                r.notUtf8 ? null : btn("run", T.actRun, "play", () => openRun(i, "run:" + i)),
-                editable ? btn("edit", T.actEdit, "pencil-alt", () => openEdit(i, "edit:" + i)) : null,
-                menuItems(i).length ? btn("more", T.actMore, "ellipsis-v", ev => openRowMenu(i, ev.currentTarget),
+                isRoot && !r.notUtf8 ? btn("run", T.actRun, "play", () => openRun(i, "run:" + i)) : null,
+                editable ? btn("edit", T.actEdit, "pencil-alt", () => openEdit(user, i, keyOf(user, "edit", i))) : null,
+                menuItems(r, i).length ? btn("more", T.actMore, "ellipsis-v", ev => openRowMenu(r, i, ev.currentTarget),
                     { "aria-haspopup": "menu", "aria-expanded": "false" }) : null));
     });
 
@@ -270,11 +313,13 @@ export function renderRoot() {
 }
 
 export function updateNextRuns() {
-    const r = state.root;
-    if (r.status !== "ok") return;
     document.querySelectorAll("td[data-next]").forEach(td => {
-        const e = r.entries[+td.dataset.next];
-        if (e && e.kind === "job") fill(td, nextCell(e, +td.dataset.next));
+        const v = td.dataset.next;
+        const c = v.lastIndexOf(":");
+        const r = crontabOf(c < 0 ? "root" : v.slice(0, c));
+        const i = +v.slice(c + 1);
+        const e = r && r.status === "ok" ? r.entries[i] : null;
+        if (e && e.kind === "job") fill(td, nextCell(r, e, i));
     });
     document.querySelectorAll("td[data-timer-next]").forEach(td => {
         const t = state.timers.list[+td.dataset.timerNext];
@@ -404,10 +449,12 @@ function renderSystem() {
             h("td", { "data-label": T.colCommand },
                 j.command ? h("span", { class: "az-mono" }, j.command) : h("span", { class: "cron-muted" }, "—"))))));
 
-    $("users-card").hidden = sys.users.length === 0;
+    /* Users whose crontabs the page cannot change (names it does not take) */
+    const readOnlyUsers = sys.users.filter(j => !state.users[j.user]);
+    $("users-card").hidden = readOnlyUsers.length === 0;
     fill($("users-body"), readOnlyTable(
         [T.colUser, T.colSchedule, T.colCommand],
-        sys.users.map(j => h("tr", { class: j.enabled ? null : "is-off" },
+        readOnlyUsers.map(j => h("tr", { class: j.enabled ? null : "is-off" },
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule)),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
@@ -424,16 +471,20 @@ function renderSystem() {
 
 /* ---------- focus ---------- */
 
-/* Focus on the element with this data-key (or a fallback); its tab is shown first. */
+/* Focus on the element with this data-key (see keyOf), or else on the row's menu
+   button, the add button of the same crontab, root's, the title; its tab is shown
+   first. */
 export function restoreFocus(key) {
-    let el = key ? document.querySelector('[data-key="' + key + '"]') : null;
-    if (!el || el.disabled || hiddenBesidesTabs(el)) {
-        const m = key ? /^[a-z-]+:(\d+)$/.exec(key) : null;
-        if (m) el = document.querySelector('[data-key="more:' + m[1] + '"]');
-    }
-    if (!el || el.disabled || hiddenBesidesTabs(el)) {
-        el = [$("add"), document.querySelector('[data-key="add-empty"]'), $("page-title")]
-            .find(x => x && !x.disabled && !hiddenBesidesTabs(x));
+    const byKey = k => document.querySelector('[data-key="' + k + '"]');
+    const usable = x => x && !x.disabled && !hiddenBesidesTabs(x);
+    let el = key ? byKey(key) : null;
+    const row = key ? /^[a-z-]+(?::([A-Za-z0-9_][A-Za-z0-9._-]*))?:(\d+)$/.exec(key) : null;
+    const of = key ? /^[a-z-]+:([A-Za-z0-9_][A-Za-z0-9._-]*)$/.exec(key) : null;
+    const user = row && row[1] ? row[1] : of && !/^\d+$/.test(of[1]) ? of[1] : "root";
+    if (!usable(el) && row) el = byKey(keyOf(user, "more", row[2]));
+    if (!usable(el)) {
+        el = [byKey(keyOf(user, "add")), byKey(keyOf(user, "add-empty")), $("add"), byKey("add-empty"), $("page-title")]
+            .find(usable);
     }
     if (el) {
         showTabOf(el);
@@ -456,38 +507,44 @@ export function closeMenu(focusButton) {
     if (focusButton && m.button.isConnected) m.button.focus();
 }
 
-function menuItems(i) {
-    const r = state.root;
+/* The row menu of job i in crontab r. Recording, run now and conversion are there
+   for root's jobs only. */
+function menuItems(r, i) {
     const e = r.entries[i];
     const info = jobInfo(e);
     const editable = r.status === "ok" && !r.locked;
+    const more = keyOf(r.user, "more", i);
     const items = [];
-    if (info.capture) items.push({ label: T.showRuns, icon: "history", action: () => openRuns(i, "more:" + i) });
+    if (r.user === "root") {
+        if (info.capture) items.push({ label: T.showRuns, icon: "history", action: () => openRuns(i, more) });
+        if (editable) {
+            if (info.capture) {
+                items.push({ label: T.captureOff, action: () => openCaptureOff(i, more) });
+            } else {
+                const can = C.canCapture(info.command);
+                items.push({ label: T.captureOn, icon: "history", disabled: !can, hint: can ? null : T.cannotCapture,
+                             action: () => setCapture(i, true, more) });
+            }
+            if (state.basics.systemd && convertedTo(r, i)) {
+                items.push({ label: T.backToCron, icon: "exchange-alt", action: () => openBack(i, more) });
+            } else if (state.basics.systemd && state.timers.status === "ok") {
+                const why = convertBlocker(e, info, i);
+                items.push({ label: T.convert, icon: "exchange-alt", disabled: !!why, hint: why,
+                             action: () => openConvert(i, more) });
+            }
+        }
+    }
     if (editable) {
-        if (info.capture) {
-            items.push({ label: T.captureOff, action: () => openCaptureOff(i, "more:" + i) });
-        } else {
-            const can = C.canCapture(info.command);
-            items.push({ label: T.captureOn, icon: "history", disabled: !can, hint: can ? null : T.cannotCapture,
-                         action: () => setCapture(i, true, "more:" + i) });
-        }
-        if (state.basics.systemd && convertedTo(r, i)) {
-            items.push({ label: T.backToCron, icon: "exchange-alt", action: () => openBack(i, "more:" + i) });
-        } else if (state.basics.systemd && state.timers.status === "ok") {
-            const why = convertBlocker(e, info, i);
-            items.push({ label: T.convert, icon: "exchange-alt", disabled: !!why, hint: why,
-                         action: () => openConvert(i, "more:" + i) });
-        }
-        items.push("sep");
-        items.push({ label: T.actDelete, icon: "trash", danger: true, action: () => openDelete(i, "more:" + i) });
+        if (items.length) items.push("sep");
+        items.push({ label: T.actDelete, icon: "trash", danger: true, action: () => openDelete(r.user, i, more) });
     }
     return items;
 }
 
-function openRowMenu(i, button) {
+function openRowMenu(r, i, button) {
     if (menu && menu.button === button) { closeMenu(true); return; }
     closeMenu(false);
-    const items = menuItems(i);
+    const items = menuItems(r, i);
     if (!items.length) return;
     const el = h("div", { class: "cron-menu", role: "menu", "aria-label": T.actMore, id: "row-menu" },
         items.map(it => it === "sep" ? h("div", { class: "cron-menu__sep", role: "separator" })

@@ -3,8 +3,8 @@
 ## What this is
 
 Cron Jobs, a Cockpit page for cron: it shows every crontab and systemd timer on a server, changes the
-root crontab safely, records the result of runs, runs jobs on demand and converts jobs into systemd
-timers.
+root crontab and (with administrative access) those of other users safely, records the result of runs,
+runs jobs on demand and converts jobs into systemd timers.
 
 - Overview and use: `README.md`
 - What comes next: `ROADMAP.md`
@@ -68,7 +68,8 @@ src/                      the Cockpit package (installed as /usr/share/cockpit/c
   index.html, app.js      the page; app.js starts it (and holds VERSION), its parts are ES modules in app/
   app/system.js           everything that runs on the server; all root scripts (SAVE_SCRIPT, RUN_SCRIPT, …)
   app/core.js             libraries, constants, texts, DOM helpers, times, the page's state
-  app/crontab.js          the root crontab as shown: loading, saving (commit, restoreRoot), administrative access
+  app/crontab.js          the crontabs as shown (root's, other users' with admin access): loading, saving
+                          (commit, restoreCrontab), administrative access
   app/page.js, timeline.js, dialogs.js, runs.js, convert.js, backups.js, tabs.js   the page, the timeline,
                           dialogs, run now and recorded runs, conversion and back to cron, backups, the tabs
   lib/cron.js             crontab parsing and writing (byte for byte), schedules, next runs, cron's % rules
@@ -105,9 +106,9 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
 
 ## Rules (not negotiable)
 
-1. **Byte for byte.** Untouched crontab lines are written back exactly. Every write of the root
-   crontab goes through `SAVE_SCRIPT`: lock, checksum of the version shown, verified backup, write,
-   read back. Never write a crontab any other way.
+1. **Byte for byte.** Untouched crontab lines are written back exactly. Every write of a crontab
+   (root's or another user's) goes through `SAVE_SCRIPT`: lock, checksum of the version shown,
+   verified backup, write, read back. Never write a crontab any other way.
 2. **No values in shell code.** Root scripts are constants; values go in as arguments or standard
    input. Check IDs, unit names and file names in the page and again in the script.
 3. **Like cron.** Run now, the run recorder and conversions must behave as cron does (environment,

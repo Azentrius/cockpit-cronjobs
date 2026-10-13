@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, BACKUP_DIR, C, fill, fmtLocal, fmtWhen, h, icon, rich, setBusyButton, state, T } from "./core.js";
+import { $, backupDirOf, C, fill, fmtLocal, fmtWhen, h, icon, keyOf, rich, setBusyButton, state, T } from "./core.js";
 import { errText, installWrapper, removeRunsIfUnused, wrapperCurrent } from "./system.js";
 import {
-    commit, jobAt, jobInfo, jobTz, loading, noteFor, refreshRuns, rootJobs, setCapture, takenIds,
+    commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, setCapture, takenIds,
 } from "./crontab.js";
 import { alertEl, closeMenu, describe, restoreFocus } from "./page.js";
 
@@ -104,6 +104,8 @@ function setFieldState(input, help, ok, message) {
 
 export function updateForm(showAll) {
     const d = dialog && dialog.kind === "edit" ? dialog : null;
+    const user = d ? d.base.user : "root";
+    const mailto = d ? d.base.mailto : state.root.mailto;
     const sched = checkSchedule(form.schedule().value, d ? d.tz : null);
     const cmd = checkCommand(form.command().value);
     const showSched = showAll || form.touched.schedule;
@@ -114,9 +116,10 @@ export function updateForm(showAll) {
     else setFieldState(form.schedule(), $("f-schedule-help"), true, T.scheduleHelp);
 
     const capture = form.capture();
-    const cmdHelp = state.basics.mta === false && !state.root.mailto
-        ? (capture.checked && !capture.disabled ? T.commandHelpNoMtaRecorded : T.commandHelpNoMta)
-        : state.root.mailto ? T.commandHelpMailto : T.commandHelp;
+    const recorded = user === "root" && capture.checked && !capture.disabled;
+    const cmdHelp = state.basics.mta === false && !mailto
+        ? (recorded ? T.commandHelpNoMtaRecorded : T.commandHelpNoMta(user))
+        : mailto ? T.commandHelpMailto(user) : T.commandHelp(user);
     if (!cmd.ok && (showCmd || !cmd.empty)) setFieldState(form.command(), $("f-command-help"), false, cmd.msg);
     else setFieldState(form.command(), $("f-command-help"), true, cmdHelp);
 
@@ -130,17 +133,22 @@ export function updateForm(showAll) {
     return { sched, cmd };
 }
 
-export function openEdit(index, openerKey) {
-    if (state.busy || loading || state.root.status !== "ok" || state.root.locked) return;
-    const base = state.root;
+/* Add (index null) or edit a job of user's crontab. Recording is offered for root's
+   jobs only. */
+export function openEdit(user, index, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
     const e = index === null ? null : base.entries[index];
     if (index !== null && (!e || e.kind !== "job")) return;
     const info = e ? jobInfo(e) : null;
     $("edit-title").textContent = e ? T.editTitle : T.addTitle;
+    $("edit-sub").textContent = user === "root" ? "" : T.userTitle(user);
+    $("edit-sub").hidden = user === "root";
+    $("f-capture-field").hidden = user !== "root";
     form.schedule().value = e ? e.schedule : "";
     form.command().value = e ? info.command : "";
     form.active().checked = e ? e.enabled : true;
-    form.capture().checked = e ? !!info.capture : true;
+    form.capture().checked = user === "root" && (e ? !!info.capture : true);
     form.touched.schedule = false;
     form.touched.command = false;
     dialogError("edit-alert", null);
@@ -159,7 +167,8 @@ export async function submitEdit(ev) {
     if (!sched.ok) { form.schedule().focus(); return; }
     if (!cmd.ok) { form.command().focus(); return; }
     const d = dialog;
-    const capture = form.capture().checked && C.canCapture(cmd.text);
+    const user = d.base.user;
+    const capture = user === "root" && form.capture().checked && C.canCapture(cmd.text);
     const enabled = form.active().checked;
     dialogError("edit-alert", null);
     setBusyButton($("edit-save"), true, T.saving);
@@ -208,8 +217,8 @@ export async function submitEdit(ev) {
     if (res.ok || res.conflict) {
         let key = d.openerKey;
         if (res.ok && index === null) {
-            const jobs = rootJobs();
-            if (jobs.length) key = "edit:" + jobs[jobs.length - 1].i;
+            const jobs = jobsOf(crontabOf(user));
+            if (jobs.length) key = keyOf(user, "edit", jobs[jobs.length - 1].i);
         }
         closeDialog(key);
         if (res.ok) refreshRuns();
@@ -221,18 +230,18 @@ export async function submitEdit(ev) {
 
 /* Delete. A comment right above the job (shown as its note) goes with it, else it
    would stick to the next job. Recorded runs are deleted as well. */
-export function openDelete(index, openerKey) {
-    if (state.busy || loading || state.root.status !== "ok" || state.root.locked) return;
-    const base = state.root;
+export function openDelete(user, index, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
     const e = base.entries[index];
     if (!e || e.kind !== "job") return;
     const info = jobInfo(e);
     const hasNote = noteFor(base, index) !== null;
     const noteIndex = hasNote ? index - 1 : null;
     const noteLine = hasNote ? base.entries[index - 1].line : null;
-    $("del-intro").textContent = hasNote ? T.delIntroNote : T.delIntro;
+    $("del-intro").textContent = hasNote ? T.delIntroNote(user) : T.delIntro(user);
     $("del-line").textContent = (hasNote ? noteLine + "\n" : "") + e.schedule + "  " + info.command;
-    fill($("del-backup"), rich(T.delBackup(BACKUP_DIR + "/")));
+    fill($("del-backup"), rich(T.delBackup(backupDirOf(user) + "/")));
     $("del-runs").hidden = !info.capture;
     fill($("del-runs"), rich(T.delRuns));
     dialogError("del-alert", null);
@@ -259,10 +268,11 @@ export async function confirmDelete() {
     if (res.ok && capture) await removeRunsIfUnused(capture.id);
     if (res.ok) refreshRuns();
     if (res.ok || res.conflict) {
-        const jobs = rootJobs();
+        const user = base.user;
+        const jobs = jobsOf(crontabOf(user));
         const first = noteIndex !== null ? noteIndex : index;
         const next = jobs.find(x => x.i >= first) || jobs[jobs.length - 1];
-        closeDialog(next ? "more:" + next.i : "add");
+        closeDialog(next ? keyOf(user, "more", next.i) : keyOf(user, "add"));
     } else if (res.error) {
         dialogError("del-alert", res.error);
         $("del-confirm").focus();
