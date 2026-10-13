@@ -753,7 +753,7 @@ with sync_playwright() as p:
     check(page.locator("#users-card").is_hidden(), "nothing left for the read-only list of other users")
     show_tab(page, "overview")
     # switch off: exactly one line changes, the backup goes to the user's own directory
-    card.locator("[data-key='toggle:www-data:0']").click()
+    card.locator("label.az-switch").filter(has=page.locator("[data-key='toggle:www-data:0']")).click()
     wait_idle(page)
     check(mock(page, "sys.users['www-data']") == "#[cronjobs:off] " + www, "switched off: " + repr(mock(page, "sys.users['www-data']")))
     check(mock(page, "userWrites.length") == 1 and mock(page, "userWrites[0].user") == "www-data", "written as www-data's crontab")
@@ -761,7 +761,7 @@ with sync_playwright() as p:
           "/var/lib/cockpit-cronjobs/backups/users/www-data/www-data-" in page.inner_text("#alerts"),
           "own backup: " + page.inner_text("#alerts"))
     check(focused_key(page) == "toggle:www-data:0", "focus stays on the switch: " + repr(focused_key(page)))
-    card.locator("[data-key='toggle:www-data:0']").click()
+    card.locator("label.az-switch").filter(has=page.locator("[data-key='toggle:www-data:0']")).click()
     wait_idle(page)
     check(mock(page, "sys.users['www-data']") == www, "switched on again: the bytes from before")
     # edit: the dialog names the crontab, there is no recording, the help says as whom it runs
@@ -818,7 +818,7 @@ with sync_playwright() as p:
     page.click("#bk-close-btn")
     # changed outside the page meanwhile: nothing written, the page says so
     page.evaluate("t => { window.__mock.userConflictNext = t; }", www + "# by hand\n")
-    card.locator("[data-key='toggle:www-data:0']").click()
+    card.locator("label.az-switch").filter(has=page.locator("[data-key='toggle:www-data:0']")).click()
     wait_idle(page)
     check(mock(page, "sys.users['www-data']") == www + "# by hand\n", "changed meanwhile: nothing written")
     check("Die Crontab von www-data wurde außerhalb" in page.inner_text("#alerts"), "conflict names the crontab: " + page.inner_text("#alerts"))

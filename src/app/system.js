@@ -105,6 +105,7 @@ f=
 if [ "$have" = 1 ]; then
   install -d -m 700 "$dir" || exit 5
   chmod 700 '${STATE_DIR}' '${BACKUP_DIR}' "$dir" || exit 5
+  if [ "$user" != root ]; then chmod 700 '${BACKUP_DIR}/users' || exit 5; fi
   last=$(ls -1t "$dir/$user"-*.crontab 2>/dev/null | head -n 1)
   if [ -n "$last" ] && [ "$(cksum < "$last")" = "$sum" ]; then
     f=$last
