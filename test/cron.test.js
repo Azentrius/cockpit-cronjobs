@@ -360,6 +360,88 @@ t("envBefore applies to the lines below only", () => {
     assert.deepStrictEqual(C.envBefore(e, 3), { SHELL: "/bin/bash", PATH: "/x" });
 });
 
+/* ---------- the environment cron gives a job ---------- */
+
+/* PAM files as Debian (debian/cron.pam), cronie (pam/crond) and Fedora's authselect ship them. */
+const PAM_DEBIAN = {
+    cron: "# The PAM configuration file for the cron daemon\n\n@include common-auth\n\n" +
+          "# Sets the loginuid process attribute\nsession    required     pam_loginuid.so\n\n" +
+          "# Read environment variables from pam_env's default files, /etc/environment\n" +
+          "# and /etc/security/pam_env.conf.\nsession       required   pam_env.so\n\n" +
+          "# In addition, read system locale information\nsession       required   pam_env.so envfile=/etc/default/locale\n\n" +
+          "@include common-account\n@include common-session-noninteractive\n\n" +
+          "# Sets up user limits, please define limits for cron tasks\n# through /etc/security/limits.conf\n" +
+          "session    required   pam_limits.so\n",
+    "common-auth": "auth\t[success=1 default=ignore]\tpam_unix.so nullok\nauth\trequisite\t\t\tpam_deny.so\nauth\trequired\t\t\tpam_permit.so\n",
+    "common-account": "account\t[success=1 new_authtok_reqd=done default=ignore]\tpam_unix.so\naccount\trequisite\t\t\tpam_deny.so\n",
+    "common-session-noninteractive": "session\t[default=1]\t\t\tpam_permit.so\nsession\trequisite\t\t\tpam_deny.so\n" +
+                                     "session\trequired\t\t\tpam_permit.so\nsession optional\t\t\tpam_umask.so\nsession\trequired\tpam_unix.so \n",
+};
+const PAM_CRONIE = {
+    crond: "#\n# The PAM configuration file for the cron daemon\n#\n#\n# Although no PAM authentication is called, auth modules\n" +
+           "# are used for credential setting\nauth       include    password-auth\naccount    required   pam_access.so\n" +
+           "account    include    password-auth\n-session   optional   pam_keyinit.so revoke\n-session   optional   pam_limits.so\n" +
+           "session    required   pam_loginuid.so\nsession    include    password-auth\n",
+    "password-auth": "auth        required      pam_env.so\nauth        sufficient    pam_unix.so try_first_pass nullok\n" +
+                     "auth        required      pam_deny.so\n\nsession     optional      pam_keyinit.so revoke\n" +
+                     "-session    optional      pam_systemd.so\nsession     required      pam_unix.so\n",
+};
+t("PAM lines: includes, brackets, comments", () => {
+    assert.deepStrictEqual(C.pamLines("@include common-auth\nsession [success=1 default=ignore] pam_succeed_if.so quiet # x\n" +
+                                      "-session optional pam_systemd.so\nauth substack system-auth\n# auth include no\n"),
+                           [{ include: "common-auth", type: null },
+                            { type: "session", module: "pam_succeed_if.so", args: ["quiet"] },
+                            { type: "session", module: "pam_systemd.so", args: [] },
+                            { include: "system-auth", type: "auth" }]);
+    assert.deepStrictEqual(C.pamLines("session required pam_env.so [envfile=/etc/my env]")[0].args, ["envfile=/etc/my env"]);
+});
+t("pam_env lines of cron's PAM service, in the order cron applies them", () => {
+    assert.deepStrictEqual(C.pamEnvModules(PAM_DEBIAN, "cron", ["session", "auth"]), [[], ["envfile=/etc/default/locale"]]);
+    assert.deepStrictEqual(C.pamEnvModules(PAM_CRONIE, "crond", ["auth", "session"]), [[]]);
+    assert.deepStrictEqual(C.pamEnvModules({ cron: "@include cron\nsession required pam_env.so" }, "cron", ["session"]).length, 9,
+                           "an include loop ends");
+    assert.deepStrictEqual(C.pamEnvModules({}, "cron", ["session"]), []);
+});
+t("env files read the way pam_env reads them", () => {
+    const env = C.applyEnvFile({ KEEP: "1", GONE: "x" },
+        "# comment\n  PATH=\"/usr/local/bin:/usr/bin\"\nexport http_proxy=http://proxy:3128\nexport  TWO=no\n" +
+        "PLAIN=a b # c\nSINGLE='s'\nINNER=\"a\"b\"\nOPEN=\"x\nTRAIL=\"x\" \nBAD-NAME=1\n=empty\nGONE\nLONG=a\\\n  b\nCR=v\r\nEMPTY=\n");
+    assert.deepStrictEqual(env, { KEEP: "1", PATH: "/usr/local/bin:/usr/bin", http_proxy: "http://proxy:3128", PLAIN: "a b ",
+                                  SINGLE: "s", INNER: "a\"b", OPEN: "x", TRAIL: "x\" ", LONG: "ab", CR: "v\r", EMPTY: "" });
+});
+t("cron's environment model: Debian, Ubuntu (-P), cronie", () => {
+    const files = { "/etc/environment": "PATH=\"/usr/local/sbin:/usr/bin:/snap/bin\"\nhttp_proxy=http://p:1\n",
+                    "/etc/default/locale": "LANG=de_DE.UTF-8\n" };
+    const debian = C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f", pam: PAM_DEBIAN, files });
+    assert.deepStrictEqual(debian, { pam: { PATH: "/usr/local/sbin:/usr/bin:/snap/bin", http_proxy: "http://p:1", LANG: "de_DE.UTF-8" },
+                                     path: "/usr/bin:/bin", user: false });
+    const ubuntu = C.cronEnvModel({ flavor: "debian", pam: PAM_DEBIAN, files,
+                                    args: "{ path=/usr/sbin/cron ; argv[]=/usr/sbin/cron -f -P $EXTRA_OPTS ; ignore_errors=no }" });
+    assert.strictEqual(ubuntu.path, null, "-P in the unit: no default");
+    assert.strictEqual(C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -fP" }).path, null, "-fP");
+    assert.strictEqual(C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f -L 15" }).path, "/usr/bin:/bin");
+    const cronie = C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n", pam: PAM_CRONIE, files });
+    assert.deepStrictEqual(cronie, { pam: { PATH: "/usr/local/sbin:/usr/bin:/snap/bin", http_proxy: "http://p:1" },
+                                     path: "/usr/bin:/bin:/usr/sbin:/sbin", user: true });
+    assert.strictEqual(C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n -P", managerPath: "/x:/y" }).path, "/x:/y",
+                       "cronie -P: its own PATH");
+    assert.deepStrictEqual(C.cronEnvModel({ flavor: "debian", pam: { cron: "session required pam_env.so readenv=0" }, files }).pam, {},
+                           "readenv=0");
+});
+t("the environment of a job: PAM's, overridden by the crontab's and cron's own", () => {
+    const model = { pam: { PATH: "/from/pam", LANG: "C.UTF-8", SHELL: "/bin/zsh", LOGNAME: "x", http_proxy: "p" }, path: null, user: false };
+    assert.deepStrictEqual(C.jobEnvironment({ MAILTO: "", X: "1" }, null, "root", model),
+                           { PATH: "/from/pam", LANG: "C.UTF-8", SHELL: "/bin/sh", LOGNAME: "root", http_proxy: "p", MAILTO: "",
+                             X: "1", HOME: "/root" });
+    assert.deepStrictEqual(C.jobEnvironment({ PATH: "/opt/bin" }, "/var/www", "www-data",
+                                            { pam: { PATH: "/from/pam" }, path: "/usr/bin:/bin:/usr/sbin:/sbin", user: true }),
+                           { PATH: "/opt/bin", SHELL: "/bin/sh", HOME: "/var/www", LOGNAME: "www-data", USER: "www-data" });
+    assert.deepStrictEqual(C.jobEnvironment({}, null, "root"),
+                           { SHELL: "/bin/sh", HOME: "/root", PATH: "/usr/bin:/bin", LOGNAME: "root" }, "no model: Debian's cron");
+    assert.strictEqual(C.jobEnvironment({}, null, "nobody").HOME, "/", "no home known: /");
+    assert.strictEqual(C.jobEnvironment({ HOME: "/srv" }, "/var/www", "www-data").HOME, "/srv", "the crontab's HOME wins");
+});
+
 /* ---------- recording wrapper lines ---------- */
 
 const { execFileSync } = require("child_process");

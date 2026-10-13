@@ -759,9 +759,11 @@ with sync_playwright() as p:
     st = mock(page, "runs_started[window.__mock.runs_started.length - 1]")
     check(st["user"] == "www-data" and st["home"] == "/var/www" and st["command"] == "php -f /var/www/nextcloud/cron.php",
           "started as www-data in its home: " + repr(st))
-    check(sorted(e for e in st["env"] if e.split("=")[0] in ("HOME", "LOGNAME", "USER", "SHELL", "PATH")) ==
-          ["HOME=/var/www", "LOGNAME=www-data", "PATH=/usr/bin:/bin", "SHELL=/bin/sh", "USER=www-data"] and
-          not any(e.startswith("CRONJOBS_TRIGGER=") for e in st["env"]), "cron's environment for www-data: " + repr(st["env"]))
+    check(sorted(e for e in st["env"] if e.split("=")[0] in ("HOME", "LOGNAME", "USER", "SHELL", "PATH", "LANG", "http_proxy")) ==
+          ["HOME=/var/www", "LANG=C.UTF-8", "LOGNAME=www-data", "PATH=/usr/bin:/bin", "SHELL=/bin/sh",
+           "http_proxy=http://proxy.example:3128"] and
+          not any(e.startswith("CRONJOBS_TRIGGER=") for e in st["env"]),
+          "cron's environment for www-data, as Debian's cron gives it (no USER): " + repr(st["env"]))
     page.click("#run-close-btn")
     check(focused_key(page) == "run:www-data:0", "focus back on the run button: " + repr(focused_key(page)))
     show_tab(page, "system")
@@ -915,7 +917,8 @@ with sync_playwright() as p:
     check(page.locator("#run-dlg").is_visible(), "run dialog")
     rt = page.inner_text("#run-dlg")
     check("sofort als root" in rt and "/usr/sbin/fstrim -a" in rt, "run confirm text")
-    check("PATH=/usr/bin:/bin" in rt and "HOME=/root" in rt and "/bin/sh" in rt, "cron environment shown: " + rt)
+    check("PATH=/usr/bin:/bin" in rt and "HOME=/root" in rt and "/bin/sh" in rt and "Außerdem gesetzt:" in rt and
+          "LANG" in rt and "http_proxy" in rt, "cron environment shown: " + rt)
     check(page.evaluate("() => document.activeElement.id") == "run-start", "focus on run")
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
@@ -923,7 +926,10 @@ with sync_playwright() as p:
     check("OK" in page.inner_text("#run-label") and "Loading 12 feeds" in page.inner_text("#run-log") and "nach" in rt, "run done: " + rt)
     started = mock(page, "runs_started[0]")
     check("PATH=/usr/bin:/bin" in started["env"] and "HOME=/root" in started["env"] and "SHELL=/bin/sh" in started["env"]
-          and not any(e.startswith("CRONJOBS_TRIGGER") for e in started["env"]), "manual run environment: " + repr(started["env"]))
+          and "LOGNAME=root" in started["env"] and "LANG=C.UTF-8" in started["env"]
+          and "http_proxy=http://proxy.example:3128" in started["env"]
+          and not any(e.startswith("CRONJOBS_TRIGGER") or e.startswith("USER=") for e in started["env"]),
+          "manual run environment: " + repr(started["env"]))
     check(started["command"] == "/usr/sbin/fstrim -a" and started["shell"] == "/bin/sh" and started["home"] == "/root" and started["input"] is None,
           "manual run command: " + repr(started))
     check(started["opts"]["superuser"] == "require" and started["opts"]["err"] == "out", "run as root, stderr merged")
@@ -975,6 +981,30 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (run): " + repr(page.problems))
     page.context.close()
 
+    # cron's environment as each cron gives it: Ubuntu starts cron with -P, so PATH comes
+    # from /etc/environment (or there is none); cronie sets its own PATH and USER
+    def run_env(query):
+        pg = open_page(browser, query)
+        row(pg, 1).locator("[data-key^='run:']").click()
+        text = pg.inner_text("#run-env")
+        pg.click("#run-start")
+        wait_js(pg, "!document.querySelector('#run-done-actions').hidden")
+        env = mock(pg, "runs_started[0].env")
+        problems = pg.problems
+        pg.context.close()
+        return text, env, problems
+
+    text, env, problems = run_env("cronenv=ubuntu")
+    ubuntu_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+    check("PATH=" + ubuntu_path in text and "PATH=" + ubuntu_path in env and "LANG=C.UTF-8" in env and
+          not any(e.startswith("USER=") for e in env) and not problems, "Ubuntu: PATH from /etc/environment: " + text + " " + repr(env))
+    text, env, problems = run_env("cronenv=nopath")
+    check("keinen PATH setzt" in text and not any(e.startswith("PATH=") for e in env) and not problems,
+          "cron -P without a PATH anywhere: none: " + text + " " + repr(env))
+    text, env, problems = run_env("flavor=cronie")
+    check("PATH=/usr/bin:/bin:/usr/sbin:/sbin" in env and "USER=root" in env and "http_proxy=http://proxy.example:3128" in env and
+          not any(e.startswith("LANG=") for e in env) and not problems, "cronie: its PATH, USER, PAM's variables: " + repr(env))
+
     # ---------- convert to a systemd timer ----------
     page = open_page(browser)
     row(page, 1).locator("[data-key^=more]").click()
@@ -987,6 +1017,11 @@ with sync_playwright() as p:
     page.click("#conv-units-toggle")
     check(not page.locator("#conv-units").is_hidden() and "ExecStart='/bin/sh' -c '/usr/sbin/fstrim -a'" in page.inner_text("#conv-service"),
           "units shown")
+    service = page.inner_text("#conv-service")
+    check('Environment="LANG=C.UTF-8"' in service and 'Environment="PATH=/usr/bin:/bin"' in service and
+          'Environment="http_proxy=http://proxy.example:3128"' in service and 'Environment="SHELL=/bin/sh"' in service and
+          "UnsetEnvironment=USER\n" in service and "LOGNAME" not in service,
+          "the unit gets cron's environment; USER, which Debian's cron does not set, is unset: " + service)
     check("OnCalendar=Sun *-*-* 01:30:00" in page.inner_text("#conv-timer") and "Persistent=false" in page.inner_text("#conv-timer"), "timer unit")
     page.locator("#conv-dlg .az-switch").click()
     check("Persistent=true" in page.inner_text("#conv-timer"), "persistent switch updates unit")

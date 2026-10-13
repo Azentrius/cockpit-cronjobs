@@ -134,6 +134,37 @@
 
     const tz = () => params.get("tz") || "Etc/UTC";
 
+    /* How cron gives jobs their environment (?cronenv=): Debian's cron by default (PATH
+       /usr/bin:/bin, LANG from /etc/default/locale, a proxy from /etc/environment);
+       "ubuntu": started with -P, PATH from /etc/environment; "nopath": -P without a PATH
+       anywhere. With ?flavor=cronie: cronie's crond and system-auth. Then what systemd
+       gives every service. */
+    function cronEnvOutput() {
+        const mode = params.get("cronenv") || "debian";
+        const cronie = params.get("flavor") === "cronie";
+        const sec = (n, body) => "\x1e" + n + "\n" + body + "\n";
+        let out = sec("crond", "run /usr/sbin/" + (cronie ? "crond -n" : "cron -f" + (mode === "debian" ? "" : " -P")));
+        if (M.systemd) out += sec("manager", "LANG=C.UTF-8\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin");
+        if (cronie) {
+            out += sec("pam:crond", "account    required   pam_access.so\naccount    include    system-auth\n" +
+                                    "session    required   pam_loginuid.so\nsession    include    system-auth\nauth       include    system-auth");
+            out += sec("pam:system-auth", "auth        required      pam_env.so\nauth        sufficient    pam_unix.so\n" +
+                                          "session     required      pam_unix.so");
+        } else {
+            out += sec("pam:cron", "@include common-auth\nsession    required     pam_loginuid.so\n" +
+                                   "session       required   pam_env.so\n# In addition, read system locale information\n" +
+                                   "session       required   pam_env.so envfile=/etc/default/locale\n" +
+                                   "@include common-account\n@include common-session-noninteractive\nsession    required   pam_limits.so");
+            ["common-auth", "common-account", "common-session-noninteractive"].forEach(n => {
+                out += sec("pam:" + n, "# " + n + "\n" + n.replace("common-", "").replace("-noninteractive", "") + " required pam_unix.so");
+            });
+            out += sec("env:/etc/default/locale", "LANG=C.UTF-8");
+        }
+        const env = mode === "ubuntu" ? "PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"\n" : "";
+        out += sec("env:/etc/environment", env + (mode === "nopath" ? "" : "# proxy for jobs\nexport http_proxy=\"http://proxy.example:3128\"\n"));
+        return out;
+    }
+
     function basicsOutput() {
         const fallback = params.get("tzmode") === "fallback";
         return "\x1ehost\npublic-host\n" +
@@ -145,7 +176,8 @@
                "\x1eflavor\n" + (params.get("flavor") || "debian") + "\n" +
                "\x1esystemd\n" + (M.systemd ? "yes" : "no") + "\n" +
                "\x1ecron\n" + (M.systemd ? "cron.service " + (M.cronActive ? "active" : "inactive") : "") + "\n" +
-               "\x1ewrapper\n" + (M.wrapper ? M.wrapper.version : "missing") + "\n";
+               "\x1ewrapper\n" + (M.wrapper ? M.wrapper.version : "missing") + "\n" +
+               cronEnvOutput();
     }
 
     function systemOutput(privileged) {
@@ -238,6 +270,11 @@
         const out = [];
         u.service.split("\n").forEach(l => { if (l.startsWith("Environment=")) out.push(...words(l.slice(12))); });
         return out;
+    }
+    function unitUnset(name) {
+        const u = M.units[name];
+        const m = u && /^UnsetEnvironment=(.*)$/m.exec(u.service);
+        return m ? m[1].split(/\s+/).filter(Boolean) : [];
     }
 
     function handle(args, opts, input) {
@@ -554,6 +591,7 @@
             const unit = Object.keys(M.units).find(n => pathOf(n + ".service") === path);
             if (unit && prop === "ExecStart") return [V("a(sasbttttuii)", unitExec(unit))];
             if (unit && prop === "Environment") return [V("as", unitEnv(unit))];
+            if (unit && prop === "UnsetEnvironment") return [V("as", unitUnset(unit))];
             throw new Error("unknown property " + ifc + "." + prop);
         }
         if (iface === "org.freedesktop.DBus.Properties" && method === "GetAll") {

@@ -187,26 +187,39 @@ t("Environment quoting", () => {
     assert.strictEqual(SD.envLine("P", "50%"), 'Environment="P=50%%"');
     assert.strictEqual(SD.envLine("Q", 'say "hi" \\o/'), 'Environment="Q=say \\"hi\\" \\\\o/"');
 });
-t("job environment: cron's defaults for root and for another user", () => {
-    assert.deepStrictEqual(SD.jobEnvironment({ MAILTO: "", X: "1" }, null),
-                           { SHELL: "/bin/sh", PATH: "/usr/bin:/bin", HOME: "/root", LOGNAME: "root", USER: "root", X: "1" });
-    assert.deepStrictEqual(SD.jobEnvironment({ CRON_TZ: "UTC", PATH: "/opt/bin:/usr/bin" }, "/var/www", "www-data"),
-                           { SHELL: "/bin/sh", PATH: "/opt/bin:/usr/bin", HOME: "/var/www", LOGNAME: "www-data", USER: "www-data" });
-    assert.strictEqual(SD.jobEnvironment({}, null, "nobody").HOME, "/", "no home known: /");
-    assert.strictEqual(SD.jobEnvironment({ HOME: "/srv" }, "/var/www", "www-data").HOME, "/srv", "the crontab's HOME wins");
+/* The environment cron gives a converted job of root, under each cron (see C.cronEnvModel). */
+const serviceEnv = (cronEnv, model) => SD.serviceEnvironment(C.jobEnvironment(cronEnv, null, "root", model), cronEnv);
+t("service environment: what cron gives, without what systemd gives the same way", () => {
+    const debian = { pam: { LANG: "C.UTF-8" }, path: "/usr/bin:/bin", user: false };
+    assert.deepStrictEqual(serviceEnv({ MAILTO: "", PATH: "/usr/local/bin:/usr/bin:/bin", SHELL: "/bin/bash" }, debian),
+                           { env: { LANG: "C.UTF-8", MAILTO: "", PATH: "/usr/local/bin:/usr/bin:/bin", SHELL: "/bin/bash" }, unset: ["USER"] },
+                           "Debian's cron sets no USER: unset what User=root would give; MAILTO passed on as cron does");
+    const ubuntu = { pam: { PATH: "/usr/local/bin:/usr/bin:/snap/bin" }, path: null, user: false };
+    assert.deepStrictEqual(serviceEnv({}, ubuntu), { env: { PATH: "/usr/local/bin:/usr/bin:/snap/bin", SHELL: "/bin/sh" }, unset: ["USER"] },
+                           "cron -P: the PATH from PAM");
+    assert.deepStrictEqual(serviceEnv({}, { pam: {}, path: null, user: false }), { env: { SHELL: "/bin/sh" }, unset: ["USER", "PATH"] },
+                           "no PATH under cron: none under systemd either");
+    assert.deepStrictEqual(serviceEnv({}, { pam: {}, path: "/usr/bin:/bin:/usr/sbin:/sbin", user: true }),
+                           { env: { SHELL: "/bin/sh", PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, unset: [] }, "cronie sets USER=root, as systemd does");
+    assert.deepStrictEqual(serviceEnv({ HOME: "/srv" }).env, { HOME: "/srv", SHELL: "/bin/sh", PATH: "/usr/bin:/bin" }, "the crontab's HOME stays");
+    const job = C.jobEnvironment({}, null, "root", debian);
+    assert.deepStrictEqual(SD.serviceEnvironment(job, {}, { LANG: "en_US.UTF-8", PATH: "/usr/bin", LANGUAGE: "en" }).unset, ["USER", "LANGUAGE"],
+                           "systemd's own variables that cron does not give are unset; those cron gives are set");
 });
 t("service unit", () => {
-    const env = SD.serviceEnvironment({ MAILTO: "", PATH: "/usr/local/bin:/usr/bin:/bin", SHELL: "/bin/bash" });
-    assert.deepStrictEqual(env, { SHELL: "/bin/bash", PATH: "/usr/local/bin:/usr/bin:/bin" });
+    const { env, unset } = serviceEnv({ MAILTO: "", PATH: "/usr/local/bin:/usr/bin:/bin", SHELL: "/bin/bash" });
+    assert.deepStrictEqual(env, { MAILTO: "", SHELL: "/bin/bash", PATH: "/usr/local/bin:/usr/bin:/bin" });
     const u = SD.serviceUnit({ name: "backup-db", line: "30 2 * * * /usr/local/bin/backup-db.sh", shell: "/bin/bash",
-                               command: "/usr/local/bin/backup-db.sh", env });
+                               command: "/usr/local/bin/backup-db.sh", env, unset });
     assert.ok(u.includes("\n[Service]\nType=oneshot\nUser=root\nWorkingDirectory=~\n"));
-    assert.ok(u.includes('Environment="PATH=/usr/local/bin:/usr/bin:/bin"\nEnvironment="SHELL=/bin/bash"\n'));
+    assert.ok(u.includes('Environment="MAILTO="\nEnvironment="PATH=/usr/local/bin:/usr/bin:/bin"\nEnvironment="SHELL=/bin/bash"\n' +
+                         "UnsetEnvironment=USER\nExecStart="));
     assert.ok(u.includes("ExecStart='/bin/bash' -c '/usr/local/bin/backup-db.sh'\n"));
     assert.ok(u.includes("#   30 2 * * * /usr/local/bin/backup-db.sh\n"));
     assert.ok(u.includes("Documentation=" + SD.DOC_URL));
-    assert.ok(!/MAILTO|LOGNAME|USER=/.test(u));
-    const home = SD.serviceUnit({ name: "x", shell: "/bin/sh", command: "true", env: SD.serviceEnvironment({ HOME: "/srv" }), workdir: "/srv" });
+    assert.ok(!/LOGNAME|USER=/.test(u));
+    assert.ok(!SD.serviceUnit({ name: "x", shell: "/bin/sh", command: "true", env: {}, unset: [] }).includes("UnsetEnvironment"));
+    const home = SD.serviceUnit({ name: "x", shell: "/bin/sh", command: "true", env: serviceEnv({ HOME: "/srv" }).env, workdir: "/srv" });
     assert.ok(home.includes("WorkingDirectory=/srv\n") && home.includes('Environment="HOME=/srv"'));
 });
 t("timer unit", () => {
@@ -239,9 +252,9 @@ if (haveAnalyze) {
     const path = require("path");
     t("systemd-analyze verify accepts the units", () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-units-"));
-        const env = SD.serviceEnvironment({ PATH: "/usr/bin:/bin", X: "50% \"q\" \\" });
+        const { env, unset } = serviceEnv({ PATH: "/usr/bin:/bin", X: "50% \"q\" \\" });
         fs.writeFileSync(path.join(dir, "cj-test.service"), SD.serviceUnit({ name: "cj-test", line: "x", shell: "/bin/sh",
-            command: "echo 'it''s' \"$HOME\" 100% \\n", env }));
+            command: "echo 'it''s' \"$HOME\" 100% \\n", env, unset: unset.concat("PATH") }));
         fs.writeFileSync(path.join(dir, "cj-test.timer"), SD.timerUnit({ name: "cj-test", specs: ["Mon..Fri *-*-* 09..17:00:00"], persistent: true }));
         const out = execFileSync("systemd-analyze", ["verify", "--man=no", path.join(dir, "cj-test.service"), path.join(dir, "cj-test.timer")],
                                  { env: { SYSTEMD_LOG_LEVEL: "warning", PATH: process.env.PATH }, stdio: ["ignore", "pipe", "pipe"] }).toString();

@@ -5,7 +5,7 @@
 
 import {
     $, C, clock, codeSafe, fill, fmtDuration, fmtElapsed, fmtShort, h, icon, joinList, KEEP_RUNS, LOCALE, R, rich,
-    RUN_OUTPUT_LIMIT, SD, setBusyButton, state, STATE_DIR, T,
+    RUN_OUTPUT_LIMIT, setBusyButton, state, STATE_DIR, T,
 } from "./core.js";
 import { errText, isDenied, readOutput, removeOrphans, RUN_SCRIPT, runsDirOf } from "./system.js";
 import { crontabOf, jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
@@ -16,10 +16,12 @@ import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
 
 let run = null;   /* { phase, proc, output, started, ended, rc, signal, stopped, error, timer, … } */
 
-/* cron's environment for job index of crontab tab: root's, or another user's with
-   that user's home; a recorded job is marked as started by hand. */
+/* cron's environment for job index of crontab tab, as cron on this server gives it
+   (see C.cronEnvModel): root's, or another user's with that user's home; a recorded
+   job is marked as started by hand. */
 function runEnvironment(tab, index, recorded) {
-    const env = SD.jobEnvironment(C.envBefore(tab.entries, index), tab.user === "root" ? null : tab.home, tab.user);
+    const env = C.jobEnvironment(C.envBefore(tab.entries, index), tab.user === "root" ? null : tab.home, tab.user,
+                                 state.basics.cronEnv);
     if (recorded) env.CRONJOBS_TRIGGER = "manual";
     return env;
 }
@@ -123,7 +125,11 @@ function renderRunDialog() {
     $("run-intro").textContent = T.runIntro(r.user);
     $("run-cmd").textContent = r.shown;
     const env = r.env;
-    fill($("run-env"), rich(T.runEnv(codeSafe("PATH=" + env.PATH), codeSafe("HOME=" + env.HOME), codeSafe(env.SHELL))),
+    const others = Object.keys(env).filter(k => !["PATH", "HOME", "SHELL", "LOGNAME", "USER", "CRONJOBS_TRIGGER"].includes(k));
+    fill($("run-env"), rich(env.PATH !== undefined
+        ? T.runEnv(codeSafe("PATH=" + env.PATH), codeSafe("HOME=" + env.HOME), codeSafe(env.SHELL))
+        : T.runEnvNoPath(codeSafe("HOME=" + env.HOME), codeSafe(env.SHELL))),
+        others.length ? [" ", rich(T.runEnvOthers(joinList(others.map(k => "`" + codeSafe(k) + "`"))))] : null,
         r.capture ? [" ", rich(T.runRecorded)] : null,
         r.cron.stdin !== null ? [" ", rich(T.runStdin)] : null);
     $("run-keep").hidden = !confirm && !running;

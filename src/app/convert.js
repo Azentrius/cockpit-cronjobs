@@ -33,7 +33,8 @@ export function openConvert(index, openerKey) {
     const tz = jobTz(base.entries, index);
     const cal = SD.calendarFromCron(e.schedule, tz !== state.tz ? tz : null);
     const cronEnv = C.envBefore(base.entries, index);
-    const env = SD.serviceEnvironment(cronEnv);
+    const { env, unset } = SD.serviceEnvironment(C.jobEnvironment(cronEnv, null, "root", state.basics.cronEnv), cronEnv,
+                                                 state.basics.managerEnv);
     const taken = new Set(state.timers.list.map(t => t.name.replace(/\.timer$/, "")));
     let name = SD.suggestUnitName(info.command);
     for (let n = 2; taken.has(name); n++) name = SD.suggestUnitName(info.command) + "-" + n;
@@ -49,7 +50,7 @@ export function openConvert(index, openerKey) {
     $("conv-close").disabled = false;
     openDialog($("conv-dlg"), openerKey, {
         kind: "convert", index, base, line: e.line, schedule: e.schedule, specs: cal.specs,
-        command: C.cronCommand(info.command).command, shell: env.SHELL || "/bin/sh", env, tz,
+        command: C.cronCommand(info.command).command, shell: env.SHELL || "/bin/sh", env, unset, tz,
         workdir: cronEnv.HOME || null, verified: null,
     }, $("conv-name"));
     updateConvert();
@@ -61,7 +62,7 @@ function convertUnits(d) {
     return {
         name,
         service: SD.serviceUnit({ name, line: d.line, shell: d.shell, command: d.command, env: d.env,
-                                  workdir: d.workdir }),
+                                  unset: d.unset, workdir: d.workdir }),
         timer: SD.timerUnit({ name, specs: d.specs, persistent: $("conv-persistent").checked }),
     };
 }
@@ -107,13 +108,15 @@ async function verifyConvert(d) {
     updateConvert();
 }
 
-/* What systemd made of ExecStart= and Environment= must be what we meant. */
-async function verifyUnit(name, shell, command, env) {
+/* What systemd made of ExecStart=, Environment= and UnsetEnvironment= must be what we meant. */
+async function verifyUnit(name, shell, command, env, unset) {
     const path = await unitPath(name + ".service");
-    const [exec, environment] = await Promise.all([
+    const [exec, environment, unsetEnv] = await Promise.all([
         getProp(path, "org.freedesktop.systemd1.Service", "ExecStart"),
         getProp(path, "org.freedesktop.systemd1.Service", "Environment"),
+        unset.length ? getProp(path, "org.freedesktop.systemd1.Service", "UnsetEnvironment") : [],
     ]);
+    if (!unset.every(k => (unsetEnv || []).includes(k))) return false;
     /* systemd keeps "$$" in the stored command line and turns it into "$" when it
        starts the service; either form means what we wrote. */
     const argv = exec && exec[0] ? exec[0][1] : null;
@@ -162,7 +165,7 @@ export async function submitConvert(ev) {
         return;
     }
     let good = false;
-    try { good = await verifyUnit(u.name, d.shell, d.command, d.env); } catch (_) { good = false; }
+    try { good = await verifyUnit(u.name, d.shell, d.command, d.env, d.unset || []); } catch (_) { good = false; }
     if (!good) { await fail(T.convUnitMismatch, true); return; }
 
     /* Switching the cron line off and starting the timer happen in one root step

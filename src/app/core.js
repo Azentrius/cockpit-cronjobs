@@ -211,7 +211,8 @@ export const state = {
     users: {},   /* the crontabs of other users by name, as root (see setCrontab); with administrative access only */
     sys: null,
     sysError: null,
-    basics: { mta: null, crontab: true, flavor: "debian", systemd: false, cron: null, wrapper: null },
+    basics: { mta: null, crontab: true, flavor: "debian", systemd: false, cron: null, wrapper: null,
+              cronEnv: null, managerEnv: {} },
     runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setCrontab */
     timers: { status: "none", list: [] },   /* none | ok | error */
     suAtLoad: undefined,

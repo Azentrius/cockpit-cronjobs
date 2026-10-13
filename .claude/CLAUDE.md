@@ -178,5 +178,13 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
   and hard link count; cronie follows links without checking them, then wants a regular file with
   `(mode & 07533) == 0400` (so nothing executable) owned by root. The end-to-end test compares the
   page with what Debian's cron logs.
+- **cron's environment** (`C.cronEnvModel`, `C.jobEnvironment`, read by `BASICS_SCRIPT`): PAM's variables
+  first (`pam_env`: `/etc/environment`, on Debian and Ubuntu also `/etc/default/locale`), then the
+  crontab's (all of them, `MAILTO` too), then cron's own: `SHELL`, `HOME`, `LOGNAME`, and `PATH` unless
+  set. Debian's cron sets `PATH=/usr/bin:/bin` and no `USER`; Ubuntu's unit starts it with `-P`, so it
+  sets no `PATH` at all and the one from `/etc/environment` applies; cronie sets
+  `/usr/bin:/bin:/usr/sbin:/sbin` and `USER`. `pam_env` drops a quote only at the start and as the last
+  character, and `#` ends a value anywhere. The end-to-end test compares the whole environment of cron,
+  run now and a converted unit.
 - **`/run/lock`** is world-writable on Debian and Ubuntu; locks for root belong in a root-only directory
   (here `/var/lib/cockpit-cronjobs/.crontab.lock`).

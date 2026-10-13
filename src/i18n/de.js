@@ -230,6 +230,8 @@
         runTitle: "Jetzt ausführen",
         runIntro: user => `Dieser Befehl wird sofort als ${user} ausgeführt:`,
         runEnv: (path, home, shell) => `Mit der Umgebung von cron: \`${path}\`, \`${home}\`, Shell \`${shell}\`.`,
+        runEnvNoPath: (home, shell) => `Mit der Umgebung von cron, die hier keinen \`PATH\` setzt: \`${home}\`, Shell \`${shell}\`.`,
+        runEnvOthers: list => `Außerdem gesetzt: ${list}.`,
         runRecorded: "Ergebnis und Ausgabe werden erfasst.",
         runStdin: "Der Text nach % in der Zeile wird als Eingabe übergeben, wie bei cron.",
         runKeepOpen: "Der Job wird angehalten, wenn Sie diese Seite schließen, während er läuft.",

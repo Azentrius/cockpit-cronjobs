@@ -194,9 +194,34 @@ export function readHomes(names) {
         });
 }
 
-/* Host name, time zone as cron sees it, and what is installed. */
+/* Host name, time zone as cron sees it, what is installed, and how cron gives its jobs
+   their environment (C.cronEnvModel): the cron daemon's command line (running, else
+   its unit's ExecStart), the environment systemd gives services, the PAM service files
+   of cron (Debian) and crond (cronie) with what they include, and the env files those
+   or pam_env read. File contents lose RS (\\036). All of it is readable without root. */
 const BASICS_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
+show() { tr -d '\\036' < "$1" 2>/dev/null; echo; }
 has_systemd() { [ -d /run/systemd/system ] && command -v systemctl > /dev/null 2>&1; }
+pam_seen=' '
+pam_files=
+pam_walk() {
+  case $1 in ''|*[!A-Za-z0-9._-]*) return ;; esac
+  case $pam_seen in *" $1 "*) return ;; esac
+  pam_seen="$pam_seen$1 "
+  f=
+  for d in /etc/pam.d /usr/lib/pam.d; do
+    if [ -f "$d/$1" ]; then f=$d/$1; break; fi
+  done
+  [ -n "$f" ] || return
+  pam_files="$pam_files $f"
+  sec "pam:$1"
+  show "$f"
+  for n in $(sed -n -e 's/^[[:space:]]*@include[[:space:]][[:space:]]*\\([^[:space:]#]*\\).*/\\1/p' \\
+                    -e 's/^[[:space:]]*-\\{0,1\\}[A-Za-z][A-Za-z]*[[:space:]][[:space:]]*include[[:space:]][[:space:]]*\\([^[:space:]#]*\\).*/\\1/p' \\
+                    -e 's/^[[:space:]]*-\\{0,1\\}[A-Za-z][A-Za-z]*[[:space:]][[:space:]]*substack[[:space:]][[:space:]]*\\([^[:space:]#]*\\).*/\\1/p' "$f"); do
+    pam_walk "$n"
+  done
+}
 sec host; hostname 2>/dev/null || cat /etc/hostname 2>/dev/null
 sec tz; timedatectl show -p Timezone --value 2>/dev/null
 sec tz; readlink /etc/localtime 2>/dev/null
@@ -225,6 +250,30 @@ if [ -f "$w" ]; then
 else
   echo missing
 fi
+sec crond
+p=$(pgrep -o -x cron 2>/dev/null || pgrep -o -x crond 2>/dev/null)
+if [ -n "$p" ] && [ -r "/proc/$p/cmdline" ]; then
+  printf 'run '; tr '\\000\\n' '  ' < "/proc/$p/cmdline"; echo
+fi
+if has_systemd; then
+  for u in cron.service crond.service cronie.service; do
+    if [ "$(systemctl show -p LoadState --value "$u" 2>/dev/null)" = loaded ]; then
+      printf 'unit '; systemctl show -p ExecStart --value "$u" 2>/dev/null | head -n 1
+      break
+    fi
+  done
+  sec manager
+  systemctl show-environment 2>/dev/null | tr -d '\\036'
+fi
+pam_walk cron
+pam_walk crond
+env_seen=' '
+for e in /etc/environment $(cat /dev/null $pam_files 2>/dev/null | sed -n 's/.*[[:space:]]envfile=\\([^[:space:]#]*\\).*/\\1/p'); do
+  case $e in /*) ;; *) continue ;; esac
+  case $env_seen in *" $e "*) continue ;; esac
+  env_seen="$env_seen$e "
+  if [ -f "$e" ]; then sec "env:$e"; show "$e"; fi
+done
 exit 0
 `;
 
@@ -234,13 +283,30 @@ function zoneFrom(s) {
     return tz && C.validTimeZone(tz) ? tz : null;
 }
 
+/* Bytes, decoded leniently: an env file in another encoding must not take the rest down. */
 export function readBasics() {
-    return spawn(["sh", "-c", BASICS_SCRIPT], { err: "ignore", environ: ["LC_ALL=C"] }).then(out => {
+    return spawn(["sh", "-c", BASICS_SCRIPT], { err: "ignore", environ: ["LC_ALL=C"], binary: true }).then(raw => {
+        const out = decode(raw);
         const res = { host: "", tz: null, mta: null, crontab: true, flavor: "debian", systemd: false,
-                      cron: null, wrapper: null };
+                      cron: null, wrapper: null, cronEnv: null, managerEnv: {} };
+        const daemon = { run: "", unit: "" };
+        const pam = {};
+        const files = {};
         sections(out).forEach(({ name, body }) => {
             const first = body.trim().split("\n")[0] || "";
-            if (name === "host") res.host = first;
+            if (name.startsWith("pam:")) pam[name.slice(4)] = body;
+            else if (name.startsWith("env:")) files[name.slice(4)] = body;
+            else if (name === "crond") {
+                body.split("\n").forEach(line => {
+                    const m = /^(run|unit) (.*)$/.exec(line);
+                    if (m) daemon[m[1]] = m[2].trim();
+                });
+            } else if (name === "manager") {
+                body.split("\n").forEach(line => {
+                    const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+                    if (m) res.managerEnv[m[1]] = m[2];
+                });
+            } else if (name === "host") res.host = first;
             else if (name === "tz" && !res.tz) res.tz = zoneFrom(first);
             else if (name === "mta") res.mta = first === "yes";
             else if (name === "crontab") res.crontab = first !== "no";
@@ -251,6 +317,8 @@ export function readBasics() {
                 res.cron = { unit: unit === "-" ? null : unit, active: st === "active" };
             } else if (name === "wrapper") res.wrapper = first === "missing" ? "missing" : (parseInt(first, 10) || 0);
         });
+        res.cronEnv = C.cronEnvModel({ flavor: res.flavor, args: daemon.run || daemon.unit, pam, files,
+                                       managerPath: res.managerEnv.PATH || null });
         return res;
     });
 }
