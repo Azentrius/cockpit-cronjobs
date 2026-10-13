@@ -394,14 +394,14 @@ function renderTimers() {
                 h("th", { scope: "col" }, T.colLast),
                 h("th", { scope: "col" }, h("span", { class: "az-sr" }, T.colActions)))),
             h("tbody", null, tm.list.map((t, k) => {
-                const ours = / \(from the root crontab\)$/.test(t.description || "");
+                const ours = SD.parseUnitDescription(t.description);
                 const specs = t.calendar.concat(t.monotonic.map(m => m.base.replace(/USec$/, "Sec") + "=" + SD.formatSpan(m.usec)));
                 const sub = specs.join(" · ") + (t.randomizedUsec ? " · " + T.randomUpTo(SD.formatSpan(t.randomizedUsec)) : "");
                 return h("tr", { class: t.active ? null : "is-off" },
                     h("td", { class: "az-nowrap", "data-label": T.colTimer },
                         h("div", { class: "cron-cell" },
                             h("span", { class: "az-mono" }, t.name),
-                            h("span", { class: "az-cell-sub" }, ours ? T.fromCrontab : t.description))),
+                            h("span", { class: "az-cell-sub" }, ours ? T.fromCrontab(ours.user) : t.description))),
                     h("td", { "data-label": T.colSchedule },
                         h("div", { class: "cron-cell" },
                             h("span", null, SD.describeTimer(t, S)),
@@ -514,7 +514,7 @@ export function closeMenu(focusButton) {
     if (focusButton && m.button.isConnected) m.button.focus();
 }
 
-/* The row menu of job i in crontab r. Conversion is there for root's jobs only. */
+/* The row menu of job i in crontab r. */
 function menuItems(r, i) {
     const e = r.entries[i];
     const info = jobInfo(e);
@@ -531,15 +531,13 @@ function menuItems(r, i) {
                          action: () => setCapture(r.user, i, true, more) });
         }
     }
-    if (r.user === "root") {
-        if (editable) {
-            if (state.basics.systemd && convertedTo(r, i)) {
-                items.push({ label: T.backToCron, icon: "exchange-alt", action: () => openBack(i, more) });
-            } else if (state.basics.systemd && state.timers.status === "ok") {
-                const why = convertBlocker(e, info, i);
-                items.push({ label: T.convert, icon: "exchange-alt", disabled: !!why, hint: why,
-                             action: () => openConvert(i, more) });
-            }
+    if (editable) {
+        if (state.basics.systemd && convertedTo(r, i)) {
+            items.push({ label: T.backToCron, icon: "exchange-alt", action: () => openBack(r.user, i, more) });
+        } else if (state.basics.systemd && state.timers.status === "ok") {
+            const why = convertBlocker(r, i);
+            items.push({ label: T.convert, icon: "exchange-alt", disabled: !!why, hint: why,
+                         action: () => openConvert(r.user, i, more) });
         }
     }
     if (editable) {

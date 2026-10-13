@@ -872,23 +872,30 @@ systemctl daemon-reload
 `;
 
 /* The units of a converted job in /etc/systemd/system, only when Cron Jobs wrote
-   them under this name: both are files (no links), the service starts with
-   SD.UNIT_HEADER, and both have the Description= of a conversion.
+   them under this name from the crontab of this user: both are files (no links), the
+   service starts with the header of a conversion from that crontab (SD.unitHeader)
+   and runs as that user, and both have the Description= of such a conversion. So a
+   note another user writes into their own crontab cannot reach root's units or theirs.
      $1 check:  exit 0 when both are ours, 9 when neither exists
      $1 remove: checks again, then stops, disables and removes them
-     $2 the name
-   Exit 8 = not ours (changed, a link, only one of them, or not written by Cron Jobs). */
+     $2 the name, $3 the user (default root)
+   Exit 8 = not ours (changed, a link, only one of them, or not written by Cron Jobs
+   from this crontab). */
 export const UNITS_SCRIPT = `set -u
 n=$2
+u=\${3:-root}
 case $n in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) exit 2 ;; esac
+case $u in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
+if [ "$u" = root ]; then from='root crontab'; else from="crontab of $u"; fi
 d=/etc/systemd/system
 s=$d/$n.service
 t=$d/$n.timer
 if [ ! -e "$s" ] && [ ! -L "$s" ] && [ ! -e "$t" ] && [ ! -L "$t" ]; then exit 9; fi
 if [ -L "$s" ] || [ -L "$t" ] || [ ! -f "$s" ] || [ ! -f "$t" ]; then exit 8; fi
-[ "$(head -n 1 "$s")" = '${SD.UNIT_HEADER}' ] || exit 8
-grep -qxF "Description=$n (from the root crontab)" "$s" || exit 8
-grep -qxF "Description=$n (from the root crontab)" "$t" || exit 8
+[ "$(head -n 1 "$s")" = '${SD.UNIT_HEADER_START}'"$from:" ] || exit 8
+grep -qxF "User=$u" "$s" || exit 8
+grep -qxF "Description=$n (from the $from)" "$s" || exit 8
+grep -qxF "Description=$n (from the $from)" "$t" || exit 8
 case $1 in
   check) ;;
   remove)

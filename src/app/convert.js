@@ -3,41 +3,52 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, BACKUP_DIR, C, DAY, fill, h, icon, pad2, rich, SD, setBusyButton, state, T } from "./core.js";
+import { $, backupDirOf, C, DAY, fill, h, icon, pad2, rich, SD, setBusyButton, state, T } from "./core.js";
 import {
     analyzeCalendar, errText, getProp, REMOVE_UNITS_SCRIPT, spawn, SPAWN_ROOT, unitPath, UNITS_SCRIPT,
     WRITE_UNITS_SCRIPT,
 } from "./system.js";
-import { commit, convertedTo, jobAt, jobInfo, jobTz, loading, requestLoad } from "./crontab.js";
+import { commit, convertedTo, crontabOf, jobAt, jobInfo, jobTz, loading, requestLoad } from "./crontab.js";
 import { describe, showAlert } from "./page.js";
 import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
 
 /* ---------- convert to systemd timer ---------- */
 
-export function convertBlocker(e, info, i) {
+/* Why job i of crontab tab cannot be converted, or null. */
+export function convertBlocker(tab, i) {
+    const e = tab.entries[i];
     if (!e.enabled) return T.convNotActive;
-    if (state.basics.flavor === "cronie" && C.envBefore(state.root.entries, i).RANDOM_DELAY) return T.convRandomDelay;
+    if (state.basics.flavor === "cronie" && C.envBefore(tab.entries, i).RANDOM_DELAY) return T.convRandomDelay;
     const cal = SD.calendarFromCron(e.schedule);
     if (!cal.ok) return cal.reason === "reboot" ? T.convReboot : T.convInvalid;
-    if (C.hasUnescapedPercent(info.command)) return T.convPercent;
+    if (C.hasUnescapedPercent(jobInfo(e).command)) return T.convPercent;
     return null;
 }
 
-export function openConvert(index, openerKey) {
-    if (state.busy || loading || state.root.status !== "ok" || state.root.locked) return;
-    const base = state.root;
+/* A unit name from the command; another user's carries the user's name in front. */
+function suggestName(user, command) {
+    const name = SD.suggestUnitName(command);
+    return user !== "root" && SD.validUnitName(user + "-" + name) ? user + "-" + name : name;
+}
+
+/* Convert job index of user's crontab; the timer runs it as that user. */
+export function openConvert(user, index, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
     const e = base.entries[index];
     if (!e || e.kind !== "job") return;
     const info = jobInfo(e);
-    if (convertBlocker(e, info, index)) return;
+    if (convertBlocker(base, index)) return;
     const tz = jobTz(base.entries, index);
     const cal = SD.calendarFromCron(e.schedule, tz !== state.tz ? tz : null);
     const cronEnv = C.envBefore(base.entries, index);
-    const { env, unset } = SD.serviceEnvironment(C.jobEnvironment(cronEnv, null, "root", state.basics.cronEnv), cronEnv,
-                                                 state.basics.managerEnv);
+    const jobEnv = C.jobEnvironment(cronEnv, user === "root" ? null : base.home, user, state.basics.cronEnv);
+    const { env, unset } = SD.serviceEnvironment(jobEnv, cronEnv, state.basics.managerEnv, user);
     const taken = new Set(state.timers.list.map(t => t.name.replace(/\.timer$/, "")));
-    let name = SD.suggestUnitName(info.command);
-    for (let n = 2; taken.has(name); n++) name = SD.suggestUnitName(info.command) + "-" + n;
+    let name = suggestName(user, info.command);
+    for (let n = 2; taken.has(name); n++) name = suggestName(user, info.command) + "-" + n;
+    $("conv-intro").textContent = T.convIntro(user);
+    $("conv-after").textContent = T.convAfter(user);
     $("conv-name").value = name;
     $("conv-persistent").checked = false;
     $("conv-cron").textContent = e.schedule;
@@ -49,7 +60,7 @@ export function openConvert(index, openerKey) {
     $("conv-cancel").disabled = false;
     $("conv-close").disabled = false;
     openDialog($("conv-dlg"), openerKey, {
-        kind: "convert", index, base, line: e.line, schedule: e.schedule, specs: cal.specs,
+        kind: "convert", user, index, base, line: e.line, schedule: e.schedule, specs: cal.specs,
         command: C.cronCommand(info.command).command, shell: env.SHELL || "/bin/sh", env, unset, tz,
         workdir: cronEnv.HOME || null, verified: null,
     }, $("conv-name"));
@@ -61,9 +72,9 @@ function convertUnits(d) {
     const name = $("conv-name").value.trim();
     return {
         name,
-        service: SD.serviceUnit({ name, line: d.line, shell: d.shell, command: d.command, env: d.env,
+        service: SD.serviceUnit({ name, user: d.user, line: d.line, shell: d.shell, command: d.command, env: d.env,
                                   unset: d.unset, workdir: d.workdir }),
-        timer: SD.timerUnit({ name, specs: d.specs, persistent: $("conv-persistent").checked }),
+        timer: SD.timerUnit({ name, user: d.user, specs: d.specs, persistent: $("conv-persistent").checked }),
     };
 }
 
@@ -108,14 +119,16 @@ async function verifyConvert(d) {
     updateConvert();
 }
 
-/* What systemd made of ExecStart=, Environment= and UnsetEnvironment= must be what we meant. */
-async function verifyUnit(name, shell, command, env, unset) {
+/* What systemd made of User=, ExecStart=, Environment= and UnsetEnvironment= must be what we meant. */
+async function verifyUnit(name, user, shell, command, env, unset) {
     const path = await unitPath(name + ".service");
-    const [exec, environment, unsetEnv] = await Promise.all([
+    const [runAs, exec, environment, unsetEnv] = await Promise.all([
+        getProp(path, "org.freedesktop.systemd1.Service", "User"),
         getProp(path, "org.freedesktop.systemd1.Service", "ExecStart"),
         getProp(path, "org.freedesktop.systemd1.Service", "Environment"),
         unset.length ? getProp(path, "org.freedesktop.systemd1.Service", "UnsetEnvironment") : [],
     ]);
+    if (runAs !== user) return false;
     if (!unset.every(k => (unsetEnv || []).includes(k))) return false;
     /* systemd keeps "$$" in the stored command line and turns it into "$" when it
        starts the service; either form means what we wrote. */
@@ -165,7 +178,7 @@ export async function submitConvert(ev) {
         return;
     }
     let good = false;
-    try { good = await verifyUnit(u.name, d.shell, d.command, d.env, d.unset || []); } catch (_) { good = false; }
+    try { good = await verifyUnit(u.name, d.user, d.shell, d.command, d.env, d.unset || []); } catch (_) { good = false; }
     if (!good) { await fail(T.convUnitMismatch, true); return; }
 
     /* Switching the cron line off and starting the timer happen in one root step
@@ -180,7 +193,7 @@ export async function submitConvert(ev) {
         return copy;
     }, null, { quiet: true, timer: u.name + ".timer" });
     if (!res.ok) {
-        await fail((res.error || T.conflictBody("root")) + (res.timerFailed ? "\n" + T.convRolledBack : ""), true);
+        await fail((res.error || T.conflictBody(d.user)) + (res.timerFailed ? "\n" + T.convRolledBack : ""), true);
         if (res.timerFailed) requestLoad();
         return;
     }
@@ -200,28 +213,31 @@ export function toggleUnits() {
 
 /* ---------- back to cron ---------- */
 
-function unitsStep(step, name) {
-    return spawn(["sh", "-c", UNITS_SCRIPT, "cockpit-cronjobs", step, name], SPAWN_ROOT);
+/* Checks (or removes) the units of a conversion from user's crontab (UNITS_SCRIPT). */
+function unitsStep(step, name, user) {
+    return spawn(["sh", "-c", UNITS_SCRIPT, "cockpit-cronjobs", step, name, user], SPAWN_ROOT);
 }
 
-/* Shows what going back does, after checking the units: ours, missing (only the
-   line goes back on) or foreign (nothing is done). */
-export function openBack(index, openerKey) {
-    if (state.busy || loading || state.root.status !== "ok" || state.root.locked) return;
-    const base = state.root;
+/* Shows what going back does for job index of user's crontab, after checking the units:
+   ours, missing (only the line goes back on) or foreign (nothing is done). Units count
+   as ours only when they were converted from this crontab. */
+export function openBack(user, index, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
     const name = convertedTo(base, index);
     if (!name) return;
     const e = base.entries[index];
+    $("back-line-intro").textContent = T.backLineIntro(user);
     $("back-line").textContent = e.schedule + "  " + jobInfo(e).command;
     fill($("back-units"), rich(T.backUnits(name)));
-    fill($("back-backup"), rich(T.delBackup(BACKUP_DIR + "/")));
+    fill($("back-backup"), rich(T.delBackup(backupDirOf(user) + "/")));
     dialogError("back-alert", null);
     setBusyButton($("back-ok"), false, T.backing);
     openDialog($("back-dlg"), openerKey, {
-        kind: "back", index, base, line: e.line, noteLine: base.entries[index - 1].line, name, units: null, why: "",
+        kind: "back", user, index, base, line: e.line, noteLine: base.entries[index - 1].line, name, units: null, why: "",
     }, $("back-cancel"));
     renderBack();
-    unitsStep("check", name).then(() => "ours", ex => {
+    unitsStep("check", name, user).then(() => "ours", ex => {
         if (ex && ex.exit_status === 9) return "missing";
         if (ex && ex.exit_status === 8) return "foreign";
         if (dialog && dialog.kind === "back") dialog.why = errText(ex);
@@ -278,14 +294,14 @@ export async function submitBack() {
     }, null, { quiet: true, timer: d.units === "ours" ? d.name + ".timer" : null, stopTimer: true });
     if (!res.ok) {
         done();
-        dialogError("back-alert", (res.error || T.conflictBody("root")) + (res.timerFailed ? "\n" + T.backRolledBack : ""), T.backFailed);
+        dialogError("back-alert", (res.error || T.conflictBody(d.user)) + (res.timerFailed ? "\n" + T.backRolledBack : ""), T.backFailed);
         if (res.timerFailed) requestLoad();
         return;
     }
     let left = null;
     if (d.units === "ours") {
         try {
-            await unitsStep("remove", d.name);
+            await unitsStep("remove", d.name, d.user);
         } catch (ex) {
             left = ex && ex.exit_status === 8 ? T.backUnitsChanged : errText(ex);
         }

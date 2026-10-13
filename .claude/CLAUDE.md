@@ -121,8 +121,9 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
 5. **Formats are contracts.** `runs.jsonl`, `*.running` and where they live (`runs/ID` for root's
    jobs, `users/USER/runs/ID` for other users', written by the recorder as that user), the wrapper's
    command line, the crontab markers (`#[cronjobs:off]`, still reading `#[cronctl:off]`), the conversion note
-   (`SD.convertNote`) and the first line and description of converted units (back to cron looks for
-   them) are read by older and newer versions.
+   (`SD.convertNote`) and the first line, description and `User=` of converted units (back to cron
+   looks for them; `SD.unitHeader`, "… (from the root crontab)" or "… (from the crontab of USER)") are
+   read by older and newer versions.
    When `cockpit-cronjobs-run` changes, raise `CRONJOBS_RUN_VERSION` there and `WRAPPER_VERSION` in
    `src/lib/cron.js`.
 6. **Browser without network.** No CDNs, no external fonts or images, no inline scripts or styles,

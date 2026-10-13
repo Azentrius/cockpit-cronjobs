@@ -131,7 +131,7 @@
         timersErrorTitle: "Die systemd-Timer ließen sich nicht lesen",
         timersNone: "Auf diesem Server gibt es keine systemd-Timer.",
         timerInactive: "Nicht aktiv",
-        fromCrontab: "aus der root-Crontab übernommen",
+        fromCrontab: user => `aus der ${crontabName(user)} übernommen`,
         randomUpTo: span => `bis ${span} später`,
         openInCockpit: name => `${name} in Cockpit öffnen`,
 
@@ -322,8 +322,9 @@
 
         /* Umwandeln */
         convTitle: "In systemd-Timer umwandeln",
-        convIntro: "Der Job läuft danach als systemd-Timer statt über cron. Status, Protokoll und Fehler sehen Sie " +
-                   "dann auch in Cockpit unter Dienste.",
+        convIntro: user => "Der Job läuft danach als systemd-Timer statt über cron" +
+                   (user === "root" ? "" : `, als ${user}, in dessen Home und mit der Umgebung, die cron ihm gibt`) +
+                   ". Status, Protokoll und Fehler sehen Sie dann auch in Cockpit unter Dienste.",
         convName: "Name",
         convNameHelp: name => `Ergibt \`${name}.service\` und \`${name}.timer\` in /etc/systemd/system.`,
         convNameInvalid: "Nur Buchstaben, Ziffern, - _ und ., am Anfang ein Buchstabe oder eine Ziffer, ohne Unit-Typ am Ende.",
@@ -338,7 +339,7 @@
                             "das nicht, deshalb ist es zunächst aus.",
         convShowUnits: "Einheiten ansehen",
         convHideUnits: "Einheiten ausblenden",
-        convAfter: "Danach wird die Zeile in der root-Crontab ausgeschaltet und mit einem Hinweis versehen. " +
+        convAfter: user => `Danach wird die Zeile in der ${crontabName(user)} ausgeschaltet und mit einem Hinweis versehen. ` +
                    "Vorher wird ein Backup angelegt.",
         convConfirm: "Umwandeln",
         converting: "Wird umgewandelt …",
@@ -358,7 +359,7 @@
         backToCron: "Zurück zu cron",
         backTitle: "Zurück zu cron?",
         backIntro: "Der Job läuft dann wieder über cron, wie vor der Umwandlung. In einem Schritt:",
-        backLineIntro: "Diese Zeile der root-Crontab wird eingeschaltet und der Hinweis darüber entfernt:",
+        backLineIntro: user => `Diese Zeile der ${crontabName(user)} wird eingeschaltet und der Hinweis darüber entfernt:`,
         backUnits: name => `\`${name}.timer\` wird angehalten und ausgeschaltet; \`${name}.service\` und \`${name}.timer\` ` +
             "werden aus /etc/systemd/system entfernt.",
         backChecking: "Die Einheiten werden geprüft …",

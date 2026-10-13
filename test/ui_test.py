@@ -808,7 +808,8 @@ with sync_playwright() as p:
     check("occ" in page.locator("#tl-card .cron-tl-name").all_inner_texts(), "the new job in the timeline right away")
     card.locator("[data-key='more:www-data:1']").click()
     items = page.locator("#row-menu [role=menuitem]").all_inner_texts()
-    check([x.strip() for x in items] == ["Läufe erfassen", "Löschen"], "menu of another user's job: " + repr(items))
+    check([x.strip() for x in items] == ["Läufe erfassen", "In systemd-Timer umwandeln", "Löschen"],
+          "menu of another user's job: " + repr(items))
     page.locator(".cron-menu__item", has_text="Löschen").click()
     check("aus der Crontab von www-data" in page.inner_text("#del-intro") and
           "/var/lib/cockpit-cronjobs/backups/users/www-data/" in page.inner_text("#del-backup"), "delete names the crontab")
@@ -890,6 +891,75 @@ with sync_playwright() as p:
     check(["www-data", "rm", "-rf", "--", f"/var/lib/cockpit-cronjobs/users/www-data/runs/{rid}"] in mock(page, "asUser"),
           "the runs removed as www-data: " + repr(mock(page, "asUser")))
     check(all(a[0] == "www-data" for a in mock(page, "asUser")), "only www-data's runs as www-data")
+
+    # converting a job of www-data: the timer runs it as www-data, with the environment cron gives it there,
+    # and its units name the crontab they come from
+    def open_convert():
+        card.locator("[data-key='more:www-data:0']").click()
+        page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+        wait_js(page, "!document.querySelector('#conv-check').innerText.includes('wird mit')")
+
+    before_conv = mock(page, "sys.users['www-data']")
+    open_convert()
+    name = page.input_value("#conv-name")
+    check(name.startswith("www-data-") and "als www-data" in page.inner_text("#conv-intro") and
+          "Crontab von www-data" in page.inner_text("#conv-after"),
+          "the dialog says as whom it runs: " + name + " " + page.inner_text("#conv-intro"))
+    page.click("#conv-units-toggle")
+    service = page.inner_text("#conv-service")
+    check(service.startswith(f"# {name}.service\n# Created by Cockpit Cron Jobs from this line of the crontab of www-data:\n") and
+          "\nUser=www-data\n" in service and f"Description={name} (from the crontab of www-data)" in service and
+          'Environment="PATH=/usr/bin:/bin"' in service and 'Environment="http_proxy=http://proxy.example:3128"' in service and
+          "UnsetEnvironment=USER\n" in service and "HOME=" not in service and "LOGNAME" not in service and
+          f"Description={name} (from the crontab of www-data)" in page.inner_text("#conv-timer"),
+          "the units of www-data's job: " + service)
+    # systemd reading another User= than written: nothing changes
+    page.evaluate("() => { window.__mock.wrongUser = 'root'; }")
+    page.click("#conv-ok")
+    wait_js(page, "!document.querySelector('#conv-alert').hidden")
+    check("nicht wie vorgesehen" in page.inner_text("#conv-alert") and name not in mock(page, "units") and
+          mock(page, "sys.users['www-data']") == before_conv, "another User= read: rolled back: " + page.inner_text("#conv-alert"))
+    page.evaluate("() => { window.__mock.wrongUser = null; }")
+    page.click("#conv-ok")
+    wait_js(page, "document.querySelector('#conv-dlg').hidden")
+    wait_idle(page)
+    converted = mock(page, "sys.users['www-data']").split("\n")
+    check(name in mock(page, "units") and name + ".timer" in mock(page, "enabled") and
+          converted[0].startswith(f"# Converted to systemd timer {name}.timer by Cockpit Cron Jobs on ") and
+          converted[1] == "#[cronjobs:off] " + www.rstrip("\n"), "converted: units, timer on, line off with the note: " + repr(converted))
+    check("Umgewandelt in systemd-Timer" in card.inner_text(), "the row says so")
+    show_tab(page, "timers")
+    check("aus der Crontab von www-data übernommen" in page.inner_text("#timers-body"), "the timers list names the crontab")
+    show_tab(page, "overview")
+    # back to cron: only units from this crontab count as ours
+    card.locator("[data-key='more:www-data:1']").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    check("Crontab von www-data" in page.inner_text("#back-line-intro") and ["check", name, "www-data"] in mock(page, "unitChecks"),
+          "back dialog for www-data's crontab, units checked for it: " + page.inner_text("#back-line-intro"))
+    page.click("#back-ok")
+    wait_js(page, "document.querySelector('#back-dlg').hidden")
+    wait_idle(page)
+    check(mock(page, "sys.users['www-data']") == before_conv and name not in mock(page, "units") and
+          ["remove", name, "www-data"] in mock(page, "unitChecks"), "back to cron: byte for byte, units removed")
+    # a note www-data writes itself, naming a timer converted from root's crontab: not ours here, nothing removed
+    page.evaluate("""() => {
+        window.__mock.units['root-job'] = {
+            service: '# Created by Cockpit Cron Jobs from this line of the root crontab:\\n#   0 1 * * * true\\n[Unit]\\n' +
+                     'Description=root-job (from the root crontab)\\n\\n[Service]\\nType=oneshot\\nUser=root\\nExecStart=true\\n',
+            timer: '[Unit]\\nDescription=root-job (from the root crontab)\\n\\n[Timer]\\nOnCalendar=*-*-* 01:00:00\\n' };
+        window.__mock.sys.users['www-data'] = '# Converted to systemd timer root-job.timer by Cockpit Cron Jobs on 2026-10-14; ' +
+            'the line below is no longer used.\\n#[cronjobs:off] 0 1 * * * true\\n';
+    }""")
+    page.click("#reload")
+    wait_idle(page)
+    card.locator("[data-key='more:www-data:1']").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "document.querySelector('#back-check').classList.contains('is-bad')")
+    check(page.is_disabled("#back-ok") and "root-job" in mock(page, "units") and
+          ["check", "root-job", "www-data"] in mock(page, "unitChecks"),
+          "root's units are not www-data's: refused: " + page.inner_text("#back-check"))
+    page.keyboard.press("Escape")
     check(not page.problems, "no console problems (other users): " + repr(page.problems))
     page.context.close()
     # a user cron cannot read gets an error card; a name the page does not take stays read-only under System
