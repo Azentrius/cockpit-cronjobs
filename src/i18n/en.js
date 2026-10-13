@@ -275,6 +275,40 @@
         orphansKept: ids => `A crontab uses them again, or a run is going on: ${ids}.`,
         orphansFailed: "Removing failed",
 
+        /* Backups */
+        backups: "Backups",
+        backupsTitle: "Backups of the root crontab",
+        backupsIntro: "Before every change, Cron Jobs saves the root crontab. Open a version to see what " +
+                      "restoring it would change.",
+        backupsNote: (n, path) => `Restoring saves the current crontab as a backup first, so a restore can be undone ` +
+                                  `the same way. The last ${n} backups are kept in \`${path}\`.`,
+        backupsNone: "No backups yet. The first one is made with the first change on this page.",
+        backupsReadError: "The backups could not be read",
+        colSaved: "Saved",
+        colRestoring: "Restoring changes",
+        backupSame: "Nothing, it is the current crontab",
+        backupSameBody: "This version is the same as the current root crontab.",
+        backupEncoding: "Not UTF-8, cannot be shown here",
+        backupDelta: (removed, added) => [
+            removed ? (removed === 1 ? "1 line removed" : `${removed} lines removed`) : null,
+            added ? (added === 1 ? "1 line added" : `${added} lines added`) : null,
+        ].filter(Boolean).join(", "),
+        showChanges: "Show changes",
+        hideChanges: "Hide changes",
+        diffIntro: "Restoring this version changes the root crontab like this: lines marked `-` are removed, " +
+                   "lines marked `+` are added.",
+        diffLabel: "Changes",
+        diffRemoved: "removed: ",
+        diffAdded: "added: ",
+        diffSkip: n => n === 1 ? "1 unchanged line" : `${n} unchanged lines`,
+        diffNoNewline: "(no newline at the end)",
+        restore: "Restore this version",
+        restoring: "Restoring …",
+        restoreEncoding: "The current root crontab is not UTF-8, so the page cannot replace it.",
+        okRestored: when => `Version saved ${when} restored`,
+        restoredUndo: "To undo it, restore the newest backup.",
+        restoreFailed: "Restoring failed",
+
         /* convert */
         convTitle: "Convert to systemd timer",
         convIntro: "The job then runs as a systemd timer instead of through cron. Its status, log and errors " +

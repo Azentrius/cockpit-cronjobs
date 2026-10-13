@@ -185,18 +185,38 @@ export function jobAt(entries, i, line) {
    longer fits. opts.quiet: no success message (the caller reports); opts.timer: a
    systemd timer to enable and start in the same step, or to stop and disable with
    opts.stopTimer (see SAVE_SCRIPT).
-   Result: { ok, unchanged?, conflict?, error?, timerFailed?, backup?, saved? } */
-export async function commit(base, mutate, okTitle, opts) {
-    opts = opts || {};
+   Result: { ok, unchanged?, conflict?, error?, timerFailed?, backup?, saved?, verified? }
+   (verified: read back as written; if not, a warning is shown already). */
+export function commit(base, mutate, okTitle, opts) {
+    const refused = refuse(base, base && base.locked);
+    if (refused) return Promise.resolve(refused);
+    const entries = mutate(base.entries);
+    if (!entries) return Promise.resolve(conflict());
+    return write(base, C.serializeUserCrontab(entries), C.normalizeText, okTitle, opts || {});
+}
+
+/* Writes an earlier version (a backup) as it is, through the same locked step. Also
+   on a crontab shown read-only, as nothing of it is kept; only not on one that is
+   not UTF-8, whose checksum the page cannot know. Result as with commit. */
+export function restoreRoot(base, text, okTitle, opts) {
+    const refused = refuse(base, base && base.notUtf8);
+    if (refused) return Promise.resolve(refused);
+    return write(base, text, s => s, okTitle, opts || {});
+}
+
+/* Why a change of base cannot be written now, or null. */
+function refuse(base, readOnly) {
     if (state.busy) return { ok: false, error: T.stillBusy };
     if (loading) return { ok: false, error: T.stillLoading };
     if (state.root.status !== "ok") return { ok: false, conflict: true };
-    if (!base || base.status !== "ok" || base.locked || (base !== state.root && base.text !== state.root.text))
+    if (!base || base.status !== "ok" || readOnly || (base !== state.root && base.text !== state.root.text))
         return conflict();
-    const entries = mutate(base.entries);
-    if (!entries) return conflict();
-    const next = C.serializeUserCrontab(entries);
-    if (next === C.normalizeText(base.text)) return { ok: true, unchanged: true };
+    return null;
+}
+
+/* next: the new text; same: how it compares with what crontab -l gives back. */
+async function write(base, next, same, okTitle, opts) {
+    if (next === same(base.text)) return { ok: true, unchanged: true };
 
     state.busy = true;
     closeMenu(false);
@@ -221,12 +241,13 @@ export async function commit(base, mutate, okTitle, opts) {
         let after = null;
         try { after = await readRoot(); } catch (_) { loadPending = true; }
         if (after !== null) setRoot(after);
-        if (after === null || C.normalizeText(after.text) !== next) {
+        const verified = after !== null && same(after.text) === next;
+        if (!verified) {
             showAlert("warning", T.unverifiedTitle, [rich(T.unverifiedBody), " ", rich(saved)]);
         } else if (!opts.quiet) {
             showAlert("success", okTitle, saved);
         }
-        return { ok: true, backup, saved };
+        return { ok: true, backup, saved, verified };
     } finally {
         state.busy = false;
         state.loadedAt = Date.now();

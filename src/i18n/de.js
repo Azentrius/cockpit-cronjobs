@@ -275,6 +275,41 @@
         orphansKept: ids => `Eine Crontab verwendet sie wieder, oder ein Lauf ist noch nicht beendet: ${ids}.`,
         orphansFailed: "Entfernen fehlgeschlagen",
 
+        /* Sicherungen */
+        backups: "Sicherungen",
+        backupsTitle: "Sicherungen der root-Crontab",
+        backupsIntro: "Vor jeder Änderung sichert Cron Jobs die root-Crontab. Öffnen Sie eine Version, um zu sehen, " +
+                      "was ihre Wiederherstellung ändern würde.",
+        backupsNote: (n, path) => `Beim Wiederherstellen wird die aktuelle Crontab zuerst gesichert, so lässt es sich ` +
+                                  `auf dem gleichen Weg rückgängig machen. Aufbewahrt werden die letzten ${n} Sicherungen ` +
+                                  `in \`${path}\`.`,
+        backupsNone: "Noch keine Sicherungen. Die erste entsteht mit der ersten Änderung auf dieser Seite.",
+        backupsReadError: "Die Sicherungen konnten nicht gelesen werden",
+        colSaved: "Gesichert",
+        colRestoring: "Wiederherstellen ändert",
+        backupSame: "Nichts, sie ist die aktuelle Crontab",
+        backupSameBody: "Diese Version ist dieselbe wie die aktuelle root-Crontab.",
+        backupEncoding: "Nicht UTF-8, hier nicht darstellbar",
+        backupDelta: (removed, added) => [
+            removed ? (removed === 1 ? "1 Zeile entfernt" : `${removed} Zeilen entfernt`) : null,
+            added ? (added === 1 ? "1 Zeile hinzugefügt" : `${added} Zeilen hinzugefügt`) : null,
+        ].filter(Boolean).join(", "),
+        showChanges: "Änderungen anzeigen",
+        hideChanges: "Änderungen ausblenden",
+        diffIntro: "Wiederherstellen ändert die root-Crontab so: Zeilen mit `-` werden entfernt, Zeilen mit `+` " +
+                   "kommen hinzu.",
+        diffLabel: "Änderungen",
+        diffRemoved: "entfernt: ",
+        diffAdded: "hinzugefügt: ",
+        diffSkip: n => n === 1 ? "1 unveränderte Zeile" : `${n} unveränderte Zeilen`,
+        diffNoNewline: "(kein Zeilenumbruch am Ende)",
+        restore: "Diese Version wiederherstellen",
+        restoring: "Wird wiederhergestellt …",
+        restoreEncoding: "Die aktuelle root-Crontab ist nicht UTF-8, deshalb kann die Seite sie nicht ersetzen.",
+        okRestored: when => `Version von ${when} wiederhergestellt`,
+        restoredUndo: "Zum Rückgängigmachen stellen Sie die neueste Sicherung wieder her.",
+        restoreFailed: "Wiederherstellen fehlgeschlagen",
+
         /* Umwandeln */
         convTitle: "In systemd-Timer umwandeln",
         convIntro: "Der Job läuft danach als systemd-Timer statt über cron. Status, Protokoll und Fehler sehen Sie " +

@@ -21,6 +21,9 @@ and turns cron jobs into systemd timers.
 - **Safe changes to the root crontab.** Add, edit, switch off and on, delete. Lines you do not touch stay
   byte for byte. Each change is written in one locked step, only if the crontab is still the one you see,
   after a backup of the previous version; afterwards it is read back and compared.
+- **Backups you can use.** The last ten versions of the root crontab, each with what restoring it would
+  change, line by line as `diff` shows it. Restoring goes through the same locked step, after a backup of
+  the current version, so a restore can be undone the same way.
 - **The result of every run.** Turn on recording for a job and it keeps exit code, duration and output of
   its last 20 runs. Handy on servers without a mail program, where cron's output is otherwise lost.
 - **Run now.** Starts a job right away with cron's environment (the crontab's variables, `PATH`, `HOME`,
@@ -129,6 +132,7 @@ sudo rm -rf /var/lib/cockpit-cronjobs
 - The root crontab is replaced only if it is still exactly the version shown (checksum), under a lock,
   after a verified backup.
 - A crontab that could not be written back exactly is opened read-only.
+- Restoring a backup writes it byte for byte through the same step, and shows first what it changes.
 - Converting to a timer refuses to go on if systemd would run the job at other times than cron, or reads
   the command or its environment differently; if starting the timer fails, the cron line is switched on
   again and the units are removed.
@@ -145,7 +149,7 @@ Cockpit uses that language. `node test/i18n.test.js` checks that every text exis
 ## Development
 
 ```sh
-make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs and back to cron (dash, bash), texts
+make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs, back to cron and backups (dash, bash), differences (against GNU diff), texts
 make check-ui     # browser tests against a stand-in for Cockpit (needs Python Playwright with Chromium)
 ```
 

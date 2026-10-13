@@ -19,6 +19,7 @@
  *   dialogs.js   dialogs in general; add, edit, delete, confirm
  *   runs.js      run now, recorded runs, leftover runs
  *   convert.js   convert to a systemd timer and back to cron
+ *   backups.js   backups of the root crontab: what restoring one changes, restoring
  *   tabs.js      the tabs under the page header
  * The libraries in lib/ and the texts in i18n/ stay plain scripts (window.Cron*),
  * so that the unit tests can load them in Node.
@@ -34,6 +35,7 @@ import {
 } from "./app/dialogs.js";
 import { orphanList, removeOrphanRuns, startRun, stopRun } from "./app/runs.js";
 import { submitBack, submitConvert, toggleUnits, updateConvert } from "./app/convert.js";
+import { openBackups } from "./app/backups.js";
 import { initTabs } from "./app/tabs.js";
 
 const VERSION = "2.2.0";
@@ -56,6 +58,7 @@ function init() {
 
     $("reload").addEventListener("click", () => { clearAlerts(); requestLoad(); });
     $("add").addEventListener("click", () => openEdit(null, "add"));
+    $("backups").addEventListener("click", () => openBackups("backups"));
 
     $("edit-form").addEventListener("submit", submitEdit);
     $("edit-cancel").addEventListener("click", () => closeDialog());
@@ -103,6 +106,9 @@ function init() {
     $("conv-name").addEventListener("input", updateConvert);
     $("conv-persistent").addEventListener("change", updateConvert);
     $("conv-units-toggle").addEventListener("click", toggleUnits);
+
+    $("bk-close").addEventListener("click", () => closeDialog());
+    $("bk-close-btn").addEventListener("click", () => closeDialog());
 
     $("back-ok").addEventListener("click", submitBack);
     $("back-cancel").addEventListener("click", () => closeDialog());

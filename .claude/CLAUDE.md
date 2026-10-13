@@ -68,12 +68,13 @@ src/                      the Cockpit package (installed as /usr/share/cockpit/c
   index.html, app.js      the page; app.js starts it (and holds VERSION), its parts are ES modules in app/
   app/system.js           everything that runs on the server; all root scripts (SAVE_SCRIPT, RUN_SCRIPT, …)
   app/core.js             libraries, constants, texts, DOM helpers, times, the page's state
-  app/crontab.js          the root crontab as shown: loading, saving (commit), administrative access
-  app/page.js, timeline.js, dialogs.js, runs.js, convert.js, tabs.js   the page, the timeline, dialogs,
-                          run now and recorded runs, conversion and back to cron, the tabs
+  app/crontab.js          the root crontab as shown: loading, saving (commit, restoreRoot), administrative access
+  app/page.js, timeline.js, dialogs.js, runs.js, convert.js, backups.js, tabs.js   the page, the timeline,
+                          dialogs, run now and recorded runs, conversion and back to cron, backups, the tabs
   lib/cron.js             crontab parsing and writing (byte for byte), schedules, next runs, cron's % rules
   lib/systemd.js          cron → OnCalendar, unit files, systemd-analyze output
   lib/runs.js             records of the run recorder
+  lib/backups.js          the list of backups, the difference between two versions (as diff shows it)
   i18n/en.js, i18n/de.js  all texts; `…` marks code
   cockpit-cronjobs-run    the run recorder (POSIX sh), installed by the page to /usr/local/libexec/
   azentrius.*, icons.js, *.woff2   shared design files, identical in all Azentrius add-ons
@@ -86,7 +87,8 @@ tools/release-notes.sh    notes for a release from CHANGELOG.md
 ## Commands
 
 ```sh
-make check                # unit tests; also compares conversions with the real systemd-analyze
+make check                # unit tests; also compares conversions with the real systemd-analyze and the
+                          # difference of two versions with GNU diff
 make check-ui             # browser tests (needs Python Playwright with Chromium)
 make package              # cockpit-cronjobs-VERSION.tar.gz + SHA256SUMS, reproducible
 CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py   # only on a throwaway machine, see the file

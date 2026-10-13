@@ -326,6 +326,54 @@ with sync_playwright() as p:
     check(len(os.listdir(STATE + "/backups")) == 10, "ten backups kept: " + repr(len(os.listdir(STATE + "/backups"))))
     check(os.path.exists(STATE + "/.crontab.lock"), "lock in the state dir")
 
+    # backups: listed as on disk, the difference as diff shows it, restoring and restoring back gives the original bytes
+    def crontab_bytes():
+        return subprocess.run(["crontab", "-l", "-u", "root"], capture_output=True, check=True).stdout
+
+    def backup_path(name):
+        return os.path.join(STATE, "backups", name)
+
+    def shown_changes():
+        return page.evaluate("""() => Array.from(document.querySelectorAll('.cron-diff__line'))
+            .filter(d => d.dataset.op !== ' ').map(d => d.dataset.op + d.querySelector('.cron-diff__text').textContent)""")
+
+    original = crontab_bytes()
+    with open("/tmp/cj-e2e-current", "wb") as f:
+        f.write(original)
+    on_disk = sorted(os.listdir(STATE + "/backups"), key=lambda n: os.stat(backup_path(n)).st_mtime_ns, reverse=True)
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 10")
+    names = page.locator("#bk-body tbody tr td:first-child .az-mono").all_inner_texts()
+    check(names == on_disk, "backups listed newest first, as on disk: " + repr(names) + " " + repr(on_disk))
+    for name in on_disk[:3]:
+        page.click(f"[data-key='bk:{name}']")
+        wait_js(page, "document.querySelector('.cron-diff')")
+        by_diff = subprocess.run(["diff", "--old-line-format=-%L", "--new-line-format=+%L", "--unchanged-line-format=",
+                                  "/tmp/cj-e2e-current", backup_path(name)], capture_output=True).stdout.decode().splitlines()
+        check(shown_changes() == by_diff, f"difference to {name} as diff shows it: {shown_changes()!r} {by_diff!r}")
+        page.click(f"[data-key='bk:{name}']")
+    target = on_disk[1]
+    with open(backup_path(target), "rb") as f:
+        wanted = f.read()
+    page.click(f"[data-key='bk:{target}']")
+    page.screenshot(path=os.path.join(SHOTS, "e2e-backups.png"))
+    page.click(f"[data-key='restore:{target}']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(crontab_bytes() == wanted, "restored byte for byte: " + repr(crontab_bytes()))
+    check("wiederhergestellt" in page.inner_text("#alerts"), "restored alert: " + page.inner_text("#alerts"))
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 10")
+    newest = page.locator("#bk-body tbody tr td:first-child .az-mono").first.inner_text()
+    with open(backup_path(newest), "rb") as f:
+        check(f.read() == original, "the version before the restore is the newest backup")
+    page.click(f"[data-key='bk:{newest}']")
+    page.click(f"[data-key='restore:{newest}']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(crontab_bytes() == original, "restoring back gives the original bytes: " + repr(crontab_bytes()))
+    os.remove("/tmp/cj-e2e-current")
+
     # /etc/cron.d: the page marks exactly what cron skips, with cron's reason, and cron's log agrees
     page.click("#reload")
     wait_idle(page)

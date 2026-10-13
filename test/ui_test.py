@@ -584,6 +584,146 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (leftovers): " + repr(page.problems))
     page.context.close()
 
+    # ---------- backups ----------
+    page = open_page(browser)
+    original = root_text(page)
+    check(page.locator("#backups").is_visible() and page.inner_text("#backups").strip() == "Sicherungen" and
+          page.locator("#backups svg").count() == 1 and "az-btn--secondary" in page.get_attribute("#backups", "class"),
+          "backups button with an icon in the root card")
+    page.click("#backups")
+    wait_js(page, "!document.querySelector('#bk-dlg').hidden && document.querySelector('#bk-body .cron-state')")
+    wait_js(page, "document.querySelector('#bk-body').innerText.includes('Noch keine')")
+    check(page.evaluate("() => document.activeElement.id") == "bk-close-btn", "focus on close in the backups dialog")
+    check("/var/lib/cockpit-cronjobs/backups/" in page.inner_text("#bk-note") and "letzten 10 " in page.inner_text("#bk-note"),
+          "backups note: " + page.inner_text("#bk-note"))
+    page.keyboard.press("Escape")
+    check(page.locator("#bk-dlg").is_hidden() and focused_key(page) == "backups", "escape closes, focus back on the button")
+    # four versions: one like now, one with another time, an older one with one more line, one that is not UTF-8
+    newer = original.replace("30 1 * * 0 /usr/sbin/fstrim -a", "45 1 * * 0 /usr/sbin/fstrim -a")
+    older = original + "15 4 * * * /usr/local/bin/old.sh\n"
+    page.evaluate("""o => {
+        const now = Math.floor(Date.now() / 1000);
+        const p = n => '/var/lib/cockpit-cronjobs/backups/root-' + n + '.crontab';
+        window.__mock.backups = [
+            { path: p('20261011-030000'), content: o.older, mtime: now - 86400 },
+            { path: p('20261012-090000'), content: o.newer, mtime: now - 3600 },
+            { path: p('20261012-100000'), content: o.same, mtime: now - 600 },
+            { path: p('20261012-100500'), content: '# caf\\u0001\\n', mtime: now - 300, latin1: true },
+        ];
+        window.__mock.backupSeq = 50;
+    }""", {"older": older, "newer": newer, "same": original})
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 4")
+    names = page.locator("#bk-body tbody tr td:first-child .az-mono").all_inner_texts()
+    check(names == ["root-20261012-100500.crontab", "root-20261012-100000.crontab", "root-20261012-090000.crontab",
+                    "root-20261011-030000.crontab"], "newest first: " + repr(names))
+    deltas = page.locator("#bk-body tbody tr td:nth-child(2)").all_inner_texts()
+    check(deltas == ["Nicht UTF-8, hier nicht darstellbar", "Nichts, sie ist die aktuelle Crontab",
+                     "1 Zeile entfernt, 1 Zeile hinzugefügt", "1 Zeile hinzugefügt"], "what restoring changes: " + repr(deltas))
+    check(page.inner_text("#bk-body tbody tr:nth-child(3) td:first-child").startswith("Heute um "), "saved time in words")
+    check(page.locator("[data-key='bk:root-20261012-100500.crontab']").count() == 0, "a backup that is not UTF-8 cannot be opened")
+    # what restoring the version from 09:00 changes, line by line
+    page.click("[data-key='bk:root-20261012-090000.crontab']")
+    wait_js(page, "document.querySelector('.cron-diff')")
+    lines = page.evaluate("""() => Array.from(document.querySelectorAll('.cron-diff > div')).map(d =>
+        d.classList.contains('cron-diff__skip') ? 'skip ' + d.textContent : d.dataset.op + d.querySelector('.cron-diff__text').textContent)""")
+    check([x for x in lines if x[0] in "-+"] == ["-30 1 * * 0 /usr/sbin/fstrim -a", "+45 1 * * 0 /usr/sbin/fstrim -a"],
+          "changed lines: " + repr(lines))
+    check(lines[0].startswith("skip ") and "unveränderte Zeilen" in lines[0] and len([x for x in lines if x[0] == " "]) == 6,
+          "three unchanged lines around, the rest folded: " + repr(lines))
+    check(page.get_attribute("[data-key='bk:root-20261012-090000.crontab']", "aria-expanded") == "true" and
+          focused_key(page) == "bk:root-20261012-090000.crontab", "expanded, focus stays on its button")
+    check(page.inner_text(".cron-diff .is-del .az-sr") == "entfernt: " and page.inner_text(".cron-diff .is-add .az-sr") == "hinzugefügt: ",
+          "removed and added lines say so to screen readers")
+    colors = page.evaluate("""() => ['.is-del', '.is-add'].map(s => getComputedStyle(document.querySelector('.cron-diff ' + s)).backgroundColor)""")
+    check(colors == ["rgb(251, 197, 197)", "rgb(209, 241, 187)"], "removed red, added green: " + repr(colors))
+    check(page.inner_text("[data-key='restore:root-20261012-090000.crontab']").strip() == "Diese Version wiederherstellen" and
+          page.locator("#bk-dlg .az-btn--primary").count() == 1, "one restore button, the only primary one")
+    shot(page, "de-light-backups", full=False)
+    page.set_viewport_size({"width": 375, "height": 800})
+    page.wait_for_timeout(150)
+    widths = page.evaluate("""() => [document.documentElement.scrollWidth, document.querySelector('#bk-dlg .az-modal').scrollWidth,
+                                      document.querySelector('#bk-dlg .az-modal').clientWidth]""")
+    check(widths[0] <= 375 and widths[1] <= widths[2], "phone: the dialog fits, long lines scroll inside: " + repr(widths))
+    shot(page, "de-light-backups-375", full=False)
+    page.set_viewport_size({"width": 1280, "height": 900})
+    # the version like now: nothing to restore
+    page.click("[data-key='bk:root-20261012-100000.crontab']")
+    wait_js(page, "document.querySelector(\"[data-key='restore:root-20261012-100000.crontab']\")")
+    check("dieselbe wie die aktuelle" in page.inner_text("#bk-body") and
+          page.locator("[data-key='restore:root-20261012-100000.crontab']").is_disabled() and
+          page.locator(".cron-diff").count() == 0, "same as now: no difference, restore off")
+    # restore the version from 09:00
+    page.click("[data-key='bk:root-20261012-090000.crontab']")
+    page.click("[data-key='restore:root-20261012-090000.crontab']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(root_text(page) == newer, "restored byte for byte")
+    check(mock(page, "backups[window.__mock.backups.length - 1].content") == original, "the version before is the newest backup now")
+    alerts = page.inner_text("#alerts")
+    check("wiederhergestellt" in alerts and "/var/lib/cockpit-cronjobs/backups/root-" in alerts and "Rückgängigmachen" in alerts,
+          "restored alert: " + alerts)
+    check(focused_key(page) == "backups", "focus back on the backups button: " + repr(focused_key(page)))
+    check("45 1 * * 0" in page.inner_text("#root-body"), "the page shows the restored crontab")
+    # undo: the newest backup brings back the bytes from before
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 5")
+    newest = page.locator("#bk-body tbody tr td:first-child .az-mono").first.inner_text()
+    page.click("[data-key='bk:" + newest + "']")
+    page.click("[data-key='restore:" + newest + "']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(root_text(page) == original, "restoring back gives the original bytes")
+    # the crontab changed meanwhile: nothing restored, the page says so
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length > 0")
+    page.click("[data-key='bk:root-20261011-030000.crontab']")
+    page.evaluate("t => { window.__mock.conflictNext = t; }", original + "# changed elsewhere\n")
+    page.click("[data-key='restore:root-20261011-030000.crontab']")
+    wait_js(page, "document.querySelector('#bk-dlg').hidden")
+    wait_idle(page)
+    check(root_text(page) == original + "# changed elsewhere\n", "changed meanwhile: nothing restored")
+    check("geändert" in page.inner_text("#alerts"), "changed meanwhile: said so: " + page.inner_text("#alerts"))
+    # writing fails: the dialog stays and says why
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length > 0")
+    page.click("[data-key='bk:root-20261011-030000.crontab']")
+    page.evaluate("() => { window.__mock.failWrite = 'crontab: errors in crontab file, cannot install.'; }")
+    page.click("[data-key='restore:root-20261011-030000.crontab']")
+    wait_js(page, "!document.querySelector('#bk-alert').hidden")
+    check("Wiederherstellen fehlgeschlagen" in page.inner_text("#bk-alert") and "cannot install" in page.inner_text("#bk-alert") and
+          page.locator("#bk-dlg").is_visible(), "write failed: shown in the dialog")
+    page.evaluate("() => { window.__mock.failWrite = null; }")
+    page.click("#bk-close-btn")
+    # the backups cannot be read: said so in the dialog
+    page.evaluate("() => { window.__mock.lockBusy = true; }")
+    page.click("#backups")
+    wait_js(page, "!document.querySelector('#bk-alert').hidden")
+    check("an anderer Stelle" in page.inner_text("#bk-alert") and page.locator("#bk-body tbody tr").count() == 0,
+          "list locked: " + page.inner_text("#bk-alert"))
+    page.evaluate("() => { window.__mock.lockBusy = false; }")
+    page.click("#bk-close")
+    check(not page.problems, "no console problems (backups): " + repr(page.problems))
+    page.context.close()
+    # a root crontab that is not UTF-8 can be compared, but not replaced; dark colours
+    page = open_page(browser, dark=True)
+    page.evaluate("""o => { window.__mock.latin1 = true; window.__mock.root += '# caf\\x01\\n';
+                            window.__mock.backups = [{ path: '/var/lib/cockpit-cronjobs/backups/root-20261012-090000.crontab',
+                                                       content: o.newer, mtime: Math.floor(Date.now() / 1000) - 60 }]; }""",
+                  {"newer": newer})
+    page.click("#reload")
+    wait_idle(page)
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 1")
+    page.click("[data-key='bk:root-20261012-090000.crontab']")
+    check(page.locator("[data-key='restore:root-20261012-090000.crontab']").is_disabled() and
+          "nicht UTF-8" in page.inner_text(".cron-bk-detail"), "not UTF-8 now: restore off, said why")
+    colors = page.evaluate("""() => ['.is-del', '.is-add'].map(s => getComputedStyle(document.querySelector('.cron-diff ' + s)).backgroundColor)""")
+    check(colors == ["rgb(53, 26, 20)", "rgb(30, 43, 23)"], "dark: removed and added colours: " + repr(colors))
+    shot(page, "de-dark-backups", full=False)
+    check(not page.problems, "no console problems (backups, dark): " + repr(page.problems))
+    page.context.close()
+
     # ---------- run now ----------
     page = open_page(browser)
     extra = ("PATH=/usr/local/bin:/usr/bin:/bin\n0 4 * * * /opt/fail.sh\n0 6 * * * sleep 600\n"
@@ -992,6 +1132,7 @@ with sync_playwright() as p:
     check("your time" not in page.inner_text("#root-body"), "no local hint when tz equal")
     check(page.evaluate("() => document.documentElement.lang") == "en", "html lang en")
     check("no crontab uses them any more" in page.inner_text("#orphans"), "en leftover line")
+    check(page.inner_text("#backups").strip() == "Backups", "en backups button")
     shot(page, "en-light-1280")
     row(page, 0).locator("[data-key^=more]").click()
     check("Stop recording" in page.inner_text("#row-menu"), "en menu")

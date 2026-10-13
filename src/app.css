@@ -245,6 +245,28 @@ html { background: var(--bg-page); }
   .az-table--stack tr.cron-runs-output td { display: block; text-align: start; }
 }
 
+/* backups: what restoring a version would change */
+.cron-bk-detail { padding-block: var(--space-xs) var(--space-sm); }
+.cron-bk-detail > p { margin: 0 0 var(--space-sm); }
+.cron-diff {
+  max-block-size: 320px;
+  overflow: auto;
+  padding-block: var(--space-xs);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+  background: var(--bg-page);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.cron-diff:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.cron-diff__line { display: flex; gap: var(--space-sm); inline-size: max-content; min-inline-size: 100%; padding-inline: var(--space-sm); }
+.cron-diff__line.is-del { background: var(--tint-danger); color: var(--on-tint-danger); }
+.cron-diff__line.is-add { background: var(--tint-success); color: var(--on-tint-success); }
+.cron-diff__mark { flex: none; }
+.cron-diff__text { white-space: pre; }
+.cron-diff__note, .cron-diff__skip { color: var(--text-subtle); font-style: italic; }
+.cron-diff__skip { padding-inline: var(--space-sm); }
+
 /* convert */
 .cron-conv-grid {
   display: grid;

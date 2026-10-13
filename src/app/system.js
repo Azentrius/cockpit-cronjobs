@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BACKUP_DIR, C, DAY, KEEP_BACKUPS, KEEP_RUNS, R, RUNS_DIR, SD, state, STATE_DIR, T } from "./core.js";
+import { B, BACKUP_DIR, C, DAY, KEEP_BACKUPS, KEEP_RUNS, R, RUNS_DIR, SD, state, STATE_DIR, T } from "./core.js";
 import { takenIds } from "./crontab.js";
 import { renderNotices, showAlert } from "./page.js";
 
@@ -129,6 +129,33 @@ export function saveRoot(expected, next, timer, stop) {
     const args = ["sh", "-c", SAVE_SCRIPT, "cockpit-cronjobs", C.cksum(expected)]
         .concat(timer ? [timer].concat(stop ? ["stop"] : []) : []);
     return spawn(args, SPAWN_ROOT, next).then(out => String(out || "").trim());
+}
+
+/* All backups of the root crontab, under the crontab lock (shared), so that none is
+   written or removed meanwhile. For each file a header "\\036MTIME SIZE NAME" (MTIME in
+   seconds), then the file byte for byte (see lib/backups.js). Links and other names
+   are left out. Exit 4 = locked. */
+const BACKUPS_SCRIPT = `set -u
+umask 077
+dir='${BACKUP_DIR}'
+[ -d "$dir" ] || exit 0
+exec 9>'${STATE_DIR}/.crontab.lock'
+flock -s -w 10 9 || exit 4
+for f in "$dir"/root-*.crontab; do
+  [ -f "$f" ] && [ ! -L "$f" ] || continue
+  n=\${f##*/}
+  case $n in *[!A-Za-z0-9.-]*) continue ;; esac
+  s=$(stat -c '%Y %s' "$f") || exit 1
+  printf '\\036%s %s\\n' "$s" "$n"
+  cat -- "$f" || exit 1
+done
+exit 0
+`;
+
+/* Resolves to the backups, newest first (see B.parseBackups). */
+export function readBackups() {
+    return spawn(["sh", "-c", BACKUPS_SCRIPT], Object.assign({}, SPAWN_ROOT, { binary: true }))
+        .then(out => B.parseBackups(typeof out === "string" ? new TextEncoder().encode(out) : out));
 }
 
 /* Host name, time zone as cron sees it, and what is installed. */
