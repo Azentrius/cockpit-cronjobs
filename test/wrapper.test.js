@@ -137,7 +137,8 @@ for (const sh of SHELLS) {
 
         t(sh + ": a user directory that cannot be written: the command runs anyway", () => {
             const state = tmpState();
-            fs.mkdirSync(path.join(state, "users", ME), { recursive: true, mode: 0o500 });
+            fs.mkdirSync(path.join(state, "users"));
+            fs.mkdirSync(path.join(state, "users", ME), { mode: 0o500 });
             const r = run(sh, ["ro-1", "echo still; exit 3"], { state });
             assert.strictEqual(r.rc, 3);
             assert.strictEqual(r.out, "still\n");
@@ -300,12 +301,15 @@ t("orphans: recorded jobs that no crontab mentions, not while running", () => {
                  "0 2 * * * root echo xgone-0004 gone-00041 gone-0004x\n";
     const o = R.orphans(byId, text);
     assert.deepStrictEqual(o.map(x => x.id), ["gone-0003", "gone-0004", "dead-0006", "never-0007"]);
-    assert.deepStrictEqual(o[0], { id: "gone-0003", count: 1, last: byId["gone-0003"].runs[0], kb: 12 });
+    assert.deepStrictEqual(o[0], { key: "gone-0003", user: "root", id: "gone-0003", count: 1, last: byId["gone-0003"].runs[0], kb: 12 });
     assert.strictEqual(o[1].count, 2);
     assert.strictEqual(o[1].last.start, 200);
     assert.strictEqual(o[2].last.aborted, true);
     assert.strictEqual(o[3].last, null);
     assert.deepStrictEqual(R.orphans({}, text), []);
+    const users = R.orphans(R.parseRuns("\x1ealice/gone-0008\n" + '{"start":600,"end":601,"rc":0}\n' + "\x1ealice/used-0001\n"), text);
+    assert.deepStrictEqual(users.map(x => [x.key, x.user, x.id]), [["alice/gone-0008", "alice", "gone-0008"]],
+                           "another user's runs by USER/ID, used when a crontab mentions the ID");
 });
 
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);

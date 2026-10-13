@@ -409,6 +409,8 @@ with sync_playwright() as p:
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "* * * * *")
     page.fill("#f-command", "{ " + WHO + "; } > /tmp/cj-e2e-whoami")
+    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()   # the plain line; recording comes below
+    check(not page.is_checked("#f-capture"), "recording off for the plain job")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -442,6 +444,7 @@ with sync_playwright() as p:
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "0 5 1 1 *")
     page.fill("#f-command", WHO)
+    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -493,6 +496,16 @@ with sync_playwright() as p:
     wait_idle(page)
     row = card.locator("tbody tr", has_text="recorded-for-" + USER)
     check("OK" in row.locator("td[data-last]").inner_text(), "the last run in the user's card: " + row.inner_text())
+    # run now goes through the recorder too, as the user
+    row.locator("[data-key^='run:']").click()
+    page.click("#run-start")
+    wait_js(page, "!document.querySelector('#run-done-actions').hidden")
+    check("OK" in page.inner_text("#run-label") and "recorded-for-" + USER in page.inner_text("#run-log"),
+          "run now of the user's recorded job: " + page.inner_text("#run-log"))
+    page.click("#run-close-btn")
+    page.wait_for_timeout(800)
+    manual = [r for r in (json.loads(x) for x in open(rec_dir + "/runs.jsonl")) if r["trigger"] == "manual"]
+    check(len(manual) == 1 and manual[0]["rc"] == 0, "run now recorded in the user's directory: " + repr(manual))
     row.locator("[data-key^='runs:']").click()
     wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1")
     check(f"/var/lib/cockpit-cronjobs/users/{USER}/runs/" in page.inner_text("#runs-note"), "the runs dialog names the user's directory")
