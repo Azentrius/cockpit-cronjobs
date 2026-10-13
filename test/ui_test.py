@@ -633,8 +633,8 @@ with sync_playwright() as p:
           "three unchanged lines around, the rest folded: " + repr(lines))
     check(page.get_attribute("[data-key='bk:root-20261012-090000.crontab']", "aria-expanded") == "true" and
           focused_key(page) == "bk:root-20261012-090000.crontab", "expanded, focus stays on its button")
-    check(page.inner_text(".cron-diff .is-del .az-sr") == "entfernt: " and page.inner_text(".cron-diff .is-add .az-sr") == "hinzugefügt: ",
-          "removed and added lines say so to screen readers")
+    sr = [page.text_content(".cron-diff .is-del .az-sr"), page.text_content(".cron-diff .is-add .az-sr")]
+    check(sr == ["entfernt: ", "hinzugefügt: "], "removed and added lines say so to screen readers: " + repr(sr))
     colors = page.evaluate("""() => ['.is-del', '.is-add'].map(s => getComputedStyle(document.querySelector('.cron-diff ' + s)).backgroundColor)""")
     check(colors == ["rgb(251, 197, 197)", "rgb(209, 241, 187)"], "removed red, added green: " + repr(colors))
     check(page.inner_text("[data-key='restore:root-20261012-090000.crontab']").strip() == "Diese Version wiederherstellen" and
