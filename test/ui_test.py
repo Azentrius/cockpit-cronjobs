@@ -640,11 +640,19 @@ with sync_playwright() as p:
     check(page.inner_text("[data-key='restore:root-20261012-090000.crontab']").strip() == "Diese Version wiederherstellen" and
           page.locator("#bk-dlg .az-btn--primary").count() == 1, "one restore button, the only primary one")
     shot(page, "de-light-backups", full=False)
+    # long lines scroll inside the difference; the list keeps the width of the dialog
+    fits = """() => {
+        const table = document.querySelector('#bk-body .cron-runs-table');
+        const button = document.querySelector('#bk-body [data-key^="restore:"]').getBoundingClientRect();
+        const modal = document.querySelector('#bk-dlg .az-modal').getBoundingClientRect();
+        return [document.documentElement.scrollWidth, table.scrollWidth, table.clientWidth, button.right <= modal.right - 16];
+    }"""
+    widths = page.evaluate(fits)
+    check(widths[1] <= widths[2] and widths[3], "the list fits the dialog, restore button visible: " + repr(widths))
     page.set_viewport_size({"width": 375, "height": 800})
     page.wait_for_timeout(150)
-    widths = page.evaluate("""() => [document.documentElement.scrollWidth, document.querySelector('#bk-dlg .az-modal').scrollWidth,
-                                      document.querySelector('#bk-dlg .az-modal').clientWidth]""")
-    check(widths[0] <= 375 and widths[1] <= widths[2], "phone: the dialog fits, long lines scroll inside: " + repr(widths))
+    widths = page.evaluate(fits)
+    check(widths[0] <= 375 and widths[1] <= widths[2] and widths[3], "phone: the dialog fits, long lines scroll inside: " + repr(widths))
     shot(page, "de-light-backups-375", full=False)
     page.set_viewport_size({"width": 1280, "height": 900})
     # the version like now: nothing to restore
@@ -1142,6 +1150,30 @@ with sync_playwright() as p:
     shot(page, "en-light-1280")
     row(page, 0).locator("[data-key^=more]").click()
     check("Stop recording" in page.inner_text("#row-menu"), "en menu")
+    page.keyboard.press("Escape")
+    # the backups dialog in English
+    root = root_text(page)
+    page.evaluate("""o => {
+        const now = Math.floor(Date.now() / 1000);
+        const p = n => '/var/lib/cockpit-cronjobs/backups/root-' + n + '.crontab';
+        window.__mock.backups = [
+            { path: p('20261012-063000'), content: o.older, mtime: now - 86400 },
+            { path: p('20261013-081500'), content: o.mid, mtime: now - 3 * 3600 },
+            { path: p('20261013-104200'), content: o.newer, mtime: now - 120 },
+        ];
+    }""", {"older": root + "15 4 * * * /usr/local/bin/old-report.sh\n",
+           "mid": root.replace("@reboot /usr/local/bin/warmup.sh\n", ""),
+           "newer": root.replace("30 1 * * 0 /usr/sbin/fstrim -a", "45 1 * * 0 /usr/sbin/fstrim -a")})
+    page.click("#backups")
+    wait_js(page, "document.querySelectorAll('#bk-body tbody tr').length === 3")
+    check(page.locator("#bk-body tbody tr td:nth-child(2)").all_inner_texts() ==
+          ["1 line removed, 1 line added", "1 line removed", "1 line added"], "en: what restoring changes")
+    page.click("[data-key='bk:root-20261013-104200.crontab']")
+    wait_js(page, "document.querySelector('.cron-diff')")
+    check("Restore this version" in page.inner_text("#bk-body") and "unchanged lines" in page.inner_text("#bk-body"), "en difference")
+    box = page.locator("#bk-dlg .az-modal").bounding_box()
+    page.screenshot(path=os.path.join(SHOTS, "en-backups.png"),
+                    clip={"x": box["x"] - 24, "y": box["y"] - 24, "width": box["width"] + 48, "height": box["height"] + 48})
     page.context.close()
 
     # ---------- language like Cockpit ----------

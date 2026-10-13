@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.3.0 – 2026-10-13
+
+Backups you can use: compare any of the last ten versions of the root crontab with the current one, and
+restore it.
+
+- **Backups:** a new button in the root crontab card lists the backups, newest first, each with what
+  restoring it would change. Opening one shows the difference line by line, as `diff` shows it. Restoring
+  writes the backup byte for byte through the same locked step as every other change, after a backup of
+  the current version, so a restore can be undone the same way.
+- Shared design files: `icons.js` has the `ban` icon (for the other add-ons); `azentrius-theme.js`
+  changed only in a comment.
+- Tests: two tests that failed now and then without a change in the code wait for what they check; the
+  end-to-end test is a required check.
+
 ## 2.2.0 – 2026-10-12
 
 The shared Azentrius page frame, the polish of stage 1.1 of the roadmap, and a new license.

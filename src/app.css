@@ -248,7 +248,10 @@ html { background: var(--bg-page); }
 /* backups: what restoring a version would change */
 .cron-bk-detail { padding-block: var(--space-xs) var(--space-sm); }
 .cron-bk-detail > p { margin: 0 0 var(--space-sm); }
+/* No width of its own in the table: long lines scroll inside instead of widening the dialog. */
 .cron-diff {
+  inline-size: 0;
+  min-inline-size: 100%;
   max-block-size: 320px;
   overflow: auto;
   padding-block: var(--space-xs);
