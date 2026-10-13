@@ -640,11 +640,19 @@ with sync_playwright() as p:
     check(page.inner_text("[data-key='restore:root-20261012-090000.crontab']").strip() == "Diese Version wiederherstellen" and
           page.locator("#bk-dlg .az-btn--primary").count() == 1, "one restore button, the only primary one")
     shot(page, "de-light-backups", full=False)
+    # long lines scroll inside the difference; the list keeps the width of the dialog
+    fits = """() => {
+        const table = document.querySelector('#bk-body .cron-runs-table');
+        const button = document.querySelector('#bk-body [data-key^="restore:"]').getBoundingClientRect();
+        const modal = document.querySelector('#bk-dlg .az-modal').getBoundingClientRect();
+        return [document.documentElement.scrollWidth, table.scrollWidth, table.clientWidth, button.right <= modal.right - 16];
+    }"""
+    widths = page.evaluate(fits)
+    check(widths[1] <= widths[2] and widths[3], "the list fits the dialog, restore button visible: " + repr(widths))
     page.set_viewport_size({"width": 375, "height": 800})
     page.wait_for_timeout(150)
-    widths = page.evaluate("""() => [document.documentElement.scrollWidth, document.querySelector('#bk-dlg .az-modal').scrollWidth,
-                                      document.querySelector('#bk-dlg .az-modal').clientWidth]""")
-    check(widths[0] <= 375 and widths[1] <= widths[2], "phone: the dialog fits, long lines scroll inside: " + repr(widths))
+    widths = page.evaluate(fits)
+    check(widths[0] <= 375 and widths[1] <= widths[2] and widths[3], "phone: the dialog fits, long lines scroll inside: " + repr(widths))
     shot(page, "de-light-backups-375", full=False)
     page.set_viewport_size({"width": 1280, "height": 900})
     # the version like now: nothing to restore
@@ -1143,7 +1151,7 @@ with sync_playwright() as p:
     row(page, 0).locator("[data-key^=more]").click()
     check("Stop recording" in page.inner_text("#row-menu"), "en menu")
     page.keyboard.press("Escape")
-    # the backups dialog in English (also the picture in the README)
+    # the backups dialog in English
     root = root_text(page)
     page.evaluate("""o => {
         const now = Math.floor(Date.now() / 1000);
