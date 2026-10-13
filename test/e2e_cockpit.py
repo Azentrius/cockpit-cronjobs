@@ -383,13 +383,13 @@ with sync_playwright() as p:
     start = crontab()
     sh("rm -f /tmp/cj-e2e-root-cron /tmp/cj-e2e-root-out")
     sh("crontab -u root -", input=start + "* * * * * { " + WHO + "; } > /tmp/cj-e2e-root-cron\n"
-                                          "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n")
+                                          "0 5 1 * * { " + WHO + "; } > /tmp/cj-e2e-root-out\n")
     page.click("#reload")
     wait_idle(page)
     by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
     check(by_cron[0] == "root" and by_cron[1] == "/root" and by_cron[2].get("CJ_E2E_EXPORT") == "quoted value" and
           "USER" not in by_cron[2], "cron ran the job as root with /etc/environment: " + repr(by_cron))
-    who_row = row_of(page, "0 5 1 1 *")
+    who_row = row_of(page, "0 5 1 * *")   # monthly: a yearly job is not converted (five runs are compared)
     who_row.locator("[data-key^='run:']").click()
     check("Außerdem gesetzt:" in page.inner_text("#run-env") and "CJ_E2E_EXPORT" in page.inner_text("#run-env"),
           "the run dialog names the other variables: " + page.inner_text("#run-env"))
