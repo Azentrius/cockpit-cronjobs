@@ -750,6 +750,33 @@ export function analyzeCalendar(specs, iterations) {
         });
 }
 
+/* How the last run of a timer's service ended (Result, exit status, times in ms), or
+   whether it is running; nulls when systemd tells nothing about it. */
+async function serviceRun(service) {
+    const run = { result: null, status: null, startUs: null, exitUs: null, running: false };
+    try {
+        const path = await unitPath(service);
+        const [svc, unit] = await Promise.all([getAll(path, "org.freedesktop.systemd1.Service"),
+                                               getAll(path, "org.freedesktop.systemd1.Unit")]);
+        run.result = svc.Result || null;
+        run.status = typeof svc.ExecMainStatus === "number" ? svc.ExecMainStatus : null;
+        run.startUs = usecTime(svc.ExecMainStartTimestamp);
+        run.exitUs = usecTime(svc.ExecMainExitTimestamp);
+        run.running = unit.ActiveState === "activating" || unit.ActiveState === "deactivating" ||
+            (unit.ActiveState === "active" && svc.Type !== "oneshot" && unit.SubState === "running");
+    } catch (_) { /* no service details */ }
+    return run;
+}
+
+/* Only the last runs of the timers in list (from readTimers): when each was last
+   triggered and how its service ended. Cheaper than readTimers, for every half minute. */
+export function readTimerRuns(list) {
+    return Promise.all(list.map(async t => {
+        const props = await getAll(t.path, "org.freedesktop.systemd1.Timer").catch(() => null);
+        return Object.assign({ last: props ? usecTime(props.LastTriggerUSec) : t.last }, await serviceRun(t.service));
+    }));
+}
+
 export async function readTimers() {
     const [units] = await sd().call(SD_PATH, SD_MGR, "ListUnitsByPatterns", [[], ["*.timer"]]);
     let offset = null;   /* realtime - monotonic, in µs */
@@ -771,23 +798,11 @@ export async function readTimers() {
             if (next === null || n < next) next = n;
         }
         const timer = {
-            name, description: u[1], active: u[3] === "active", calendar, monotonic, next,
+            name, description: u[1], active: u[3] === "active", calendar, monotonic, next, path: u[6],
             last: usecTime(t.LastTriggerUSec), randomizedUsec: t.RandomizedDelayUSec || 0,
-            persistent: !!t.Persistent, service: t.Unit || name.replace(/\.timer$/, ".service"),
-            result: null, status: null, startUs: null, exitUs: null, running: false, runs: [],
+            persistent: !!t.Persistent, service: t.Unit || name.replace(/\.timer$/, ".service"), runs: [],
         };
-        try {
-            const path = await unitPath(timer.service);
-            const [svc, unit] = await Promise.all([getAll(path, "org.freedesktop.systemd1.Service"),
-                                                   getAll(path, "org.freedesktop.systemd1.Unit")]);
-            timer.result = svc.Result || null;
-            timer.status = typeof svc.ExecMainStatus === "number" ? svc.ExecMainStatus : null;
-            timer.startUs = usecTime(svc.ExecMainStartTimestamp);
-            timer.exitUs = usecTime(svc.ExecMainExitTimestamp);
-            timer.running = unit.ActiveState === "activating" || unit.ActiveState === "deactivating" ||
-                (unit.ActiveState === "active" && svc.Type !== "oneshot" && unit.SubState === "running");
-        } catch (_) { /* no service details */ }
-        return timer;
+        return Object.assign(timer, await serviceRun(timer.service));
     }));
 
     /* Runs in the next 24 hours, for the timeline. Randomized timers: only the

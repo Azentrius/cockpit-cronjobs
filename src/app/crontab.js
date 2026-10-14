@@ -8,9 +8,9 @@
 import { C, codeSafe, keyOf, R, rich, SD, state, T, USER_RE } from "./core.js";
 import {
     ensureUserRuns, ensureWrapper, errText, isDenied, readBasics, readCrontab, readHomes, readRuns, readSystem,
-    readTimers, removeRunsIfUnused, saveCrontab,
+    readTimerRuns, readTimers, removeRunsIfUnused, saveCrontab,
 } from "./system.js";
-import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns } from "./page.js";
+import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns, updateTimerRuns } from "./page.js";
 import { dialog } from "./dialogs.js";
 import { renderOrphansDialog, renderRunsDialog } from "./runs.js";
 
@@ -210,6 +210,22 @@ export function refreshRuns() {
         updateLastRuns();
         if (dialog && dialog.kind === "runs") renderRunsDialog();
         if (dialog && dialog.kind === "orphans") renderOrphansDialog();
+    });
+}
+
+/* Only the last runs of the systemd timers, every half minute with the recorded runs,
+   so that a failed timer shows within a minute. */
+let timersLoading = false;
+export function refreshTimers() {
+    const list = state.timers.status === "ok" ? state.timers.list : null;
+    if (timersLoading || !list || !list.length) return Promise.resolve();
+    timersLoading = true;
+    return readTimerRuns(list).then(runs => {
+        if (state.timers.list !== list) return;   /* a reload was faster */
+        list.forEach((t, k) => Object.assign(t, runs[k]));
+    }, () => { /* the next reload says what is wrong */ }).finally(() => {
+        timersLoading = false;
+        updateTimerRuns();
     });
 }
 

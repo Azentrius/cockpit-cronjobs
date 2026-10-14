@@ -70,8 +70,9 @@ src/                      the Cockpit package (installed as /usr/share/cockpit/c
   app/core.js             libraries, constants, texts, DOM helpers, times, the page's state
   app/crontab.js          the crontabs as shown (root's, other users' with admin access): loading, saving
                           (commit, restoreCrontab), administrative access
-  app/page.js, timeline.js, dialogs.js, runs.js, convert.js, backups.js, tabs.js   the page, the timeline,
-                          dialogs, run now and recorded runs, conversion and back to cron, backups, the tabs
+  app/page.js, summary.js, timeline.js, dialogs.js, runs.js, convert.js, backups.js, tabs.js   the page,
+                          the latest results, the timeline, dialogs, run now and recorded runs, conversion
+                          and back to cron, backups, the tabs
   lib/cron.js             crontab parsing and writing (byte for byte), schedules, next runs, cron's % rules
   lib/systemd.js          cron → OnCalendar, unit files, systemd-analyze output
   lib/runs.js             records of the run recorder

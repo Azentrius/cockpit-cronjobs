@@ -57,6 +57,15 @@
         wrapperNoCopy: "Cron Jobs could not load its copy of cockpit-cronjobs-run.",
 
         /* timeline */
+        sumTitle: "Latest results",
+        sumFailed: n => `${n} failed`,
+        sumNoFailures: "No failures",
+        sumRunning: n => `${n} running`,
+        sumOk: n => `${n} successful`,
+        sumShowOk: n => `Show ${n} successful`,
+        sumHideOk: "Hide the successful ones",
+        colResult: "Result",
+        colJob: "Job",
         tlTitle: "The next 24 hours",
         tlDesc: "All cron jobs and systemd timers on this server, in server time.",
         legendCron: "Cron job",

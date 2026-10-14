@@ -14,6 +14,7 @@ import {
     convertedTo, crontabOf, jobInfo, jobsOf, jobTz, loading, noteFor, requestLoad, runsOf, setCapture, toggle,
 } from "./crontab.js";
 import { renderTimeline } from "./timeline.js";
+import { renderSummary } from "./summary.js";
 import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
 import { openRun, openRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
 import { convertBlocker, openBack, openConvert } from "./convert.js";
@@ -84,6 +85,7 @@ async function repairWrapper() {
 export function renderAll() {
     renderHeader();
     renderNotices();
+    renderSummary();
     renderTimeline();
     renderCrontabs();
     renderOrphans();
@@ -345,13 +347,23 @@ export function updateLastRuns() {
         if (e && e.kind === "job") fill(td, lastCell(user, e, i, !r.locked, false));
     });
     renderOrphans();
+    renderSummary();
     if (focused && !document.activeElement.isConnected) restoreFocus(focused);
     renderNotices();
 }
 
+/* After the timers' last runs were read again (refreshTimers). */
+export function updateTimerRuns() {
+    if (state.busy || loading) return;
+    const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
+    renderTimers();
+    renderSummary();
+    if (focused && !document.activeElement.isConnected) restoreFocus(focused);
+}
+
 /* ---------- systemd timers ---------- */
 
-function jumpToUnit(unit) {
+export function jumpToUnit(unit) {
     cockpit.jump("/system/services#/" + encodeURIComponent(unit), cockpit.transport.host);
 }
 
@@ -361,14 +373,22 @@ function timerNextCell(t) {
     return whenCell(t.next);
 }
 
+/* How timer t's last run ended, as a label ({ kind, icon, text }), or null when systemd
+   tells no result; and how long it took, in seconds (or null). */
+export function timerRunLabel(t) {
+    if (t.result === "success") return { kind: "success", icon: "check-circle", text: T.statusOk };
+    if (t.result === "exit-code" && t.status !== null) return { kind: "danger", icon: "exclamation-circle", text: T.statusFailed(t.status) };
+    if (t.result) return { kind: "danger", icon: "exclamation-circle", text: T.statusResult(t.result) };
+    return null;
+}
+export const timerDuration = t => t.startUs !== null && t.exitUs !== null && t.exitUs >= t.startUs ? (t.exitUs - t.startUs) / 1000 : null;
+
 function timerLastCell(t) {
     if (t.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("info", "sync-alt", T.statusRunning)));
     if (t.last === null) return h("span", { class: "cron-muted" }, T.noRunYet);
-    let label = null;
-    if (t.result === "success") label = labelEl("success", "check-circle", T.statusOk);
-    else if (t.result === "exit-code" && t.status !== null) label = labelEl("danger", "exclamation-circle", T.statusFailed(t.status));
-    else if (t.result) label = labelEl("danger", "exclamation-circle", T.statusResult(t.result));
-    const dur = t.startUs !== null && t.exitUs !== null && t.exitUs >= t.startUs ? (t.exitUs - t.startUs) / 1000 : null;
+    const l = timerRunLabel(t);
+    const label = l ? labelEl(l.kind, l.icon, l.text) : null;
+    const dur = timerDuration(t);
     return h("div", { class: "cron-cell" },
         label ? h("span", null, label) : null,
         h("span", { class: label ? "az-cell-sub" : null }, fmtShort(t.last) + (dur !== null ? " · " + fmtDuration(dur) : "")));
