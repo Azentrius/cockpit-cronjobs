@@ -105,6 +105,7 @@
         /* UNITS_SCRIPT calls: [step, name, user]; wrongUser: what systemd reports as User= */
         unitChecks: [],
         wrongUser: null,
+        timerChanges: {},
         /* getent passwd, after the name */
         passwd: { "www-data": "33:33:www-data:/var/www:/usr/sbin/nologin", "ghost": "1001:1001::/home/ghost:/bin/sh" },
         userConflictNext: null,
@@ -546,7 +547,8 @@
             list.push({ name: n + ".timer", desc: d ? d[1] : n, cal: m ? [m[1]] : [],
                         service: n + ".service", result: null, status: 0, never: true, inactive: !M.enabled.includes(n + ".timer") });
         });
-        return list;
+        /* M.timerChanges: { NAME: { result, status, ago (µs since the last run), never, running } } */
+        return list.map(t => Object.assign(t, M.timerChanges[t.name] || {}));
     };
     const pathOf = name => "/org/freedesktop/systemd1/unit/" + name.replace(/[^A-Za-z0-9]/g, c => "_" + c.charCodeAt(0).toString(16));
     const V = (t, v) => ({ t, v });
@@ -563,7 +565,7 @@
             TimersMonotonic: V("a(stt)", (t.mono || []).map(([b, us]) => [b, us, 0])),
             NextElapseUSecRealtime: V("t", t.inactive ? 0 : rt),
             NextElapseUSecMonotonic: V("t", t.inactive ? 0 : mono),
-            LastTriggerUSec: V("t", t.never ? 0 : usNow() - 6 * 3600e6),
+            LastTriggerUSec: V("t", t.never ? 0 : usNow() - (t.ago || 6 * 3600e6)),
             RandomizedDelayUSec: V("t", t.rand || 0),
             Persistent: V("b", true),
         };
@@ -614,7 +616,7 @@
             if (t && ifc === "org.freedesktop.systemd1.Timer") return [timerProps(t)];
             const s = timers.find(x => pathOf(x.service) === path);
             if (s && ifc === "org.freedesktop.systemd1.Service") {
-                const start = usNow() - 6 * 3600e6;
+                const start = usNow() - (s.ago || 6 * 3600e6);
                 return [{ Result: V("s", s.result || "success"), ExecMainStatus: V("i", s.status || 0),
                           ExecMainStartTimestamp: V("t", s.never ? 0 : start),
                           ExecMainExitTimestamp: V("t", s.never || s.running ? 0 : start + (s.dur || 0)),

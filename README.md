@@ -13,9 +13,12 @@ starts jobs on demand and turns cron jobs into systemd timers.
   written out in words; next runs are shown in server time, and in your own time when that differs.
   Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links) are marked
   with the reason, by the rules of the cron that is installed.
-- **Three tabs.** Overview (the next 24 hours, the root crontab and those of other users), systemd timers,
-  and System (`/etc/crontab`, `/etc/cron.d`, the periodic scripts). Notices stay visible in every tab;
-  switching tabs loads nothing.
+- **Three tabs.** Overview (the latest results, the next 24 hours, the root crontab and those of other
+  users), systemd timers, and System (`/etc/crontab`, `/etc/cron.d`, the periodic scripts). Notices stay
+  visible in every tab; switching tabs loads nothing.
+- **The latest results.** The last run of every recorded job and every systemd timer in one list,
+  failures first, successful ones folded away. Runs and timers are read again every half minute, so a
+  failure shows within a minute without reloading.
 - **The next 24 hours.** A timeline of all cron jobs and timers. Jobs that start in the same minute are
   pointed out.
 - **Safe changes to the root crontab.** Add, edit, switch off and on, delete. Lines you do not touch stay

@@ -474,6 +474,38 @@ with sync_playwright() as p:
     check(crontab_bytes() == original, "restoring back gives the original bytes: " + repr(crontab_bytes()))
     os.remove("/tmp/cj-e2e-current")
 
+    # the latest results: a recorded job and a systemd timer that fail show up within a minute of
+    # their run, failed first, while the page stays open (it reads runs and timers every half minute)
+    start = crontab()
+    sh("crontab -u root -", input=start + f"* * * * * {WRAP} sumfail-0001 'echo about to fail; exit 3'\n")
+    fail_timer = "cj-e2e-fail"
+    r = sh(f"systemd-run --unit={fail_timer} --on-calendar='*-*-* *:*:00' --timer-property=AccuracySec=1s /bin/false")
+    check(r.returncode == 0, "a failing timer: " + r.stderr)
+    page.click("#reload")
+    wait_idle(page)
+    loaded = time.time()
+    deadline = loaded + 100
+    rows = []
+    while time.time() < deadline:
+        rows = page.locator("#sum-body tbody tr").all_inner_texts() if page.locator("#sum-card").is_visible() else []
+        if any("exit 3" in x.lower() and "about to fail" in x for x in rows) and any(fail_timer + ".timer" in x and "exit 1" in x.lower() for x in rows):
+            break
+        time.sleep(2)
+    took = time.time() - loaded
+    check(any("Fehler · Exit 3" in x and "about to fail" in x and "root-Crontab" in x for x in rows) and
+          any(fail_timer + ".timer" in x and "Fehler · Exit 1" in x for x in rows) and took < 100,
+          f"the failing job and timer in the latest results after {took:.0f} s, without reloading: " + repr(rows))
+    fails = [i for i, x in enumerate(rows) if "Fehler" in x]
+    check(fails and fails == list(range(len(fails))), "failures first: " + repr(rows))
+    page.locator("#sum-card").scroll_into_view_if_needed()
+    page.screenshot(path=os.path.join(SHOTS, "e2e-summary.png"))
+    sh(f"systemctl stop {fail_timer}.timer; systemctl reset-failed {fail_timer}.service {fail_timer}.timer")
+    sh("crontab -u root -", input=start)
+    shutil.rmtree(f"{STATE}/runs/sumfail-0001", ignore_errors=True)
+    page.click("#reload")
+    wait_idle(page)
+    check(crontab() == start and fail_timer not in page.inner_text("#sum-body"), "back as before")
+
     # another user's crontab: a card of its own, written as that user's crontab with backups of its own,
     # and cron runs the jobs as that user
     card = page.locator(f"#user-crontabs section[data-user='{USER}']")

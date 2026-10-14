@@ -978,6 +978,40 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (other users, read-only): " + repr(page.problems))
     page.context.close()
 
+    # ---------- latest results ----------
+    page = open_page(browser)
+    check(page.locator("#panel-overview > section").first.get_attribute("id") == "sum-card" and page.locator("#sum-card").is_visible(),
+          "the latest results first in the overview")
+    check(page.inner_text("#sum-desc") == "2 fehlgeschlagen · 1 läuft gerade · 3 erfolgreich", "counts: " + page.inner_text("#sum-desc"))
+    rows = [r.replace("\t", " ").replace("\n", " ") for r in page.locator("#sum-body tbody tr").all_inner_texts()]
+    check(len(rows) == 3 and "Fehler · Exit 1" in rows[0] and "update-geoip.sh" in rows[0] and "root-Crontab" in rows[0] and
+          "Fehler · Exit 32" in rows[1] and "fstrim.timer" in rows[1] and "systemd-Timer" in rows[1] and
+          "Läuft" in rows[2] and "backup-files.timer" in rows[2] and "aus der root-Crontab übernommen" in rows[2],
+          "failed first (newest first), then running; the successful ones folded: " + repr(rows))
+    page.click("[data-key='sum-toggle']")
+    rows = page.locator("#sum-body tbody tr").all_inner_texts()
+    check(len(rows) == 6 and all("OK" in r for r in rows[3:]) and focused_key(page) == "sum-toggle" and
+          page.inner_text("[data-key='sum-toggle']").strip() == "Erfolgreiche ausblenden", "the successful ones shown: " + repr(rows))
+    page.click("[data-key='sum:24']")
+    check(page.locator("#runs-dlg").is_visible() and "update-geoip" in page.inner_text("#runs-dlg"), "a recorded job opens its runs")
+    page.click("#runs-close-btn")
+    check(focused_key(page) == "sum:24", "focus back on the result: " + repr(focused_key(page)))
+    # a timer that fails shows without reloading, when the page reads the runs again (every half minute)
+    page.evaluate("() => { window.__mock.timerChanges['logrotate.timer'] = { result: 'exit-code', status: 2, ago: 20e6 }; }")
+    page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    wait_js(page, "document.querySelector('#sum-body tbody tr').innerText.includes('logrotate.timer')")
+    check(page.inner_text("#sum-desc").startswith("3 fehlgeschlagen") and "Fehler · Exit 2" in page.locator("#sum-body tbody tr").first.inner_text(),
+          "the failed timer first: " + page.inner_text("#sum-desc"))
+    check("Fehler · Exit 2" in page.locator("#timers-body tbody tr", has_text="logrotate").inner_text(), "and in the timers tab")
+    shot(page, "de-light-summary", full=False)
+    check(not page.problems, "no console problems (latest results): " + repr(page.problems))
+    page.context.close()
+    # nothing recorded and no timers: no card
+    page = open_page(browser, "systemd=no")
+    reload_with_root(page, "0 1 * * * /usr/local/bin/backup.sh\n")
+    check(page.locator("#sum-card").is_hidden(), "no results, no card")
+    page.context.close()
+
     # ---------- run now ----------
     page = open_page(browser)
     extra = ("PATH=/usr/local/bin:/usr/bin:/bin\n0 4 * * * /opt/fail.sh\n0 6 * * * sleep 600\n"

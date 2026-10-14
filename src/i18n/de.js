@@ -56,6 +56,15 @@
         wrapperNoCopy: "Cron Jobs konnte seine Kopie von cockpit-cronjobs-run nicht laden.",
 
         /* Zeitleiste */
+        sumTitle: "Letzte Ergebnisse",
+        sumFailed: n => `${n} fehlgeschlagen`,
+        sumNoFailures: "Keine Fehlschläge",
+        sumRunning: n => `${n} ${n === 1 ? "läuft" : "laufen"} gerade`,
+        sumOk: n => `${n} erfolgreich`,
+        sumShowOk: n => `${n} erfolgreiche zeigen`,
+        sumHideOk: "Erfolgreiche ausblenden",
+        colResult: "Ergebnis",
+        colJob: "Job",
         tlTitle: "Die nächsten 24 Stunden",
         tlDesc: "Alle Cron-Jobs und systemd-Timer dieses Servers, in Serverzeit.",
         legendCron: "Cron-Job",

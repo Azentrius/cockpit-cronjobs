@@ -40,6 +40,16 @@
   <div class="cron-alerts" id="sys-alerts"></div>
 
   <section class="cron-panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview">
+    <section class="az-card" id="sum-card" aria-labelledby="sum-title" hidden>
+      <div class="az-card__header">
+        <div>
+          <h2 class="az-card__title" id="sum-title" data-t="sumTitle">Latest results</h2>
+          <p class="az-card__desc" id="sum-desc"></p>
+        </div>
+      </div>
+      <div id="sum-body"></div>
+    </section>
+
     <section class="az-card" id="tl-card" aria-labelledby="tl-title" hidden>
       <div class="az-card__header cron-tl-header">
         <div>

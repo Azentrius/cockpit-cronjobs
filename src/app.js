@@ -29,7 +29,7 @@
  */
 
 import { $, fill, icon, rich, state, T } from "./app/core.js";
-import { crontabOf, jobAt, loading, refreshRuns, requestLoad, watchSuperuser } from "./app/crontab.js";
+import { crontabOf, jobAt, loading, refreshRuns, refreshTimers, requestLoad, watchSuperuser } from "./app/crontab.js";
 import { clearAlerts, updateNextRuns } from "./app/page.js";
 import {
     closeDialog, confirmDelete, confirmOk, dialog, form, openCaptureOff, openEdit, submitEdit, updateForm,
@@ -119,7 +119,10 @@ function init() {
         const hidden = cockpit.hidden !== undefined ? cockpit.hidden : document.hidden;
         if (hidden || dialog || state.busy) return;
         if (Date.now() - state.loadedAt > 60000) requestLoad();
-        else refreshRuns();
+        else {
+            refreshRuns();
+            refreshTimers();
+        }
     };
     document.addEventListener("visibilitychange", onVisible);
     if (typeof cockpit.addEventListener === "function") cockpit.addEventListener("visibilitychange", onVisible);
@@ -127,7 +130,10 @@ function init() {
     window.setInterval(() => {
         updateNextRuns();
         const hidden = cockpit.hidden !== undefined ? cockpit.hidden : document.hidden;
-        if (!hidden && !state.busy && !loading) refreshRuns();
+        if (!hidden && !state.busy && !loading) {
+            refreshRuns();
+            refreshTimers();
+        }
     }, 30000);
 
     watchSuperuser().then(() => requestLoad());
