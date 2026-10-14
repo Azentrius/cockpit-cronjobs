@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-13. Each stage is cut so that it is useful on its own and brings its own tests. The
+As of 2026-10-14. Each stage is cut so that it is useful on its own and brings its own tests. The
 order is the recommendation; stages after 1.1 are proposals until they are decided.
 
 **Guardrails for every stage** (they keep applying):
@@ -60,10 +60,14 @@ it would change; the end-to-end test compares the difference with `diff` and res
 
 ---
 
-## Stage 3 – Crontabs of other users
+## Stage 3 – Crontabs of other users ✅
 
-**Goal:** the crontabs of other users can be changed with the same safety as root's (today they are
-read-only).
+Done in 2.4.0 (see [CHANGELOG](CHANGELOG.md)), only with administrative access (without it they are not
+shown at all); the end-to-end test covers a second user for editing, backups, run now, recording and
+conversion. Run now and conversions use the environment cron gives a job on the server.
+
+**Goal:** the crontabs of other users can be changed with the same safety as root's (they were
+read-only before).
 
 - `crontab -u USER` in the same locked step, backups per user, user names checked against the system.
 - Recording and run now as that user; conversion with `User=` in the service unit.
@@ -116,6 +120,5 @@ minute of the run.
 
 ## Open decisions
 
-1. Stage 3: should other users' crontabs become editable at all, or stay read-only?
-2. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
+1. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
 3. Stage 5: packages and the listing in Cockpit's Applications page: worth the upkeep?
