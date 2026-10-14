@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.4.0 – 2026-10-14
+
+Crontabs of other users, with administrative access: changed, run, recorded and converted with the same
+safety as root's. Run now and conversions now give a job the environment cron gives it.
+
+- **Crontabs of other users:** with administrative access, every other user's crontab gets a card of its
+  own on the overview and is changed the same way as root's: through `crontab -u USER` in one locked
+  step, after a backup of its own (the last ten in `/var/lib/cockpit-cronjobs/backups/users/USER/`),
+  which can be compared and restored like root's. Without administrative access they are not shown at
+  all. `/etc/crontab` and `/etc/cron.d` stay read-only.
+- **Run now as that user:** another user's job runs as that user (through `runuser`), in the user's
+  home, with cron's environment for that user.
+- **Recording for other users:** the run recorder (version 2; the page installs it again) records a job
+  of another user as that user, in `/var/lib/cockpit-cronjobs/users/USER/runs/`, a directory that
+  belongs to the user; `/var/lib/cockpit-cronjobs` and its `users` directory become mode 711. Cron Jobs
+  reads output and removes runs there as that user, and lists only what has the form of runs.
+- **Conversion for other users:** the timer runs the job with `User=USER`, in the user's home. Units
+  name the crontab they come from, and back to cron removes only units converted from the crontab whose
+  note it follows, so a note a user writes into their own crontab cannot reach anyone else's timer. The
+  systemd timers tab names the crontab a timer came from.
+- **Cron's environment:** run now and conversions read from the server how cron builds a job's
+  environment (PAM's variables from `/etc/environment` and, on Debian and Ubuntu, the locale; the
+  crontab's variables; cron's own) and use exactly that. On Ubuntu, which starts cron with `-P`, `PATH`
+  now comes from `/etc/environment` as under cron, and `USER` is no longer set where cron sets none. A
+  converted unit lists the variables and unsets what systemd would add on its own. The run dialog names
+  the other variables it sets.
+- Tests: the end-to-end test covers a second user for editing, backups, run now, recording and
+  conversion, compares the whole environment of a job under cron with run now and with a converted
+  unit, and tries a link in a user's run directory and a forged conversion note.
+
 ## 2.3.0 – 2026-10-13
 
 Backups you can use: compare any of the last ten versions of the root crontab with the current one, and
