@@ -132,7 +132,7 @@
         timersErrorTitle: "Could not read the systemd timers",
         timersNone: "This server has no systemd timers.",
         timerInactive: "Not active",
-        fromCrontab: "converted from the root crontab",
+        fromCrontab: user => `converted from the ${crontabName(user)}`,
         randomUpTo: span => `up to ${span} later`,
         openInCockpit: name => `Open ${name} in Cockpit`,
 
@@ -321,8 +321,9 @@
 
         /* convert */
         convTitle: "Convert to systemd timer",
-        convIntro: "The job then runs as a systemd timer instead of through cron. Its status, log and errors " +
-                   "also show up in Cockpit under Services.",
+        convIntro: user => "The job then runs as a systemd timer instead of through cron" +
+                   (user === "root" ? "" : `, as ${user}, in that user's home and with the environment cron gives it`) +
+                   ". Its status, log and errors also show up in Cockpit under Services.",
         convName: "Name",
         convNameHelp: name => `Becomes \`${name}.service\` and \`${name}.timer\` in /etc/systemd/system.`,
         convNameInvalid: "Letters, digits, - _ and . only, starting with a letter or digit, without a unit type at the end.",
@@ -337,7 +338,7 @@
                             "so it is off at first.",
         convShowUnits: "Show units",
         convHideUnits: "Hide units",
-        convAfter: "Afterwards the line in the root crontab is turned off and gets a note. A backup is made first.",
+        convAfter: user => `Afterwards the line in the ${crontabName(user)} is turned off and gets a note. A backup is made first.`,
         convConfirm: "Convert",
         converting: "Converting …",
         convFailed: "Conversion failed",
@@ -356,7 +357,7 @@
         backToCron: "Back to cron",
         backTitle: "Back to cron?",
         backIntro: "The job then runs through cron again, as before the conversion. In one step:",
-        backLineIntro: "This line of the root crontab is turned on, and the note above it is removed:",
+        backLineIntro: user => `This line of the ${crontabName(user)} is turned on, and the note above it is removed:`,
         backUnits: name => `\`${name}.timer\` is stopped and turned off; \`${name}.service\` and \`${name}.timer\` ` +
             "are removed from /etc/systemd/system.",
         backChecking: "Checking the units …",

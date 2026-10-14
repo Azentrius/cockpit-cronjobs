@@ -222,6 +222,30 @@ t("service unit", () => {
     const home = SD.serviceUnit({ name: "x", shell: "/bin/sh", command: "true", env: serviceEnv({ HOME: "/srv" }).env, workdir: "/srv" });
     assert.ok(home.includes("WorkingDirectory=/srv\n") && home.includes('Environment="HOME=/srv"'));
 });
+t("units of another user's job: run as that user, named after its crontab", () => {
+    const jobEnv = C.jobEnvironment({ MAILTO: "" }, "/var/www", "www-data", { pam: { LANG: "C.UTF-8" }, path: "/usr/bin:/bin", user: false });
+    const { env, unset } = SD.serviceEnvironment(jobEnv, { MAILTO: "" }, {}, "www-data");
+    assert.deepStrictEqual(env, { LANG: "C.UTF-8", MAILTO: "", SHELL: "/bin/sh", PATH: "/usr/bin:/bin" },
+                           "User=www-data gives LOGNAME and HOME (the user's) the way cron does");
+    assert.deepStrictEqual(unset, ["USER"]);
+    const cronie = SD.serviceEnvironment(C.jobEnvironment({}, "/var/www", "www-data", { pam: {}, path: "/usr/bin", user: true }), {}, {}, "www-data");
+    assert.ok(!("USER" in cronie.env) && cronie.unset.length === 0, "cronie's USER=www-data is what systemd gives");
+    const u = SD.serviceUnit({ name: "www-data-php", user: "www-data", line: "*/5 * * * * php -f cron.php", shell: "/bin/sh",
+                               command: "php -f cron.php", env, unset }).split("\n");
+    assert.strictEqual(u[0], "# Created by Cockpit Cron Jobs from this line of the crontab of www-data:");
+    assert.strictEqual(u[0], SD.unitHeader("www-data"));
+    assert.ok(u.includes("User=www-data") && u.includes("WorkingDirectory=~") && u.includes("Description=www-data-php (from the crontab of www-data)"));
+    assert.ok(SD.timerUnit({ name: "www-data-php", user: "www-data", specs: ["*-*-* *:00/5:00"], persistent: false }).split("\n")
+        .includes("Description=www-data-php (from the crontab of www-data)"));
+    /* root's stay as they were: older versions read them */
+    assert.strictEqual(SD.unitHeader("root"), "# Created by Cockpit Cron Jobs from this line of the root crontab:");
+    assert.strictEqual(SD.UNIT_HEADER, SD.unitHeader("root"));
+    assert.ok(SD.serviceUnit({ name: "x", shell: "/bin/sh", command: "true", env: {} }).split("\n").includes("User=root"));
+    assert.deepStrictEqual(SD.parseUnitDescription("backup (from the root crontab)"), { name: "backup", user: "root" });
+    assert.deepStrictEqual(SD.parseUnitDescription("www-data-php (from the crontab of www-data)"), { name: "www-data-php", user: "www-data" });
+    [null, "", "Daily apt download activities", "x (from the crontab of a b)", "x (from the crontab of root)x"]
+        .forEach(d => assert.strictEqual(SD.parseUnitDescription(d), null, String(d)));
+});
 t("timer unit", () => {
     const u = SD.timerUnit({ name: "backup-db", specs: ["*-*-01 00:00:00", "Mon *-*-* 00:00:00"], persistent: false });
     assert.strictEqual(u, "[Unit]\nDescription=backup-db (from the root crontab)\nDocumentation=" + SD.DOC_URL + "\n\n" +

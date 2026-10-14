@@ -24,8 +24,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - **Crontabs of other users.** With administrative access, every other user's crontab gets a card of its
   own and is changed the same way, through `crontab -u USER`, with backups of its own; its jobs run as
   that user. Without administrative access they are not shown at all. Run now starts their jobs as that
-  user, in the user's home with cron's environment, and their runs can be recorded; conversion to a
-  systemd timer is for root's jobs so far.
+  user, in the user's home with cron's environment, their runs can be recorded, and a conversion gives
+  a timer that runs the job as that user (`User=`).
 - **Backups you can use.** The last ten versions of the root crontab, each with what restoring it would
   change, line by line as `diff` shows it. Restoring goes through the same locked step, after a backup of
   the current version, so a restore can be undone the same way.
@@ -36,7 +36,9 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - **Convert to a systemd timer.** Creates `NAME.service` and `NAME.timer` with the same schedule (checked
   against `systemd-analyze`), the same command and environment, checks what systemd read, starts the
   timer and switches the cron line off with a note. **Back to cron** undoes it in one step: the line is
-  on again exactly as before, the note is gone, and the timer is stopped and its units removed.
+  on again exactly as before, the note is gone, and the timer is stopped and its units removed. The units
+  name the crontab they come from, and back to cron removes only units converted from the crontab whose
+  note it follows, so a note a user writes into their own crontab cannot reach anyone else's timer.
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 

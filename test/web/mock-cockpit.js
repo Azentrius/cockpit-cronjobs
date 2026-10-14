@@ -102,6 +102,9 @@
         failUserRuns: null,
         /* commands run as another user: [user, command…] */
         asUser: [],
+        /* UNITS_SCRIPT calls: [step, name, user]; wrongUser: what systemd reports as User= */
+        unitChecks: [],
+        wrongUser: null,
         /* getent passwd, after the name */
         passwd: { "www-data": "33:33:www-data:/var/www:/usr/sbin/nologin", "ghost": "1001:1001::/home/ghost:/bin/sh" },
         userConflictNext: null,
@@ -349,14 +352,14 @@
             if (timer && !stop && M.failEnable) fail({ exit_status: 7, problem: null, message: M.failEnable });
             if (timer && stop && M.failDisable) fail({ exit_status: 7, problem: null, message: M.failDisable });
             M.writes++;
+            if (timer && stop) M.enabled = M.enabled.filter(n => n !== timer);
+            else if (timer) M.enabled.push(timer);
             if (user !== "root") {
                 M.sys.users[user] = input;
                 M.userWrites.push({ user, text: input });
                 return path + "\n";
             }
             M.root = input;
-            if (timer && stop) M.enabled = M.enabled.filter(n => n !== timer);
-            else if (timer) M.enabled.push(timer);
             return path + "\n";
         }
         /* The backups, newest first (ls -t): header "\x1eMTIME SIZE NAME", then the file. */
@@ -420,12 +423,18 @@
             M.units[name] = { service: args[5], timer: args[6] };
             return "";
         }
-        /* Back to cron: units checked (and removed) only when the page wrote them. */
+        /* Back to cron: units checked (and removed) only when the page wrote them from
+           this user's crontab (header, User=, Description=). */
         if (/\n {2}check\) ;;/.test(script)) {
-            const [step, name] = args.slice(4);
+            const [step, name, user] = args.slice(4);
+            const who = user || "root";
+            const from = who === "root" ? "root crontab" : "crontab of " + who;
             const u = M.units[name];
             if (!u) fail({ exit_status: 9, problem: null, message: "" });
-            if (u.foreign) fail({ exit_status: 8, problem: null, message: "" });
+            M.unitChecks.push([step, name, who]);
+            const ours = u.service.split("\n")[0] === "# Created by Cockpit Cron Jobs from this line of the " + from + ":" &&
+                u.service.split("\n").includes("User=" + who) && u.timer.split("\n").includes("Description=" + name + " (from the " + from + ")");
+            if (u.foreign || !ours) fail({ exit_status: 8, problem: null, message: "" });
             if (step === "remove") {
                 delete M.units[name];
                 M.enabled = M.enabled.filter(n => n !== name + ".timer");
@@ -533,7 +542,8 @@
         ];
         Object.keys(M.units).forEach(n => {
             const m = /^OnCalendar=(.*)$/m.exec(M.units[n].timer);
-            list.push({ name: n + ".timer", desc: n + " (from the root crontab)", cal: m ? [m[1]] : [],
+            const d = /^Description=(.*)$/m.exec(M.units[n].timer);
+            list.push({ name: n + ".timer", desc: d ? d[1] : n, cal: m ? [m[1]] : [],
                         service: n + ".service", result: null, status: 0, never: true, inactive: !M.enabled.includes(n + ".timer") });
         });
         return list;
@@ -592,6 +602,10 @@
             if (unit && prop === "ExecStart") return [V("a(sasbttttuii)", unitExec(unit))];
             if (unit && prop === "Environment") return [V("as", unitEnv(unit))];
             if (unit && prop === "UnsetEnvironment") return [V("as", unitUnset(unit))];
+            if (unit && prop === "User") {
+                const m = /^User=(.*)$/m.exec(M.units[unit].service);
+                return [V("s", M.wrongUser || (m ? m[1] : ""))];
+            }
             throw new Error("unknown property " + ifc + "." + prop);
         }
         if (iface === "org.freedesktop.DBus.Properties" && method === "GetAll") {

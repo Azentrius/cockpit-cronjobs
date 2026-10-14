@@ -628,6 +628,67 @@ with sync_playwright() as p:
           "recording off: the plain line, root's directory behind the link untouched")
     os.remove(user_runs)
     shutil.rmtree(root_only)
+
+    # converting a job of the second user: the unit runs it as that user, in its home, with the
+    # environment cron gives it there; back to cron gives the crontab back byte for byte
+    sh("rm -f /tmp/cj-e2e-user-unit")
+    sh(f"crontab -u {USER} -", input=crontab_of(USER).decode() + "0 5 1 * * { " + WHO + "; } > /tmp/cj-e2e-user-unit\n")
+    page.click("#reload")
+    wait_idle(page)
+    conv_before = crontab_of(USER)
+    user_unit = "cj-e2e-user-who"
+    urow = card.locator("tbody tr", has_text="0 5 1 * *")
+    urow.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    page.fill("#conv-name", user_unit)
+    wait_js(page, "!document.querySelector('#conv-ok').disabled")
+    check(f"als {USER}" in page.inner_text("#conv-intro"), "the dialog says as whom it runs: " + page.inner_text("#conv-intro"))
+    page.click("#conv-ok")
+    wait_js(page, "document.querySelector('#conv-dlg').hidden")
+    wait_idle(page)
+    unit_text = read(f"/etc/systemd/system/{user_unit}.service") or ""
+    check(unit_text.startswith(f"# Created by Cockpit Cron Jobs from this line of the crontab of {USER}:\n") and
+          f"\nUser={USER}\n" in unit_text and sh(f"systemctl is-active {user_unit}.timer").stdout.strip() == "active",
+          "the unit of the user's job, timer running: " + unit_text)
+    started = sh(f"systemctl start {user_unit}.service")
+    by_unit = who_parts(read("/tmp/cj-e2e-user-unit"))
+    check(started.returncode == 0 and by_unit[0] == USER and by_unit[1] == cron_ran[1] and
+          os.path.exists("/tmp/cj-e2e-user-unit") and os.stat("/tmp/cj-e2e-user-unit").st_uid == uid and
+          not env_diff(cron_ran[2], by_unit[2], SYSTEMD_OWN),
+          "the converted unit runs as the user, where and with what cron gives it: " + started.stderr +
+          repr(env_diff(cron_ran[2], by_unit[2], SYSTEMD_OWN)) + "\n" + unit_text)
+    urow.locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "!document.querySelector('#back-ok').disabled")
+    page.click("#back-ok")
+    wait_js(page, "document.querySelector('#back-dlg').hidden")
+    wait_idle(page)
+    check(crontab_of(USER) == conv_before and not os.path.exists(f"/etc/systemd/system/{user_unit}.service") and
+          not os.path.exists(f"/etc/systemd/system/{user_unit}.timer"),
+          "back to cron: the user's crontab byte for byte, the units gone: " + repr(crontab_of(USER)))
+    # a note the user writes into their own crontab, naming units converted from root's: not theirs, nothing removed
+    fake = "cj-e2e-rootjob"
+    with open(f"/etc/systemd/system/{fake}.service", "w") as f:
+        f.write("# Created by Cockpit Cron Jobs from this line of the root crontab:\n#   0 2 1 * * true\n[Unit]\n"
+                f"Description={fake} (from the root crontab)\n\n[Service]\nType=oneshot\nUser=root\nExecStart=/bin/true\n")
+    with open(f"/etc/systemd/system/{fake}.timer", "w") as f:
+        f.write(f"[Unit]\nDescription={fake} (from the root crontab)\n\n[Timer]\nOnCalendar=*-*-01 02:00:00\n")
+    forged_before = crontab_of(USER)
+    sh(f"crontab -u {USER} -", input=forged_before.decode() + f"# Converted to systemd timer {fake}.timer by Cockpit Cron Jobs "
+       "on 2026-10-14; the line below is no longer used.\n#[cronjobs:off] 0 2 1 * * true\n")
+    page.click("#reload")
+    wait_idle(page)
+    card.locator("tbody tr", has_text="0 2 1 * *").locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
+    wait_js(page, "document.querySelector('#back-check').classList.contains('is-bad')")
+    check(page.is_disabled("#back-ok") and os.path.exists(f"/etc/systemd/system/{fake}.service"),
+          "root's units are not the user's to remove: " + page.inner_text("#back-check"))
+    page.keyboard.press("Escape")
+    os.remove(f"/etc/systemd/system/{fake}.service")
+    os.remove(f"/etc/systemd/system/{fake}.timer")
+    sh(f"crontab -u {USER} -", input=forged_before.decode())
+    page.click("#reload")
+    wait_idle(page)
     page.locator(f"#user-crontabs section[data-user='{USER}']").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-user.png"))
 
