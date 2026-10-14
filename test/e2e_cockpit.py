@@ -497,7 +497,7 @@ with sync_playwright() as p:
           f"the failing job and timer in the latest results after {took:.0f} s, without reloading: " + repr(rows))
     fails = [i for i, x in enumerate(rows) if "Fehler" in x]
     check(fails and fails == list(range(len(fails))), "failures first: " + repr(rows))
-    page.locator(f"#sum-card").scroll_into_view_if_needed()
+    page.locator("#sum-card").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-summary.png"))
     sh(f"systemctl stop {fail_timer}.timer; systemctl reset-failed {fail_timer}.service {fail_timer}.timer")
     sh("crontab -u root -", input=start)
