@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, backupDirOf, C, DAY, fill, h, icon, pad2, rich, SD, setBusyButton, state, T } from "./core.js";
+import { $, backupDirOf, C, fill, h, icon, pad2, rich, SD, setBusyButton, state, T } from "./core.js";
 import {
     analyzeCalendar, errText, getProp, REMOVE_UNITS_SCRIPT, spawn, SPAWN_ROOT, unitPath, UNITS_SCRIPT,
     WRITE_UNITS_SCRIPT,
@@ -100,17 +100,17 @@ export function updateConvert() {
     $("conv-ok").disabled = state.busy || !valid || !v || !v.ok;
 }
 
-/* The next runs must be the same under systemd as under cron. */
+/* The next runs must be the same under systemd as under cron. Ours are computed up to
+   the last run systemd lists, however far ahead that is (a yearly job, the 29th of
+   February), so that rare schedules are checked as fully as frequent ones. */
 async function verifyConvert(d) {
     let res;
     try {
         const t0 = Date.now() - 60000;
         const iter = await analyzeCalendar(d.specs, 5);
         const theirs = Array.from(new Set([].concat(...d.specs.map(s => iter[s] || [])))).sort((a, b) => a - b).slice(0, 5);
-        const ours = C.runsBetween(d.schedule, t0, t0 + 800 * DAY, d.tz, 7);
-        const k = ours.indexOf(theirs[0]);
-        const ok = theirs.length > 0 && k >= 0 && k <= 1 && theirs.every((t, n) => t === ours[k + n]);
-        res = ok ? { ok: true, count: theirs.length } : { ok: false };
+        const ours = theirs.length ? C.runsBetween(d.schedule, t0, theirs[theirs.length - 1], d.tz, theirs.length + 2) : [];
+        res = SD.sameRuns(theirs, ours) ? { ok: true, count: theirs.length } : { ok: false };
     } catch (ex) {
         res = { ok: false, error: errText(ex) };
     }
