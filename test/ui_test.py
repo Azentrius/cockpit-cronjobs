@@ -1075,6 +1075,19 @@ with sync_playwright() as p:
     check("PATH=/usr/bin:/bin:/usr/sbin:/sbin" in env and "USER=root" in env and "http_proxy=http://proxy.example:3128" in env and
           not any(e.startswith("LANG=") for e in env) and not problems, "cronie: its PATH, USER, PAM's variables: " + repr(env))
 
+    # rare schedules are checked over their next 5 runs too, however far ahead those are
+    page = open_page(browser)
+    reload_with_root(page, root_text(page) + "0 5 1 1 * /usr/local/bin/yearly.sh\n0 0 29 2 * /usr/local/bin/leap.sh\n")
+    for cmd in ("yearly.sh", "leap.sh"):
+        page.locator("#root-body tbody tr", has_text=cmd).locator("[data-key^=more]").click()
+        page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+        wait_js(page, "!document.querySelector('#conv-check').innerText.includes('wird mit')")
+        check("die nächsten 5 Läufe stimmen überein" in page.inner_text("#conv-check") and not page.is_disabled("#conv-ok"),
+              "a rare schedule can be converted: " + cmd + ": " + page.inner_text("#conv-check"))
+        page.click("#conv-cancel")
+    check(not page.problems, "no console problems (rare schedules): " + repr(page.problems))
+    page.context.close()
+
     # ---------- convert to a systemd timer ----------
     page = open_page(browser)
     row(page, 1).locator("[data-key^=more]").click()

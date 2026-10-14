@@ -74,6 +74,16 @@ if (haveAnalyze) {
                                    ours.slice(k, k + theirs.length).map(x => new Date(x).toISOString()));
         }));
     }
+    /* The check of the conversion dialog (verifyConvert in app/convert.js), against systemd itself. */
+    ["30 4 1 1 *", "0 2 29 2 *", "0 0 1 */6 *", "*/5 * * * *"].forEach(s => t("conversion check takes the next 5 runs, however rare: " + s, () => {
+        const specs = SD.calendarFromCron(s).specs;
+        const theirs = Array.from(new Set([].concat(...specs.map(x => analyze(x, 5, "Europe/Berlin"))))).sort((a, b) => a - b).slice(0, 5);
+        const ours = C.runsBetween(s, Date.now() - 60000, theirs[theirs.length - 1], "Europe/Berlin", theirs.length + 2);
+        assert.strictEqual(theirs.length, 5);
+        assert.ok(SD.sameRuns(theirs, ours), theirs.map(x => new Date(x).toISOString()) + " vs " + ours.map(x => new Date(x).toISOString()));
+        assert.ok(!SD.sameRuns(theirs, C.runsBetween(s.replace(/^\S+/, m => m === "*/5" ? "*/10" : "31"), Date.now() - 60000,
+                                                      theirs[theirs.length - 1], "Europe/Berlin", 7)), "another schedule does not pass");
+    }));
     t("systemd agrees on a calendar in another zone (CRON_TZ)", () => {
         const specs = SD.calendarFromCron("30 2 * * 1-5", "America/New_York").specs;
         const theirs = analyze(specs[0], 6, "Europe/Berlin");
@@ -84,6 +94,19 @@ if (haveAnalyze) {
 } else {
     skipped++;
 }
+
+t("same runs: all of systemd's, in order, none extra; cron may count one minute more at the start", () => {
+    const Y = 365 * 86400000;
+    const yearly = [1, 2, 3, 4, 5].map(n => n * Y);
+    assert.ok(SD.sameRuns(yearly, yearly), "five years ahead");
+    assert.ok(SD.sameRuns(yearly, [0].concat(yearly)), "one run more at the start");
+    assert.ok(!SD.sameRuns(yearly, [-1, 0].concat(yearly)), "not two");
+    assert.ok(!SD.sameRuns(yearly, yearly.slice(0, 4)), "one missing at the end");
+    assert.ok(!SD.sameRuns(yearly, [Y, 1.5 * Y, 2 * Y, 3 * Y, 4 * Y, 5 * Y]), "one extra in between");
+    assert.ok(!SD.sameRuns(yearly, [Y, 2 * Y, 3 * Y + 60000, 4 * Y, 5 * Y]), "one at another time");
+    assert.ok(!SD.sameRuns([], []), "systemd lists none");
+    assert.ok(SD.sameRuns([7], [7]), "a single run");
+});
 
 /* ---------- systemd-analyze output ---------- */
 

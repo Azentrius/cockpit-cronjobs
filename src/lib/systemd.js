@@ -294,6 +294,16 @@
         return lines.join("\n") + "\n";
     }
 
+    /* Whether systemd's next runs (theirs, from `systemd-analyze calendar`) are cron's
+       (ours, from a minute before up to theirs' last run): the same instants in the same
+       order, none missing and none extra. Ours may start with one run more, from the
+       minute systemd no longer counts. */
+    function sameRuns(theirs, ours) {
+        if (!theirs.length) return false;
+        const k = ours.indexOf(theirs[0]);
+        return (k === 0 || k === 1) && ours.length - k === theirs.length && theirs.every((t, n) => t === ours[k + n]);
+    }
+
     /* The argv systemd should end up with for ExecStart=. */
     function expectedArgv(shell, command) {
         return [shell || "/bin/sh", "-c", command];
@@ -321,6 +331,6 @@
         calField, calendarFromCron, calendarToCron, describeCalendar, describeTimer,
         formatSpan, parseAnalyzeCalendar,
         validUnitName, suggestUnitName, execWord, envLine, serviceEnvironment,
-        serviceUnit, timerUnit, expectedArgv, convertNote, parseConvertNote,
+        serviceUnit, timerUnit, sameRuns, expectedArgv, convertNote, parseConvertNote,
     };
 }));
