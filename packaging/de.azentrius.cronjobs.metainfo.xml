@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<!-- AppStream data: Cockpit lists the page under Applications and opens it from there. -->
+<component type="addon">
+  <id>de.azentrius.cronjobs</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Cron Jobs</name>
+  <summary>Every cron job and systemd timer in one place</summary>
+  <summary xml:lang="de">Alle Cron-Jobs und systemd-Timer an einem Ort</summary>
+  <description>
+    <p>
+      A Cockpit page for cron. It shows everything that is scheduled on the server, with a timeline
+      of the next 24 hours, changes the root crontab safely and keeps backups of it, records the
+      result of every run, starts jobs on demand and turns cron jobs into systemd timers and back.
+    </p>
+    <p xml:lang="de">
+      Eine Cockpit-Seite für cron. Sie zeigt alles, was auf dem Server geplant ist, mit einer
+      Zeitleiste der nächsten 24 Stunden, ändert die Root-Crontab sicher und sichert sie, hält das
+      Ergebnis jedes Laufs fest, startet Jobs auf Knopfdruck und macht aus Cron-Jobs systemd-Timer
+      und wieder zurück.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">cronjobs</launchable>
+  <url type="homepage">https://github.com/Azentrius/cockpit-cronjobs</url>
+  <url type="bugtracker">https://github.com/Azentrius/cockpit-cronjobs/issues</url>
+  <developer id="de.azentrius">
+    <name>Azentrius</name>
+  </developer>
+</component>

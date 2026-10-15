@@ -28,6 +28,27 @@ jobs:
           make package
           version=$(sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
           tools/release-notes.sh "$version" > /dev/null || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
+      - name: Packages (.deb, .rpm) with valid AppStream data, built twice to the same bytes
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm appstream > /dev/null
+          appstreamcli validate --no-net packaging/*.metainfo.xml
+          make packages
+          (cd dist && sha256sum *.deb *.rpm) > first.sha256
+          rm -rf dist && make packages > /dev/null
+          (cd dist && sha256sum -c ../first.sha256)
+      - name: Install the .deb on Debian and the .rpm on Fedora
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" debian:13 sh -ec '
+            apt-get update -qq
+            apt-get install -y -qq /dist/*.deb > /dev/null
+            test -x /usr/share/cockpit/cronjobs/cockpit-cronjobs-run
+            test -f /usr/share/metainfo/de.azentrius.cronjobs.metainfo.xml
+            dpkg -L cockpit-cronjobs | grep -q /usr/share/cockpit/cronjobs/manifest.json'
+          docker run --rm -v "$PWD/dist:/dist:ro" fedora:43 sh -ec '
+            dnf install -y -q /dist/*.rpm
+            rpm -V cockpit-cronjobs
+            test -f /usr/share/cockpit/cronjobs/manifest.json'
       - name: Check tools (pinned in test/requirements.txt) and the browser
         run: |
           pip install -r test/requirements.txt
