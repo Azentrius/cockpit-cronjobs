@@ -768,12 +768,35 @@ async function serviceRun(service) {
     return run;
 }
 
-/* Only the last runs of the timers in list (from readTimers): when each was last
-   triggered and how its service ended. Cheaper than readTimers, for every half minute. */
+/* The journal of a service ($1, NAME.service) as `journalctl -o json`: its last entries,
+   with only the fields R.parseJournal reads where journalctl can leave the others out
+   (systemd 236 and later). Exit 2 = not a service name. */
+const JOURNAL_SCRIPT = `u=$1
+case $u in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9:_.@-]*) exit 2 ;; esac
+case $u in *.service) ;; *) exit 2 ;; esac
+f=MESSAGE,MESSAGE_ID,INVOCATION_ID,_SYSTEMD_INVOCATION_ID,EXIT_CODE,EXIT_STATUS,UNIT_RESULT,JOB_RESULT,_PID
+journalctl -u "$u" -o json --no-pager -n 5000 --output-fields="$f" 2>/dev/null ||
+  journalctl -u "$u" -o json --no-pager -n 5000
+`;
+
+/* The runs of a service from the journal (see R.parseJournal): the last KEEP_RUNS, each
+   with up to 64 KB of its output, like the run recorder keeps them. */
+export function readJournal(unit) {
+    return spawn(["sh", "-c", JOURNAL_SCRIPT, "cockpit-cronjobs", unit], Object.assign({}, SPAWN_ROOT, { binary: true }))
+        .then(out => R.parseJournal(decode(out), KEEP_RUNS, 64 * 1024));
+}
+
+/* When a timer's service last ran: the later of the timer's last trigger and the start
+   of the service's last run (started by hand, it ran without the timer). */
+const lastRun = (trigger, run) => run.startUs !== null && (trigger === null || run.startUs > trigger) ? run.startUs : trigger;
+
+/* Only the last runs of the timers in list (from readTimers): when each last ran
+   and how its service ended. Cheaper than readTimers, for every half minute. */
 export function readTimerRuns(list) {
     return Promise.all(list.map(async t => {
         const props = await getAll(t.path, "org.freedesktop.systemd1.Timer").catch(() => null);
-        return Object.assign({ last: props ? usecTime(props.LastTriggerUSec) : t.last }, await serviceRun(t.service));
+        const run = await serviceRun(t.service);
+        return Object.assign(run, { last: lastRun(props ? usecTime(props.LastTriggerUSec) : t.last, run) });
     }));
 }
 
@@ -802,7 +825,8 @@ export async function readTimers() {
             last: usecTime(t.LastTriggerUSec), randomizedUsec: t.RandomizedDelayUSec || 0,
             persistent: !!t.Persistent, service: t.Unit || name.replace(/\.timer$/, ".service"), runs: [],
         };
-        return Object.assign(timer, await serviceRun(timer.service));
+        const run = await serviceRun(timer.service);
+        return Object.assign(timer, run, { last: lastRun(timer.last, run) });
     }));
 
     /* Runs in the next 24 hours, for the timeline. Randomized timers: only the

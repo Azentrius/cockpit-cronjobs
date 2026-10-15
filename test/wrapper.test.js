@@ -312,4 +312,57 @@ t("orphans: recorded jobs that no crontab mentions, not while running", () => {
                            "another user's runs by USER/ID, used when a crontab mentions the ID");
 });
 
+/* journalctl -u cj-sample.service -o json from systemd 259 (Ubuntu 26.04), fields cut down to what is
+   read: four runs of a throwaway service: success with two lines, exit 3, exit 2 with output that is not
+   UTF-8, killed by SIGKILL. */
+const JOURNAL = [
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339047083\",\"_PID\":\"1\",\"INVOCATION_ID\":\"6d6e2f2189d2494bbdd714a7d44740c8\",\"MESSAGE_ID\":\"7d4958e842da4a758f6c1cdc7b36dcc5\",\"MESSAGE\":\"Starting cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"echo first line; echo to stderr >&2; exit 0\\\"...\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339079572\",\"_PID\":\"472\",\"_SYSTEMD_INVOCATION_ID\":\"6d6e2f2189d2494bbdd714a7d44740c8\",\"MESSAGE\":\"first line\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339079572\",\"_PID\":\"472\",\"_SYSTEMD_INVOCATION_ID\":\"6d6e2f2189d2494bbdd714a7d44740c8\",\"MESSAGE\":\"to stderr\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339081734\",\"_PID\":\"1\",\"INVOCATION_ID\":\"6d6e2f2189d2494bbdd714a7d44740c8\",\"MESSAGE_ID\":\"7ad2d189f7e94e70a38c781354912448\",\"MESSAGE\":\"cj-sample.service: Deactivated successfully.\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339082235\",\"_PID\":\"1\",\"INVOCATION_ID\":\"6d6e2f2189d2494bbdd714a7d44740c8\",\"MESSAGE_ID\":\"39f53479d3a045ac8e11786248231fbf\",\"JOB_RESULT\":\"done\",\"MESSAGE\":\"Finished cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"echo first line; echo to stderr >&2; exit 0\\\".\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339116364\",\"_PID\":\"1\",\"INVOCATION_ID\":\"4f7c735fcd9444b88a55cf643a3e7fcd\",\"MESSAGE_ID\":\"7d4958e842da4a758f6c1cdc7b36dcc5\",\"MESSAGE\":\"Starting cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"echo failing; exit 3\\\"...\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339160048\",\"_PID\":\"476\",\"_SYSTEMD_INVOCATION_ID\":\"4f7c735fcd9444b88a55cf643a3e7fcd\",\"MESSAGE\":\"failing\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339160878\",\"_PID\":\"1\",\"INVOCATION_ID\":\"4f7c735fcd9444b88a55cf643a3e7fcd\",\"MESSAGE_ID\":\"98e322203f7a4ed290d09fe03c09fe15\",\"EXIT_CODE\":\"exited\",\"EXIT_STATUS\":\"3\",\"MESSAGE\":\"cj-sample.service: Main process exited, code=exited, status=3/NOTIMPLEMENTED\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339161054\",\"_PID\":\"1\",\"INVOCATION_ID\":\"4f7c735fcd9444b88a55cf643a3e7fcd\",\"MESSAGE_ID\":\"d9b373ed55a64feb8242e02dbe79a49c\",\"UNIT_RESULT\":\"exit-code\",\"MESSAGE\":\"cj-sample.service: Failed with result 'exit-code'.\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339161151\",\"_PID\":\"1\",\"INVOCATION_ID\":\"4f7c735fcd9444b88a55cf643a3e7fcd\",\"MESSAGE_ID\":\"be02cf6855d2428ba40df7e9d022f03d\",\"JOB_RESULT\":\"failed\",\"MESSAGE\":\"Failed to start cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"echo failing; exit 3\\\".\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339190429\",\"_PID\":\"1\",\"INVOCATION_ID\":\"786931d0ddfc40cf8b4c0e03f216f131\",\"MESSAGE_ID\":\"7d4958e842da4a758f6c1cdc7b36dcc5\",\"MESSAGE\":\"Starting cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"printf \\\\\\\"caf\\\\\\\\351\\\\\\\\n\\\\\\\"; kill -TERM \\\\$\\\\$\\\"...\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339248787\",\"_PID\":\"480\",\"_SYSTEMD_INVOCATION_ID\":\"786931d0ddfc40cf8b4c0e03f216f131\",\"MESSAGE\":[99,97,102,233]}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339248787\",\"_PID\":\"480\",\"_SYSTEMD_INVOCATION_ID\":\"786931d0ddfc40cf8b4c0e03f216f131\",\"MESSAGE\":\"/usr/bin/sh: 1: kill: Illegal number: $\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339250880\",\"_PID\":\"1\",\"INVOCATION_ID\":\"786931d0ddfc40cf8b4c0e03f216f131\",\"MESSAGE_ID\":\"98e322203f7a4ed290d09fe03c09fe15\",\"EXIT_CODE\":\"exited\",\"EXIT_STATUS\":\"2\",\"MESSAGE\":\"cj-sample.service: Main process exited, code=exited, status=2/INVALIDARGUMENT\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339251174\",\"_PID\":\"1\",\"INVOCATION_ID\":\"786931d0ddfc40cf8b4c0e03f216f131\",\"MESSAGE_ID\":\"d9b373ed55a64feb8242e02dbe79a49c\",\"UNIT_RESULT\":\"exit-code\",\"MESSAGE\":\"cj-sample.service: Failed with result 'exit-code'.\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094339251436\",\"_PID\":\"1\",\"INVOCATION_ID\":\"786931d0ddfc40cf8b4c0e03f216f131\",\"MESSAGE_ID\":\"be02cf6855d2428ba40df7e9d022f03d\",\"JOB_RESULT\":\"failed\",\"MESSAGE\":\"Failed to start cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"printf \\\\\\\"caf\\\\\\\\351\\\\\\\\n\\\\\\\"; kill -TERM \\\\$\\\\$\\\".\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094364165859\",\"_PID\":\"1\",\"INVOCATION_ID\":\"9ddd9614b40a49f2957519424d58ba24\",\"MESSAGE_ID\":\"7d4958e842da4a758f6c1cdc7b36dcc5\",\"MESSAGE\":\"Starting cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"echo before the signal; kill -KILL 0\\\"...\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094364207591\",\"_PID\":\"431\",\"_SYSTEMD_INVOCATION_ID\":\"9ddd9614b40a49f2957519424d58ba24\",\"MESSAGE\":\"before the signal\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094364208412\",\"_PID\":\"1\",\"INVOCATION_ID\":\"9ddd9614b40a49f2957519424d58ba24\",\"MESSAGE_ID\":\"98e322203f7a4ed290d09fe03c09fe15\",\"EXIT_CODE\":\"killed\",\"EXIT_STATUS\":\"9\",\"MESSAGE\":\"cj-sample.service: Main process exited, code=killed, status=9/KILL\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094364208481\",\"_PID\":\"1\",\"INVOCATION_ID\":\"9ddd9614b40a49f2957519424d58ba24\",\"MESSAGE_ID\":\"d9b373ed55a64feb8242e02dbe79a49c\",\"UNIT_RESULT\":\"signal\",\"MESSAGE\":\"cj-sample.service: Failed with result 'signal'.\"}",
+    "{\"__REALTIME_TIMESTAMP\":\"1792094364208608\",\"_PID\":\"1\",\"INVOCATION_ID\":\"9ddd9614b40a49f2957519424d58ba24\",\"MESSAGE_ID\":\"be02cf6855d2428ba40df7e9d022f03d\",\"JOB_RESULT\":\"failed\",\"MESSAGE\":\"Failed to start cj-sample.service - [systemd-run] /usr/bin/sh -c \\\"echo before the signal; kill -KILL 0\\\".\"}",
+];
+t("journal runs: one per invocation, newest first, as recorded runs", () => {
+    const runs = R.parseJournal(JOURNAL.join("\n") + "\n", 20, 65536);
+    assert.deepStrictEqual(runs.map(r => [r.out.slice(0, 6), R.outcome(r), r.rc, r.running]), [
+        ["9ddd96", "aborted", null, false], ["786931", "failed", 2, false], ["4f7c73", "failed", 3, false], ["6d6e2f", "ok", 0, false]]);
+    const ok = runs[3];
+    assert.strictEqual(ok.start, 1792094339.047083);
+    assert.strictEqual(ok.end, 1792094339.082235);
+    assert.strictEqual(ok.output, "first line\nto stderr");
+    assert.strictEqual(ok.trigger, null);
+    assert.strictEqual(runs[1].output, "caf�\n/usr/bin/sh: 1: kill: Illegal number: $", "bytes that are not UTF-8 decoded leniently");
+    assert.strictEqual(runs[0].output, "before the signal");
+    assert.strictEqual(runs[0].aborted, true, "killed: aborted");
+    assert.strictEqual(R.parseJournal(JOURNAL.join("\n"), 2, 0).length, 2, "at most keep");
+});
+t("journal runs: running, lost ends, cut output, lines that are no runs", () => {
+    const start = JOURNAL.slice(0, 3).join("\n");
+    assert.deepStrictEqual(R.parseJournal(start, 20, 65536).map(r => [r.running, r.end, R.outcome(r)]), [[true, null, "aborted"]],
+                           "the newest without an end is running");
+    const lost = R.parseJournal(start + "\n" + JOURNAL.slice(5).join("\n"), 20, 65536);
+    assert.deepStrictEqual(lost.map(r => [r.out.slice(0, 6), r.running, r.aborted]).pop(), ["6d6e2f", false, true],
+                           "an older one without an end lost it");
+    const cut = R.parseJournal(JOURNAL.slice(0, 5).join("\n"), 20, 9)[0];
+    assert.strictEqual(cut.output, "to stderr");
+    assert.strictEqual(cut.truncated, true);
+    assert.deepStrictEqual(R.parseJournal("-- No entries --\n{broken\n{\"_PID\":\"1\",\"INVOCATION_ID\":\"x\",\"__REALTIME_TIMESTAMP\":\"1\"}\n", 20, 0), []);
+});
+
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);

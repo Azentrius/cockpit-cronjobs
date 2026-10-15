@@ -264,6 +264,7 @@
         colResult: "Result",
         trigManual: "Manually",
         trigSchedule: "Schedule",
+        trigSystemd: "systemd",
         showOutput: "Show output",
         hideOutput: "Hide output",
         copyOutput: "Copy output",
@@ -272,6 +273,8 @@
         outputTruncated: "Only the last 64 KB of this output were kept.",
         runsEmpty: "No runs recorded yet.",
         runsNote: (n, path) => `The last ${n} runs are kept, with up to 64 KB of output each, in \`${path}\`.`,
+        runsJournalNote: unit => `Runs of \`${unit}\` come from the journal; how far back it goes depends on its settings.`,
+        journalFailed: "The journal could not be read",
 
         /* leftover runs */
         orphansLine: n => n === 1 ? "The recorded runs of 1 job are still kept, but no crontab uses them any more."

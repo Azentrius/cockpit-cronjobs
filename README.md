@@ -19,6 +19,9 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - **The latest results.** The last run of every recorded job and every systemd timer in one list,
   failures first, successful ones folded away. Runs and timers are read again every half minute, so a
   failure shows within a minute without reloading.
+- **Runs from the journal.** Every systemd timer gets the same runs dialog as a recorded job, from the
+  journal of its service: start, duration, result and output. A job converted to a timer keeps its
+  history there: the runs recorded before the conversion and those of its service since.
 - **The next 24 hours.** A timeline of all cron jobs and timers. Jobs that start in the same minute are
   pointed out.
 - **Safe changes to the root crontab.** Add, edit, switch off and on, delete. Lines you do not touch stay

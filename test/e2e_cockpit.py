@@ -413,6 +413,17 @@ with sync_playwright() as p:
     check(started.returncode == 0 and by_unit[:2] == by_cron[:2] and not env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN),
           "the converted unit: the environment cron gives, all of it: " + started.stderr +
           repr(env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN)) + "\n" + (read(f"/etc/systemd/system/{unit}.service") or ""))
+    # the converted job keeps its history: the run of its service, from the journal
+    page.click("#reload")
+    wait_idle(page)
+    check("OK" in who_row.locator("td[data-last]").inner_text(), "the converted row shows the service's last run: " +
+          who_row.locator("td[data-last]").inner_text())
+    who_row.locator("[data-key^='runs:']").click()
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1", timeout=30)
+    runs_rows = page.locator("#runs-body tbody tr").all_inner_texts()
+    check(len(runs_rows) == 1 and "OK" in runs_rows[0] and "systemd" in runs_rows[0] and f"{unit}.service" in page.inner_text("#runs-note"),
+          "its run from the journal: " + repr(runs_rows))
+    page.click("#runs-close-btn")
     who_row.locator("[data-key^='more:']").click()
     page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
     wait_js(page, "!document.querySelector('#back-ok').disabled")
@@ -479,7 +490,8 @@ with sync_playwright() as p:
     start = crontab()
     sh("crontab -u root -", input=start + f"* * * * * {WRAP} sumfail-0001 'echo about to fail; exit 3'\n")
     fail_timer = "cj-e2e-fail"
-    r = sh(f"systemd-run --unit={fail_timer} --on-calendar='*-*-* *:*:00' --timer-property=AccuracySec=1s /bin/false")
+    r = sh(f"systemd-run --unit={fail_timer} --on-calendar='*-*-* *:*:00' --timer-property=AccuracySec=1s "
+           "/bin/sh -c 'echo failing from systemd; exit 1'")
     check(r.returncode == 0, "a failing timer: " + r.stderr)
     page.click("#reload")
     wait_idle(page)
@@ -499,6 +511,16 @@ with sync_playwright() as p:
     check(fails and fails == list(range(len(fails))), "failures first: " + repr(rows))
     page.locator("#sum-card").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-summary.png"))
+    # the timer's runs, from the journal: failed, with what it wrote
+    page.click(f"[data-key='sum-timer:{fail_timer}.timer']")
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1", timeout=30)
+    jrows = page.locator("#runs-body tbody tr").all_inner_texts()
+    check(jrows and all("Fehler · Exit 1" in x for x in jrows), "the timer's runs from the journal: " + repr(jrows))
+    page.locator("#runs-body [data-key^='out:']").first.click()
+    wait_js(page, "document.querySelector('#runs-body pre')")
+    check(page.text_content("#runs-body pre") == "failing from systemd", "its output: " + repr(page.text_content("#runs-body pre")))
+    page.screenshot(path=os.path.join(SHOTS, "e2e-journal-runs.png"))
+    page.click("#runs-close-btn")
     sh(f"systemctl stop {fail_timer}.timer; systemctl reset-failed {fail_timer}.service {fail_timer}.timer")
     sh("crontab -u root -", input=start)
     shutil.rmtree(f"{STATE}/runs/sumfail-0001", ignore_errors=True)

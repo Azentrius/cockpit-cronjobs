@@ -264,6 +264,7 @@
         colResult: "Ergebnis",
         trigManual: "Manuell",
         trigSchedule: "Zeitplan",
+        trigSystemd: "systemd",
         showOutput: "Ausgabe anzeigen",
         hideOutput: "Ausgabe ausblenden",
         copyOutput: "Ausgabe kopieren",
@@ -272,6 +273,8 @@
         outputTruncated: "Von dieser Ausgabe wurden nur die letzten 64 KB aufbewahrt.",
         runsEmpty: "Noch keine Läufe erfasst.",
         runsNote: (n, path) => `Aufbewahrt werden die letzten ${n} Läufe mit je bis zu 64 KB Ausgabe, unter \`${path}\`.`,
+        runsJournalNote: unit => `Die Läufe von \`${unit}\` stammen aus dem Journal; wie weit es zurückreicht, hängt von seinen Einstellungen ab.`,
+        journalFailed: "Das Journal ließ sich nicht lesen",
 
         /* Übrig gebliebene Läufe */
         orphansLine: n => n === 1 ? "Die erfassten Läufe von 1 Job sind noch gespeichert, aber keine Crontab verwendet sie mehr."
