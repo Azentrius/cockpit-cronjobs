@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-14. Each stage is cut so that it is useful on its own and brings its own tests. The
+As of 2026-10-15. Each stage is cut so that it is useful on its own and brings its own tests. The
 order is the recommendation; stages after 1.1 are proposals until they are decided.
 
 **Guardrails for every stage** (they keep applying):
@@ -78,7 +78,12 @@ read-only before).
 
 ---
 
-## Stage 4 – Results at a glance
+## Stage 4 – Results at a glance ✅
+
+Done in 2.5.0 (see [CHANGELOG](CHANGELOG.md)): the latest results at the top of the overview, read again
+every half minute, and the runs of every systemd timer from the journal; the end-to-end test lets a
+recorded job and a timer fail under the real cron and systemd and finds both in the summary without
+reloading. Notifications are not part of it (see the open decision below).
 
 **Goal:** see what failed without opening each job.
 
