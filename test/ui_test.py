@@ -190,7 +190,7 @@ with sync_playwright() as p:
     check("Fehler · Exit 32" in tm and "Läuft" in tm and "Nicht aktiv" in tm, "timer states")
     check("Täglich um 06:00 und 18:00, zufällig verzögert" in tm, "timer described")
     check("15min nach dem Systemstart" in tm, "monotonic timer described")
-    page.locator("#timers-body tbody tr", has_text="apt-daily.timer").locator("button").click()
+    page.locator("#timers-body tbody tr", has_text="apt-daily.timer").locator("button[aria-label='apt-daily.timer in Cockpit öffnen']").click()
     check(mock(page, "jumps[0][0]") == "/system/services#/apt-daily.timer", "open timer in Cockpit")
     fonts = page.evaluate("() => document.fonts.check('15px \"DM Sans\"') && document.fonts.check('16px \"DM Serif Display\"')")
     check(fonts, "fonts available")
