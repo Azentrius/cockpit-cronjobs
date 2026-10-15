@@ -4,8 +4,11 @@
 #   tools/build-packages.sh ROOT VERSION OUTDIR
 #
 # ROOT holds the files as installed (usr/share/cockpit/…, usr/share/metainfo/…, usr/share/doc/…).
-# The package details come from packaging/package.conf; maintainer scripts, if the package has
-# any, from packaging/deb/{postinst,prerm,postrm} and packaging/rpm/{post,preun,postun}.
+# The package details come from packaging/package.conf. Optional shell snippets, the same for
+# both formats, run as root:
+#   packaging/scripts/configure   after every install and upgrade
+#   packaging/scripts/remove      before the package is removed (not on upgrades)
+#   packaging/scripts/removed     after the package was removed (not on upgrades)
 # Reproducible: all times are SOURCE_DATE_EPOCH. Needs dpkg-deb and rpmbuild.
 # The same file in every Azentrius Cockpit add-on; change it in all of them together.
 # SPDX-License-Identifier: Apache-2.0
@@ -17,12 +20,13 @@ mkdir -p "${3:?outdir}"
 out=$(cd "$3" && pwd)
 epoch=${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH must be set}
 here=$(pwd)
-NAME= SUMMARY= DESCRIPTION= HOMEPAGE= MAINTAINER= LICENSE= DEB_DEPENDS= RPM_REQUIRES= FILES=
+NAME='' SUMMARY='' DESCRIPTION='' HOMEPAGE='' MAINTAINER='' LICENSE='' DEB_DEPENDS='' RPM_REQUIRES='' FILES=''
 # shellcheck source=/dev/null
 . "$here/packaging/package.conf"
 for var in NAME SUMMARY DESCRIPTION HOMEPAGE MAINTAINER LICENSE DEB_DEPENDS RPM_REQUIRES FILES; do
     eval "[ -n \"\$$var\" ]" || { echo "packaging/package.conf: $var is empty" >&2; exit 1; }
 done
+snippet() { [ -f "$here/packaging/scripts/$1" ] && cat "$here/packaging/scripts/$1"; }
 
 # 2.6.0-rc.1 sorts before 2.6.0 only with "~" in both formats.
 upstream=$(printf '%s' "$version" | tr '-' '~')
@@ -47,11 +51,15 @@ mkdir -m 755 "$work/deb/DEBIAN"
     echo "Description: $SUMMARY"
     printf '%s\n' "$DESCRIPTION" | fold -s -w 78 | sed 's/ *$//; s/^/ /'
 } > "$work/deb/DEBIAN/control"
-for script in postinst prerm postrm; do
-    if [ -f "$here/packaging/deb/$script" ]; then
-        install -m 755 "$here/packaging/deb/$script" "$work/deb/DEBIAN/$script"
-    fi
-done
+# deb_script FILE CONDITION SNIPPET: a maintainer script that runs SNIPPET when CONDITION holds.
+deb_script() {
+    body=$(snippet "$3") || return 0
+    printf '#!/bin/sh\nset -e\nif %s; then\n%s\nfi\n' "$2" "$body" > "$work/deb/DEBIAN/$1"
+    chmod 755 "$work/deb/DEBIAN/$1"
+}
+deb_script postinst '[ "$1" = configure ]' configure
+deb_script prerm '[ "$1" = remove ]' remove
+deb_script postrm '[ "$1" = remove ] || [ "$1" = purge ]' removed
 (cd "$work/deb" && find . -path ./DEBIAN -prune -o -type f -print | sed 's|^\./||' | LC_ALL=C sort |
     xargs md5sum > DEBIAN/md5sums)
 chmod 644 "$work/deb/DEBIAN/control" "$work/deb/DEBIAN/md5sums"
@@ -62,6 +70,11 @@ SOURCE_DATE_EPOCH=$epoch dpkg-deb --root-owner-group -Zxz --build "$work/deb" "$
 # ---- .rpm
 mkdir -p "$work/rpm/SPECS" "$work/rpm/BUILD"
 spec=$work/rpm/SPECS/$NAME.spec
+# rpm_script SECTION CONDITION SNIPPET; $1 is the number of installed versions afterwards.
+rpm_script() {
+    body=$(snippet "$3") || return 0
+    printf '\n%%%s\nif %s; then\n%s\nfi\n' "$1" "$2" "$body"
+}
 {
     echo "Name: $NAME"
     echo "Version: $upstream"
@@ -77,13 +90,9 @@ spec=$work/rpm/SPECS/$NAME.spec
     echo
     echo "%install"
     echo "cp -a '$root/.' '%{buildroot}/'"
-    for script in post preun postun; do
-        if [ -f "$here/packaging/rpm/$script" ]; then
-            echo
-            echo "%$script"
-            cat "$here/packaging/rpm/$script"
-        fi
-    done
+    rpm_script post 'true' configure
+    rpm_script preun '[ "$1" -eq 0 ]' remove
+    rpm_script postun '[ "$1" -eq 0 ]' removed
     echo
     echo "%files"
     printf '%s\n' "$FILES"
