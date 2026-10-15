@@ -115,10 +115,12 @@ function init() {
     $("back-cancel").addEventListener("click", () => closeDialog());
     $("back-close").addEventListener("click", () => closeDialog());
 
+    /* Back on the page: everything again after a minute, unless a dialog is open; else
+       only the runs and the timers' results (and with them an open runs dialog). */
     const onVisible = () => {
         const hidden = cockpit.hidden !== undefined ? cockpit.hidden : document.hidden;
-        if (hidden || dialog || state.busy) return;
-        if (Date.now() - state.loadedAt > 60000) requestLoad();
+        if (hidden || state.busy) return;
+        if (!dialog && Date.now() - state.loadedAt > 60000) requestLoad();
         else {
             refreshRuns();
             refreshTimers();

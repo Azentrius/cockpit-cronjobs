@@ -75,7 +75,7 @@ src/                      the Cockpit package (installed as /usr/share/cockpit/c
                           and back to cron, backups, the tabs
   lib/cron.js             crontab parsing and writing (byte for byte), schedules, next runs, cron's % rules
   lib/systemd.js          cron → OnCalendar, unit files, systemd-analyze output
-  lib/runs.js             records of the run recorder
+  lib/runs.js             records of the run recorder, and runs of a service from its journal
   lib/backups.js          the list of backups, the difference between two versions (as diff shows it)
   i18n/en.js, i18n/de.js  all texts; `…` marks code
   cockpit-cronjobs-run    the run recorder (POSIX sh), installed by the page to /usr/local/libexec/
@@ -188,5 +188,12 @@ time; without a system bus Cockpit's own pages crash the bridge, this page does 
   `/usr/bin:/bin:/usr/sbin:/sbin` and `USER`. `pam_env` drops a quote only at the start and as the last
   character, and `#` ends a value anywhere. The end-to-end test compares the whole environment of cron,
   run now and a converted unit.
+- **Runs in the journal** (`R.parseJournal`, `readJournal`): `journalctl -u NAME.service -o json`, grouped
+  by invocation: systemd's own messages carry `INVOCATION_ID` (and `_PID` 1), the job's lines
+  `_SYSTEMD_INVOCATION_ID`. The end and result come from structured messages (`MESSAGE_ID`): "Deactivated
+  successfully" (systemd 246+) or "Finished" with `JOB_RESULT=done` for success, "Main process exited"
+  with `EXIT_CODE`/`EXIT_STATUS` and "Failed with result" (`UNIT_RESULT`) for failures; success logs no
+  exit status. Lines that are not UTF-8 come as a list of bytes. The unit test uses real output of
+  systemd 259; the end-to-end test reads the journal of real units.
 - **`/run/lock`** is world-writable on Debian and Ubuntu; locks for root belong in a root-only directory
   (here `/var/lib/cockpit-cronjobs/.crontab.lock`).

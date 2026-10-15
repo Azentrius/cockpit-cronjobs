@@ -106,6 +106,9 @@
         unitChecks: [],
         wrongUser: null,
         timerChanges: {},
+        /* journalctl -u UNIT -o json output by unit; else made up from the timers (journalOutput) */
+        journal: {},
+        journalReads: [],
         /* getent passwd, after the name */
         passwd: { "www-data": "33:33:www-data:/var/www:/usr/sbin/nologin", "ghost": "1001:1001::/home/ghost:/bin/sh" },
         userConflictNext: null,
@@ -418,6 +421,11 @@
             return "";
         }
         if (/systemd-analyze calendar/.test(script)) return analyzeOutput(+args[4], args.slice(5));
+        if (/journalctl -u/.test(script)) {
+            M.journalReads.push(args[4]);
+            if (M.journal[args[4]] === false) fail({ exit_status: 1, problem: null, message: "journal unreadable" });
+            return journalOutput(args[4]);
+        }
         if (/systemctl daemon-reload/.test(script) && /mv -f/.test(script)) {
             const name = args[4];
             if (M.units[name] || ["logrotate", "apt-daily"].includes(name)) fail({ exit_status: 6, problem: null, message: "" });
@@ -552,6 +560,41 @@
     };
     const pathOf = name => "/org/freedesktop/systemd1/unit/" + name.replace(/[^A-Za-z0-9]/g, c => "_" + c.charCodeAt(0).toString(16));
     const V = (t, v) => ({ t, v });
+
+    /* journalctl -u UNIT -o json: M.journal[UNIT] when given, else three runs of the service of a
+       timer (a day apart; the last as the timer's result says, running when it runs). */
+    function journalOutput(unit) {
+        if (typeof M.journal[unit] === "string") return M.journal[unit];
+        const t = TIMERS().find(x => x.service === unit);
+        if (!t || t.never) return "";
+        const hex = Array.from(unit).map(c => c.charCodeAt(0).toString(16)).join("");
+        const id = n => (n.toString(16) + hex).padEnd(32, "0").slice(0, 32);
+        const lines = [];
+        const add = (us, own, iid, o) => lines.push(JSON.stringify(Object.assign({ __REALTIME_TIMESTAMP: String(Math.round(us)),
+            _PID: own ? "1" : "4242" }, own ? { INVOCATION_ID: iid } : { _SYSTEMD_INVOCATION_ID: iid }, o)));
+        const last = t.ago || 6 * 3600e6;
+        [{ ago: last + 2 * 86400e6, ok: true }, { ago: last + 86400e6, ok: true },
+         { ago: last, ok: (t.result || "success") === "success", status: t.status, running: t.running }].forEach((r, n) => {
+            const iid = id(n);
+            const start = usNow() - r.ago;
+            const end = start + (t.dur || 1e6);
+            add(start, true, iid, { MESSAGE_ID: "7d4958e842da4a758f6c1cdc7b36dcc5", MESSAGE: "Starting " + unit + "..." });
+            add(start + 1000, false, iid, { MESSAGE: "run " + (n + 1) + " of " + unit });
+            if (r.running) return;
+            if (r.ok) {
+                add(end, true, iid, { MESSAGE_ID: "7ad2d189f7e94e70a38c781354912448", MESSAGE: unit + ": Deactivated successfully." });
+                add(end + 100, true, iid, { MESSAGE_ID: "39f53479d3a045ac8e11786248231fbf", JOB_RESULT: "done", MESSAGE: "Finished " + unit + "." });
+                return;
+            }
+            add(end - 100, false, iid, { MESSAGE: [101, 114, 114, 111, 114, 58, 32, 0xe9] });
+            add(end, true, iid, { MESSAGE_ID: "98e322203f7a4ed290d09fe03c09fe15", EXIT_CODE: "exited", EXIT_STATUS: String(r.status || 1),
+                                  MESSAGE: unit + ": Main process exited, code=exited, status=" + (r.status || 1) });
+            add(end + 50, true, iid, { MESSAGE_ID: "d9b373ed55a64feb8242e02dbe79a49c", UNIT_RESULT: "exit-code",
+                                       MESSAGE: unit + ": Failed with result 'exit-code'." });
+            add(end + 100, true, iid, { MESSAGE_ID: "be02cf6855d2428ba40df7e9d022f03d", JOB_RESULT: "failed", MESSAGE: "Failed to start " + unit + "." });
+        });
+        return lines.join("\n") + "\n";
+    }
 
     function timerProps(t) {
         const calNext = (t.cal || []).map(nextCal).filter(Boolean);

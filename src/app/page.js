@@ -11,12 +11,12 @@ import {
 } from "./core.js";
 import { errText, installWrapper } from "./system.js";
 import {
-    convertedTo, crontabOf, jobInfo, jobsOf, jobTz, loading, noteFor, requestLoad, runsOf, setCapture, toggle,
+    convertedTimer, convertedTo, crontabOf, jobInfo, jobsOf, jobTz, loading, noteFor, requestLoad, runsOf, setCapture, toggle,
 } from "./crontab.js";
 import { renderTimeline } from "./timeline.js";
 import { renderSummary } from "./summary.js";
 import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
-import { openRun, openRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
+import { openRun, openRuns, openTimerRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
 import { convertBlocker, openBack, openConvert } from "./convert.js";
 import { openBackups } from "./backups.js";
 import { hiddenBesidesTabs, showTabOf } from "./tabs.js";
@@ -150,10 +150,24 @@ export function labelEl(kind, iconName, text, attrs) {
 /* id of the element with the command of job i, which describes the row's controls. */
 const cmdIdOf = (user, i) => user === "root" ? "cmd-" + i : "cmd-" + user + "-" + i;
 
-/* The last run of job i of user's crontab. */
+/* The last run of job i of user's crontab; for a job converted to a systemd timer, the
+   timer's (its runs are in the journal then). */
 function lastCell(user, e, i, editable, frozen) {
     const info = jobInfo(e);
     const cmdId = cmdIdOf(user, i);
+    const timer = convertedTimer(crontabOf(user), i);
+    if (timer) {
+        const runsKey = keyOf(user, "runs", i);
+        const open = { "data-key": runsKey, "aria-describedby": cmdId, title: T.showRuns,
+                       onclick: () => openRuns(user, i, runsKey) };
+        if (timer.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("info", "sync-alt", T.statusRunning, open)));
+        const l = timer.last !== null ? timerRunLabel(timer) : null;
+        if (!l) return h("span", { class: "cron-muted" }, T.noRunYet);
+        const d = timerDuration(timer);
+        return h("div", { class: "cron-cell" },
+            h("span", null, labelEl(l.kind, l.icon, l.text, open)),
+            h("span", { class: "az-cell-sub" }, fmtShort(timer.last) + (d !== null ? " · " + fmtDuration(d) : "")));
+    }
     if (!info.capture) {
         if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
         const can = editable && C.canCapture(info.command);
@@ -363,7 +377,7 @@ export function updateTimerRuns() {
 
 /* ---------- systemd timers ---------- */
 
-export function jumpToUnit(unit) {
+function jumpToUnit(unit) {
     cockpit.jump("/system/services#/" + encodeURIComponent(unit), cockpit.transport.host);
 }
 
@@ -429,6 +443,10 @@ function renderTimers() {
                     h("td", { class: "az-nowrap", "data-label": T.colNext, "data-timer-next": k }, timerNextCell(t)),
                     h("td", { class: "az-nowrap", "data-label": T.colLast }, timerLastCell(t)),
                     h("td", { class: "az-cell-actions" },
+                        h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "data-key": "timer-runs:" + t.name,
+                                      "aria-label": T.showRuns, title: T.showRuns,
+                                      onclick: () => openTimerRuns(t, "timer-runs:" + t.name) },
+                          icon("history")),
                         h("button", { class: "az-btn az-btn--plain az-btn--sm", type: "button", "aria-label": T.openInCockpit(t.name),
                                       title: T.openInCockpit(t.name),
                                       onclick: () => jumpToUnit(t.name) },
@@ -541,7 +559,7 @@ function menuItems(r, i) {
     const editable = r.status === "ok" && !r.locked;
     const more = keyOf(r.user, "more", i);
     const items = [];
-    if (info.capture) items.push({ label: T.showRuns, icon: "history", action: () => openRuns(r.user, i, more) });
+    if (info.capture || convertedTimer(r, i)) items.push({ label: T.showRuns, icon: "history", action: () => openRuns(r.user, i, more) });
     if (editable) {
         if (info.capture) {
             items.push({ label: T.captureOff, action: () => openCaptureOff(r.user, i, more) });

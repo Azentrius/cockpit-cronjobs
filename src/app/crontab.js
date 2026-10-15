@@ -12,7 +12,7 @@ import {
 } from "./system.js";
 import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns, updateTimerRuns } from "./page.js";
 import { dialog } from "./dialogs.js";
-import { renderOrphansDialog, renderRunsDialog } from "./runs.js";
+import { refreshJournal, renderOrphansDialog, renderRunsDialog } from "./runs.js";
 
 /* ---------- the crontabs ---------- */
 
@@ -97,6 +97,16 @@ export function convertedTo(r, i) {
     if (!e || e.kind !== "job" || e.enabled || i === 0 || r.entries[i - 1].kind !== "raw") return null;
     const note = SD.parseConvertNote(r.entries[i - 1].line);
     return note ? note.name : null;
+}
+
+/* The systemd timer (from state.timers) job i of crontab r was converted to, when its
+   units say they come from that crontab (see SD.parseUnitDescription). Else null. */
+export function convertedTimer(r, i) {
+    const name = r ? convertedTo(r, i) : null;
+    if (!name || state.timers.status !== "ok") return null;
+    const t = state.timers.list.find(x => x.name === name + ".timer");
+    const from = t ? SD.parseUnitDescription(t.description) : null;
+    return from && from.name === name && from.user === r.user ? t : null;
 }
 
 /* cronie runs a job in CRON_TZ when the crontab sets it above the job;
@@ -226,6 +236,7 @@ export function refreshTimers() {
     }, () => { /* the next reload says what is wrong */ }).finally(() => {
         timersLoading = false;
         updateTimerRuns();
+        refreshJournal();
     });
 }
 

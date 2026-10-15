@@ -7,9 +7,9 @@ import {
     $, C, clock, codeSafe, fill, fmtDuration, fmtElapsed, fmtShort, h, icon, joinList, KEEP_RUNS, LOCALE, R, rich,
     RUN_OUTPUT_LIMIT, setBusyButton, state, STATE_DIR, T,
 } from "./core.js";
-import { errText, isDenied, readOutput, removeOrphans, RUN_SCRIPT, runsDirOf } from "./system.js";
-import { crontabOf, jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
-import { labelEl, runLabel, showAlert } from "./page.js";
+import { errText, isDenied, readJournal, readOutput, removeOrphans, RUN_SCRIPT, runsDirOf } from "./system.js";
+import { convertedTimer, crontabOf, jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
+import { alertEl, labelEl, runLabel, showAlert } from "./page.js";
 import { closeDialog, dialog, dialogError, openDialog } from "./dialogs.js";
 
 /* ---------- run now ---------- */
@@ -164,42 +164,74 @@ function renderRunDialog() {
 
 /* ---------- recorded runs ---------- */
 
-/* The recorded runs of job index of user's crontab. */
+/* The runs of job index of user's crontab: those the run recorder kept, and for a job
+   converted to a systemd timer from this crontab those of its service in the journal,
+   so that the job keeps its history. */
 export function openRuns(user, index, openerKey) {
     const tab = crontabOf(user);
     if (!tab || tab.status !== "ok") return;
     const e = tab.entries[index];
     if (!e || e.kind !== "job") return;
     const info = jobInfo(e);
-    if (!info.capture) return;
+    const timer = convertedTimer(tab, index);
+    if (!info.capture && !timer) return;
     openDialog($("runs-dlg"), openerKey, {
-        kind: "runs", user, index, line: e.line, id: info.capture.id, command: info.command,
+        kind: "runs", user, index, line: e.line, id: info.capture ? info.capture.id : null, command: info.command,
+        unit: timer ? timer.service : null, journal: null, open: null, outputs: {},
+    }, $("runs-close-btn"));
+    renderRunsDialog();
+    if (info.capture) refreshRuns();
+    if (timer) loadJournal(dialog);
+}
+
+/* The runs of systemd timer t's service, from the journal. */
+export function openTimerRuns(t, openerKey) {
+    openDialog($("runs-dlg"), openerKey, {
+        kind: "runs", user: null, index: null, id: null, command: t.name, unit: t.service, journal: null,
         open: null, outputs: {},
     }, $("runs-close-btn"));
     renderRunsDialog();
-    refreshRuns();
+    loadJournal(dialog);
+}
+
+function loadJournal(d) {
+    readJournal(d.unit).then(runs => {
+        d.journal = { status: "ok", runs };
+        runs.forEach(r => { d.outputs[r.out] = r.output; });
+    }, ex => {
+        d.journal = { status: isDenied(ex) ? "denied" : "error", runs: d.journal ? d.journal.runs : [], error: errText(ex) };
+    }).finally(() => { if (dialog === d) renderRunsDialog(); });
+}
+
+/* Reads the journal again for an open runs dialog of a service (every half minute). */
+export function refreshJournal() {
+    if (dialog && dialog.kind === "runs" && dialog.unit) loadJournal(dialog);
 }
 
 export function renderRunsDialog() {
     const d = dialog;
     if (!d || d.kind !== "runs") return;
     $("runs-cmd").textContent = d.command;
-    const tab = crontabOf(d.user);
+    const tab = d.user ? crontabOf(d.user) : null;
     const editable = !!tab && tab.status === "ok" && !tab.locked;
-    $("runs-capture-off").hidden = !editable;
-    fill($("runs-note"), rich(T.runsNote(KEEP_RUNS, runsDirOf(d.user) + "/")));
-    const job = runsOf(d.user, d.id);
+    $("runs-capture-off").hidden = !editable || !d.id || !!d.unit;
+    fill($("runs-note"), d.id ? rich(T.runsNote(KEEP_RUNS, runsDirOf(d.user) + "/")) : null, d.id && d.unit ? " " : null,
+        d.unit ? rich(T.runsJournalNote(d.unit)) : null);
+    const job = d.id ? runsOf(d.user, d.id) : null;
     const body = $("runs-body");
     const focusedKey = document.activeElement && body.contains(document.activeElement)
         ? document.activeElement.dataset.key : null;
-    if (!job) {
-        fill(body, h("p", { class: "cron-state" }, state.runs.status === "denied" ? T.deniedTitle : T.loading));
-        return;
-    }
-    const items = job.running.map(r => ({ running: true, start: r.start, trigger: r.trigger }))
-        .concat(job.runs.map(r => Object.assign({ running: false }, r)));
+    const waiting = (d.id && !job && state.runs.status !== "denied") || (d.unit && !d.journal);
+    const denied = (d.id && !job && state.runs.status === "denied") || (d.journal && d.journal.status === "denied");
+    const items = (job ? job.running.map(r => ({ running: true, start: r.start, trigger: r.trigger }))
+        .concat(job.runs.map(r => Object.assign({ running: false }, r))) : [])
+        .concat(d.journal ? d.journal.runs.map(r => r.running ? { running: true, start: r.start, trigger: null, journal: true }
+                                                              : Object.assign({ journal: true }, r)) : [])
+        .sort((a, b) => b.start - a.start);
+    const failed = d.journal && d.journal.status === "error"
+        ? h("div", { class: "cron-dialog-alert" }, alertEl("warning", T.journalFailed, d.journal.error)) : null;
     if (!items.length) {
-        fill(body, h("p", { class: "cron-state" }, T.runsEmpty));
+        fill(body, failed, failed && !waiting ? null : h("p", { class: "cron-state" }, waiting ? T.loading : denied ? T.deniedTitle : T.runsEmpty));
         return;
     }
     const rows = [];
@@ -207,12 +239,13 @@ export function renderRunsDialog() {
         const key = r.out || ("s" + r.start);
         const label = r.running ? { kind: "info", icon: "sync-alt", text: T.statusRunning } : runLabel(r);
         const dur = r.running ? null : R.duration(r);
-        const hasOut = !r.running && !!r.out;
+        const hasOut = !r.running && (r.journal ? !!r.output : !!r.out);
         const isOpen = hasOut && d.open === r.out;
         const outId = "runs-out-" + key;
         rows.push(h("tr", { class: isOpen ? "is-open" : null },
             h("td", { class: "az-nowrap", "data-label": T.colStart }, fmtShort(r.start * 1000)),
-            h("td", { "data-label": T.colTrigger }, r.trigger === "manual" ? T.trigManual : T.trigSchedule),
+            h("td", { "data-label": T.colTrigger },
+                r.trigger === "manual" ? T.trigManual : r.trigger === "schedule" ? T.trigSchedule : T.trigSystemd),
             h("td", { class: "az-nowrap", "data-label": T.colDuration },
                 r.running ? T.runningFor(fmtDuration(Date.now() / 1000 - r.start)) : dur === null ? "—" : fmtDuration(dur)),
             h("td", { class: "az-nowrap", "data-label": T.colResult }, labelEl(label.kind, label.icon, label.text)),
@@ -234,7 +267,7 @@ export function renderRunsDialog() {
                                       onclick: ev => copyText(text, ev.currentTarget, outId) }, icon("copy"), T.copyOutput)) : null)));
         }
     });
-    fill(body, h("div", { class: "cron-runs-table" },
+    fill(body, failed, h("div", { class: "cron-runs-table" },
         h("table", { class: "az-table az-table--stack" },
             h("thead", null, h("tr", null,
                 h("th", { scope: "col" }, T.colStart),

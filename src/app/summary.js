@@ -6,8 +6,8 @@
 
 import { $, fill, fmtDuration, fmtShort, h, icon, keyOf, R, SD, state, T } from "./core.js";
 import { jobInfo, jobsOf, runsOf } from "./crontab.js";
-import { jumpToUnit, labelEl, runLabel, timerDuration, timerRunLabel } from "./page.js";
-import { openRuns } from "./runs.js";
+import { labelEl, runLabel, timerDuration, timerRunLabel } from "./page.js";
+import { openRuns, openTimerRuns } from "./runs.js";
 
 /* Whether the successful ones are listed too; failed and running ones always are. */
 let showOk = false;
@@ -43,7 +43,7 @@ function results() {
         if (!t.active) return;
         const from = SD.parseUnitDescription(t.description);
         const item = { name: t.name, source: from ? T.fromCrontab(from.user) : T.legendTimer, key: "sum-timer:" + t.name,
-                       title: T.openInCockpit(t.name), open: () => jumpToUnit(t.name) };
+                       title: T.showRuns, open: () => openTimerRuns(t, "sum-timer:" + t.name) };
         if (t.running) {
             out.push(Object.assign(item, { state: "running", label: Object.assign({ text: T.statusRunning }, RUNNING),
                                            when: t.startUs !== null ? t.startUs : t.last, dur: null }));

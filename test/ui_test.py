@@ -1006,6 +1006,66 @@ with sync_playwright() as p:
     shot(page, "de-light-summary", full=False)
     check(not page.problems, "no console problems (latest results): " + repr(page.problems))
     page.context.close()
+    # ---------- runs from the journal ----------
+    page = open_page(browser)
+    # a timer's runs, from the latest results and from the timers tab
+    page.click("[data-key='sum-timer:fstrim.timer']")
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length === 3")
+    rows = page.locator("#runs-body tbody tr").all_inner_texts()
+    check(page.inner_text("#runs-cmd") == "fstrim.timer" and "Fehler · Exit 32" in rows[0] and all("OK" in r for r in rows[1:]) and
+          all("systemd" in r for r in rows) and "aus dem Journal" in page.inner_text("#runs-note") and page.locator("#runs-capture-off").is_hidden(),
+          "a timer's runs from the journal: " + repr(rows) + " " + page.inner_text("#runs-note"))
+    check(mock(page, "journalReads") == ["fstrim.service"], "read from the journal of its service")
+    page.locator("#runs-body [data-key^='out:']").first.click()
+    check(page.text_content("#runs-body pre") == "run 3 of fstrim.service\nerror: �", "its output, bytes decoded: " + repr(page.text_content("#runs-body pre")))
+    page.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    wait_js(page, "window.__mock.journalReads.length === 2")
+    check(True, "read again while the dialog is open")
+    page.click("#runs-close-btn")
+    check(focused_key(page) == "sum-timer:fstrim.timer", "focus back on the result: " + repr(focused_key(page)))
+    show_tab(page, "timers")
+    page.click("[data-key='timer-runs:logrotate.timer']")
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length === 3")
+    check(page.inner_text("#runs-cmd") == "logrotate.timer" and all("OK" in r for r in page.locator("#runs-body tbody tr").all_inner_texts()),
+          "the runs button of the timers tab")
+    page.click("#runs-close-btn")
+    check(focused_key(page) == "timer-runs:logrotate.timer", "focus back on the button: " + repr(focused_key(page)))
+    # a journal that cannot be read says so
+    page.evaluate("() => { window.__mock.journal['apt-daily.service'] = false; }")
+    page.click("[data-key='timer-runs:apt-daily.timer']")
+    wait_js(page, "document.querySelector('#runs-body').innerText.includes('Journal')")
+    check("Das Journal ließ sich nicht lesen" in page.inner_text("#runs-body") and "journal unreadable" in page.inner_text("#runs-body"),
+          "journal not readable: " + page.inner_text("#runs-body"))
+    page.click("#runs-close-btn")
+    show_tab(page, "overview")
+    # a recorded job converted to a timer keeps its history: the recorded runs and those from the journal together
+    row(page, 0).locator("[data-key^=more]").click()
+    page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    wait_js(page, "!document.querySelector('#conv-ok').disabled")
+    unit = page.input_value("#conv-name")
+    page.click("#conv-ok")
+    wait_js(page, "document.querySelector('#conv-dlg').hidden")
+    wait_idle(page)
+    check("Noch kein Lauf" in page.locator("td[data-last='25']").inner_text(), "converted, the timer has not run yet")
+    page.evaluate("""u => { window.__mock.timerChanges[u + '.timer'] = { never: false, result: 'exit-code', status: 4, ago: 60e6, dur: 2e6 }; }""", unit)
+    page.click("#reload")
+    wait_idle(page)
+    check("Fehler · Exit 4" in page.locator("td[data-last='25']").inner_text(), "the row shows the timer's last run: " +
+          page.locator("td[data-last='25']").inner_text())
+    page.click("[data-key='runs:25']")
+    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length === 6")
+    rows = page.locator("#runs-body tbody tr").all_inner_texts()
+    check("Fehler · Exit 4" in rows[0] and "systemd" in rows[0] and any("Zeitplan" in r for r in rows) and any("Manuell" in r for r in rows) and
+          sum("systemd" in r for r in rows) == 3, "recorded and journal runs, newest first: " + repr(rows))
+    check("/var/lib/cockpit-cronjobs/runs/" in page.inner_text("#runs-note") and unit + ".service" in page.inner_text("#runs-note") and
+          page.locator("#runs-capture-off").is_hidden(), "both named, no switching recording off: " + page.inner_text("#runs-note"))
+    page.click("#runs-close-btn")
+    row(page, 0).locator("[data-key^=more]").click()
+    check("Läufe anzeigen" in page.inner_text("#row-menu"), "the menu of the converted job offers its runs")
+    page.keyboard.press("Escape")
+    check(not page.problems, "no console problems (journal): " + repr(page.problems))
+    page.context.close()
+
     # nothing recorded and no timers: no card
     page = open_page(browser, "systemd=no")
     reload_with_root(page, "0 1 * * * /usr/local/bin/backup.sh\n")
