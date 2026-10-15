@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-15. Each stage is cut so that it is useful on its own and brings its own tests. The
+As of 2026-10-16. Each stage is cut so that it is useful on its own and brings its own tests. The
 order is the recommendation; stages after 1.1 are proposals until they are decided.
 
 **Guardrails for every stage** (they keep applying):
@@ -98,9 +98,13 @@ minute of the run.
 
 ## Stage 5 – Distribution and reach
 
-- **Packages:** `.deb` and `.rpm` built by the release workflow, next to the archive.
-- **Cockpit's Applications page:** AppStream metadata (`org.cockpit_project.cronjobs.metainfo.xml`), so
-  Cron Jobs can be found and installed from Cockpit itself.
+Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHANGELOG.md)), marked ✅.
+
+- ✅ **Packages:** `.deb` and `.rpm` (`cockpit-cronjobs`) built by the release workflow, next to the
+  archive, reproducible, with a signed build provenance.
+- ✅ **Cockpit's Applications page:** AppStream data (`de.azentrius.cronjobs`) in the packages, and the
+  Azentrius package repository, packages.azentrius.de, whose catalog Cockpit reads: Cron Jobs is found
+  and installed from Cockpit itself.
 - **More translations** through `src/i18n/` (texts are already separate from the code).
 - **BusyBox systems** (e.g. Alpine): `flock` without `-w`, `setsid` without `-w`, `crond` with
   `/etc/crontabs`.
@@ -126,4 +130,6 @@ minute of the run.
 ## Open decisions
 
 1. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
-3. Stage 5: packages and the listing in Cockpit's Applications page: worth the upkeep?
+
+Decided: packages and the listing in Cockpit's Applications page (stage 5), through the Azentrius
+package repository shared with the other add-ons.
