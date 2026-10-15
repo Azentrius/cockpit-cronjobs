@@ -4,7 +4,7 @@ A [Cockpit](https://cockpit-project.org) page for cron. It shows everything that
 server, lets you change the root crontab and those of other users safely, keeps the result of every run,
 starts jobs on demand and turns cron jobs into systemd timers.
 
-![Overview: the next 24 hours and the root crontab](docs/overview.png)
+![Overview: the latest results, the next 24 hours and the root crontab](docs/overview.png)
 
 ## What it does
 
@@ -69,11 +69,11 @@ the system crontabs and timers, and nothing of other users' crontabs.
 From a [release](https://github.com/Azentrius/cockpit-cronjobs/releases) (replace the version):
 
 ```sh
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.4.0/cockpit-cronjobs-2.4.0.tar.gz
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.4.0/SHA256SUMS
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.5.0/cockpit-cronjobs-2.5.0.tar.gz
+curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.5.0/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
-gh attestation verify cockpit-cronjobs-2.4.0.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
-sudo tar -xzf cockpit-cronjobs-2.4.0.tar.gz -C /usr/share/cockpit
+gh attestation verify cockpit-cronjobs-2.5.0.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
+sudo tar -xzf cockpit-cronjobs-2.5.0.tar.gz -C /usr/share/cockpit
 ```
 
 Or from the source:

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.5.0 – 2026-10-15
+
+Results at a glance: the latest result of every recorded job and systemd timer at the top of the overview,
+failures first, and the runs of every timer from the journal.
+
+- **The latest results:** a new card at the top of the overview lists the last run of every recorded job
+  (in every crontab the page shows) and of every active systemd timer: failed and aborted ones first,
+  newest first, then those running, then the successful ones, folded away behind a button. A result opens
+  the runs of its job or timer. The page reads the runs and the timers' results again every half minute,
+  so a failure shows within a minute without reloading; coming back to the page with a dialog open, it
+  reads them too.
+- **Runs from the journal:** every systemd timer gets the runs dialog of a recorded job, from the journal
+  of its service: start, duration, result and output. The systemd timers tab has a button for it. A job
+  converted to a timer keeps its history: its row shows the timer's last run, and its runs dialog lists
+  the runs recorded before the conversion together with those of its service since.
+- The last run of a timer is the later of its last trigger and the last start of its service, so a
+  service started by hand shows as run.
+- **Fix:** jobs with rare schedules, such as yearly ones or those on the 29th of February, could not be
+  converted to a systemd timer: the check compared five runs, but computed cron's own only 800 days ahead.
+  It now computes them up to the last run systemd lists.
+- Tests: the end-to-end test lets a recorded job and a timer fail under the real cron and systemd and
+  finds both in the latest results without reloading, reads runs from the real journal, and converts a
+  yearly and a leap day job; the journal parser is tested with real output of systemd 259.
+
 ## 2.4.0 – 2026-10-14
 
 Crontabs of other users, with administrative access: changed, run, recorded and converted with the same
