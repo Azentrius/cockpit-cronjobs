@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.6.0 – 2026-10-16
+
+Packages: Cron Jobs comes as `cockpit-cronjobs` (`.deb` and `.rpm`) from the Azentrius package
+repository, packages.azentrius.de, and Cockpit lists it under Applications.
+
+- **Packages:** every release has `cockpit-cronjobs_VERSION-1_all.deb` and
+  `cockpit-cronjobs-VERSION-1.noarch.rpm` next to the archive, in `SHA256SUMS` and with a signed build
+  provenance. They install the page to `/usr/share/cockpit/cronjobs` and need `cockpit-bridge` and a
+  cron daemon (`cron` or another `cron-daemon` on Debian and Ubuntu, `cronie` or `cron` in RPM). The
+  builds are reproducible: CI builds them twice and compares the bytes, then installs them on Debian 13
+  and Fedora 43.
+- **Cockpit's Applications page:** the packages carry AppStream data (`de.azentrius.cronjobs`, English
+  and German). With the package repository set up (one package, `azentrius-repository`), Cockpit lists
+  Cron Jobs under Applications and installs it with a click, and the system's updates keep it current.
+  The repository takes a package only after checking that this repository's release workflow built it.
+- **Installation:** the README installs from the package repository, from the files of a release or
+  from the source, and says how to switch from an earlier installation.
+
 ## 2.5.0 – 2026-10-15
 
 Results at a glance: the latest result of every recorded job and systemd timer at the top of the overview,

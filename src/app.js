@@ -39,7 +39,7 @@ import { submitBack, submitConvert, toggleUnits, updateConvert } from "./app/con
 import { openBackups } from "./app/backups.js";
 import { initTabs } from "./app/tabs.js";
 
-const VERSION = "2.5.0";
+const VERSION = "2.6.0";
 
 /* ---------- start ---------- */
 

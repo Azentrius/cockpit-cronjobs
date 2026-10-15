@@ -66,26 +66,47 @@ the system crontabs and timers, and nothing of other users' crontabs.
 
 ## Installation
 
-From a [release](https://github.com/Azentrius/cockpit-cronjobs/releases) (replace the version):
+**From the Azentrius package repository.** Set up [packages.azentrius.de](https://packages.azentrius.de)
+once:
 
 ```sh
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.5.0/cockpit-cronjobs-2.5.0.tar.gz
-curl -LO https://github.com/Azentrius/cockpit-cronjobs/releases/download/v2.5.0/SHA256SUMS
-sha256sum --ignore-missing -c SHA256SUMS
-gh attestation verify cockpit-cronjobs-2.5.0.tar.gz --repo Azentrius/cockpit-cronjobs   # optional, needs gh
-sudo tar -xzf cockpit-cronjobs-2.5.0.tar.gz -C /usr/share/cockpit
+# Debian and Ubuntu
+curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
+sudo apt install ./azentrius-repository.deb
+sudo apt update
+
+# Fedora, RHEL and openSUSE
+sudo rpm --import https://packages.azentrius.de/azentrius.asc
+sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
 
-Or from the source:
+Then install **Cron Jobs** in Cockpit under **Applications** (with administrative access), or on the
+console with `sudo apt install cockpit-cronjobs` or `sudo dnf install cockpit-cronjobs`. The system's
+updates keep it current. The repository takes a package only after checking that this repository's
+release workflow built it.
+
+**From a release.** Every [release](https://github.com/Azentrius/cockpit-cronjobs/releases) has the
+`.deb` and the `.rpm`, `SHA256SUMS` and a signed build provenance (`X.Y.Z` is the version):
 
 ```sh
-git clone https://github.com/Azentrius/cockpit-cronjobs.git
-cd cockpit-cronjobs
-sudo make install          # to /usr/local/share/cockpit/cronjobs
+sudo apt install ./cockpit-cronjobs_X.Y.Z-1_all.deb     # Debian, Ubuntu
+sudo dnf install ./cockpit-cronjobs-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
+sha256sum --ignore-missing -c SHA256SUMS                # check a download
+gh attestation verify <file> --repo Azentrius/cockpit-cronjobs   # built by the release workflow
 ```
 
-Log in to Cockpit again; **Cron Jobs** appears in the menu. To update, install the new version the
-same way.
+On other systems the archive `cockpit-cronjobs-X.Y.Z.tar.gz` of a release holds the page:
+`sudo tar -xzf cockpit-cronjobs-X.Y.Z.tar.gz -C /usr/share/cockpit`.
+
+**From the source.** `git clone` this repository, then `sudo make install` (to
+`/usr/local/share/cockpit/cronjobs`).
+
+**From an earlier installation.** A page installed from the archive or the source is not part of the
+package, and one in `/usr/local` would hide it. Remove it first, then install the package:
+`sudo rm -rf /usr/share/cockpit/cronjobs` (archive) or `sudo make uninstall` in the checkout
+(source). Backups, recorded runs and the run recorder stay.
+
+**Cron Jobs** appears in Cockpit's menu; if it does not show yet, log in to Cockpit again.
 
 For development, `make devel-install` links `src` to `~/.local/share/cockpit/cronjobs`.
 
@@ -158,7 +179,8 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
 ## Uninstall
 
 ```sh
-sudo rm -rf /usr/share/cockpit/cronjobs   # installed from a release
+sudo apt remove cockpit-cronjobs          # or: sudo dnf remove cockpit-cronjobs
+sudo rm -rf /usr/share/cockpit/cronjobs   # installed from the archive
 sudo make uninstall                       # installed from the source
 # only when no job records its runs any more:
 sudo rm -f /usr/local/libexec/cockpit-cronjobs-run
@@ -205,11 +227,14 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
 1. Set the new version in `src/app.js` (`const VERSION`) and add a section for it to `CHANGELOG.md`.
 2. Merge to `main`.
 3. On GitHub: Actions › **release** › Run workflow (branch `main`). The workflow checks that the version
-   is new and matches `src/app.js`, runs all tests, builds `cockpit-cronjobs-VERSION.tar.gz` with
-   `SHA256SUMS` (`make package`, reproducible) and creates the tag `vVERSION` with a release whose
-   notes come from `CHANGELOG.md`. It also signs a build provenance for the archive; for releases after 2.1.0,
-   `gh attestation verify cockpit-cronjobs-VERSION.tar.gz --repo Azentrius/cockpit-cronjobs` shows
-   that a release archive was built by this workflow from this repository.
+   is new and matches `src/app.js`, runs all tests, builds `cockpit-cronjobs-VERSION.tar.gz`
+   (`make package`) and the `.deb` and `.rpm` (`make packages`), all reproducible, with `SHA256SUMS`,
+   and creates the tag `vVERSION` with a release whose notes come from `CHANGELOG.md`. It also signs a
+   build provenance for each file; `gh attestation verify <file> --repo Azentrius/cockpit-cronjobs`
+   shows that it was built by this workflow from this repository (the archive since 2.1.1, the
+   packages since 2.6.0).
+4. packages.azentrius.de takes the packages from the release within an hour
+   ([Azentrius/packages](https://github.com/Azentrius/packages)).
 
 ## License
 
