@@ -57,9 +57,11 @@ The same in every Azentrius repository; keep it when changing the repository or 
   for third-party material.
 
 Here: check tools in `test/requirements.txt` (pip); lint is `make lint` (`shellcheck --severity=warning`
-for the shell scripts, `ruff check` with the rules in `ruff.toml`); the artifact is `make package`,
-which takes only `src/`. Ruleset `main` requires the check `e2e` as well (the end-to-end test, see
-“Commands”), so a pull request is merged only when `test` and `e2e` are green.
+for the shell scripts, `ruff check` with the rules in `ruff.toml`); the artifacts are the archive
+(`make package`, only `src/`) and the `.deb` and `.rpm` (`make packages`, built by
+`tools/build-packages.sh` from `packaging/`; `test` installs them on Debian and Fedora). Ruleset
+`main` requires the check `e2e` as well (the end-to-end test, see “Commands”), so a pull request is
+merged only when `test` and `e2e` are green.
 
 ## Layout
 
@@ -83,6 +85,8 @@ src/                      the Cockpit package (installed as /usr/share/cockpit/c
 test/                     unit tests (node), browser tests (Playwright against test/web/mock-cockpit.js),
                           test/e2e_cockpit.py (real Cockpit and cron, destructive)
 tools/release-notes.sh    notes for a release from CHANGELOG.md
+tools/build-packages.sh   .deb and .rpm from a staged tree; the same file in every Azentrius add-on
+packaging/                package.conf (name, description, dependencies), the AppStream metainfo
 .github/workflows/        test with jobs test and e2e (every push and PR), release (on request)
 ```
 
@@ -93,6 +97,7 @@ make check                # unit tests; also compares conversions with the real 
                           # difference of two versions with GNU diff
 make check-ui             # browser tests (needs Python Playwright with Chromium)
 make package              # cockpit-cronjobs-VERSION.tar.gz + SHA256SUMS, reproducible
+make packages             # dist/*.deb and dist/*.rpm (needs dpkg-deb and rpmbuild), reproducible
 CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py   # only on a throwaway machine, see the file
 ```
 

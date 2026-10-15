@@ -1,6 +1,7 @@
 # Makes a release on request: Actions › release › Run workflow (on main).
-# Checks the version, runs all tests, builds the package and creates the tag
-# vVERSION with a GitHub release (package, SHA256SUMS, notes from CHANGELOG.md).
+# Checks the version, runs all tests, builds the archive and the .deb and .rpm packages and
+# creates the tag vVERSION with a GitHub release (archive, packages, SHA256SUMS, signed build
+# provenance, notes from CHANGELOG.md).
 name: release
 
 on:
@@ -78,13 +79,21 @@ jobs:
       - name: Browser tests
         run: make check-ui
 
-      - name: Package
-        run: make package
+      - name: Package (archive, .deb, .rpm)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
+          make package
+          make packages
+          (cd dist && sha256sum *.deb *.rpm) >> SHA256SUMS
 
-      - name: Build provenance for the package
+      - name: Build provenance for the packages
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: cockpit-cronjobs-${{ steps.version.outputs.version }}.tar.gz
+          subject-path: |
+            cockpit-cronjobs-${{ steps.version.outputs.version }}.tar.gz
+            dist/*.deb
+            dist/*.rpm
 
       - name: Release notes
         env:
@@ -96,21 +105,20 @@ jobs:
             echo "::warning::CHANGELOG.md has no section for $VERSION; GitHub writes the notes."
             : > notes.md
           fi
+          deb=cockpit-cronjobs_$(printf '%s' "$VERSION" | tr '-' '~')-1_all.deb
+          rpm=cockpit-cronjobs-$(printf '%s' "$VERSION" | tr '-' '~')-1.noarch.rpm
           {
             echo
             echo "### Install"
             echo
+            echo "Debian and Ubuntu: \`sudo apt install ./$deb\`. Fedora, RHEL and openSUSE: \`sudo dnf install ./$rpm\`."
+            echo "Other systems: \`sudo tar -xzf cockpit-cronjobs-$VERSION.tar.gz -C /usr/share/cockpit\`."
+            echo
+            echo "Check the download against \`SHA256SUMS\`, and that it was built by this repository's release workflow:"
+            echo
             echo '```sh'
-            echo "curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/cockpit-cronjobs-$VERSION.tar.gz"
-            echo "curl -LO https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/SHA256SUMS"
             echo "sha256sum --ignore-missing -c SHA256SUMS"
-            echo "sudo tar -xzf cockpit-cronjobs-$VERSION.tar.gz -C /usr/share/cockpit"
-            echo '```'
-            echo
-            echo "Check that the archive was built by this repository's release workflow:"
-            echo
-            echo '```sh'
-            echo "gh attestation verify cockpit-cronjobs-$VERSION.tar.gz --repo $GITHUB_REPOSITORY"
+            echo "gh attestation verify <file> --repo $GITHUB_REPOSITORY"
             echo '```'
           } >> notes.md
 
@@ -127,4 +135,4 @@ jobs:
           if [ "$PRERELEASE" = "true" ]; then
             set -- "$@" --prerelease
           fi
-          gh release create "v$VERSION" "cockpit-cronjobs-$VERSION.tar.gz" SHA256SUMS "$@"
+          gh release create "v$VERSION" "cockpit-cronjobs-$VERSION.tar.gz" dist/*.deb dist/*.rpm SHA256SUMS "$@"
