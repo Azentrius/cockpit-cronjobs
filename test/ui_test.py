@@ -601,14 +601,20 @@ with sync_playwright() as p:
     # four versions: one like now, one with another time, an older one with one more line, one that is not UTF-8
     newer = original.replace("30 1 * * 0 /usr/sbin/fstrim -a", "45 1 * * 0 /usr/sbin/fstrim -a")
     older = original + "15 4 * * * /usr/local/bin/old.sh\n"
+    # the dialog names the day in the server's time zone (UTC here): in the first hour after midnight the times
+    # count from 01:00, else an hour ago is yesterday; and midnight must not fall between setting up and checking
+    wait = 86400 - time.time() % 86400
+    if wait < 15:
+        time.sleep(wait + 1)
     page.evaluate("""o => {
         const now = Math.floor(Date.now() / 1000);
+        const t = Math.max(now, now - now % 86400 + 3600);
         const p = n => '/var/lib/cockpit-cronjobs/backups/root-' + n + '.crontab';
         window.__mock.backups = [
-            { path: p('20261011-030000'), content: o.older, mtime: now - 86400 },
-            { path: p('20261012-090000'), content: o.newer, mtime: now - 3600 },
-            { path: p('20261012-100000'), content: o.same, mtime: now - 600 },
-            { path: p('20261012-100500'), content: '# caf\\u0001\\n', mtime: now - 300, latin1: true },
+            { path: p('20261011-030000'), content: o.older, mtime: t - 86400 },
+            { path: p('20261012-090000'), content: o.newer, mtime: t - 3600 },
+            { path: p('20261012-100000'), content: o.same, mtime: t - 600 },
+            { path: p('20261012-100500'), content: '# caf\\u0001\\n', mtime: t - 300, latin1: true },
         ];
         window.__mock.backupSeq = 50;
     }""", {"older": older, "newer": newer, "same": original})
