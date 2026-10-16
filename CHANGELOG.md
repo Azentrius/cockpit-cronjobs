@@ -14,10 +14,13 @@ The page follows the Azentrius design system more closely: states, controls, ale
   be read, or that a crontab opened read-only now shows above the card it is about, and the card says what
   it waits for. These errors also say how to fix them, as do those of the journal, of an output and of the
   backups.
-- **Field errors once a field is left:** the edit dialog shows an error when the field is left or on
-  saving, not while typing.
+- **Field errors once a field is left:** the edit dialog, and the name in the convert dialog, show an error
+  when the field is left or on saving or converting, not while typing. "Convert job" no longer turns grey
+  for an invalid name; it leads back to the field.
 - **Run recorder:** it is updated with "Update" and the arrow-circle-up icon. "Update" and "Install run
   recorder" are link buttons in their alerts.
+- **Actions in alerts carry an icon** like every text button: "Try again" sync-alt, "Open in Services"
+  external-link-alt.
 - **Buttons name their object:** "Run job", "Stop job", "Convert job", "Record runs", "Review runs",
   "Remove all runs" and "Install run recorder".
 - **German texts:** errors address the reader as "Sie" ("Geben Sie einen Befehl ein.") instead of the

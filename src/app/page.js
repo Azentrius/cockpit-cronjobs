@@ -50,7 +50,7 @@ export function renderNotices() {
         out.push(alertEl("warning", T.cronDownTitle, T.cronDownBody, b.cron.unit && b.systemd
             ? h("button", { class: "az-btn az-btn--link", type: "button",
                             onclick: () => cockpit.jump("/system/services#/" + encodeURIComponent(b.cron.unit), cockpit.transport.host) },
-                T.openServices)
+                icon("external-link-alt"), T.openServices)
             : null));
     }
     if (capturedJobs.length && b.wrapper === "missing") {
@@ -265,7 +265,7 @@ function renderCrontab(r, els) {
     }
     if (r.status === "error") {
         fill(els.alerts, alertEl("danger", T.readErrorTitle(user), withFix(r.message, T.readErrorFix),
-            h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, T.retry)));
+            h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, icon("sync-alt"), T.retry)));
         fill(body, h("p", { class: "cron-state" }, T.readErrorState));
         return;
     }

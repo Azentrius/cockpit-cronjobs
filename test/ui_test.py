@@ -995,6 +995,7 @@ with sync_playwright() as p:
     ghost_alert = page.inner_text("#ut-ghost-alerts")
     check(ghost.count() == 1 and "Die Crontab von ghost ließ sich nicht lesen" in ghost_alert and "unknown" in ghost_alert and
           "Beheben Sie die Ursache" in ghost_alert and "sobald sie sich lesen lässt" in ghost.inner_text() and
+          page.locator("#ut-ghost-alerts button.az-btn--link svg.az-icon").count() == 1 and
           page.evaluate("() => document.getElementById('ut-ghost-alerts').nextElementSibling.dataset.user") == "ghost",
           "unreadable crontab: the alert above its card: " + ghost_alert)
     check(page.locator("#user-crontabs section[data-user='bad name']").count() == 0, "no card for a name the scripts refuse")
@@ -1218,6 +1219,14 @@ with sync_playwright() as p:
     check(page.inner_text("#conv-cron") == "30 1 * * 0" and "OnCalendar=Sun *-*-* 01:30:00" in page.inner_text("#conv-cal"), "calendar shown")
     wait_js(page, "!document.querySelector('#conv-check').innerText.includes('wird mit')")
     check("die nächsten 5 Läufe stimmen überein" in page.inner_text("#conv-check"), "verified with systemd-analyze")
+    # the name's error only once the field is left
+    page.fill("#conv-name", "bad name")
+    check("Nur Buchstaben" not in page.inner_text("#conv-name-help") and page.get_attribute("#conv-name", "aria-invalid") == "false",
+          "no name error while typing: " + page.inner_text("#conv-name-help"))
+    page.press("#conv-name", "Tab")
+    check("Nur Buchstaben" in page.inner_text("#conv-name-help") and page.get_attribute("#conv-name", "aria-invalid") == "true",
+          "name error once the field is left")
+    page.fill("#conv-name", "fstrim-2")
     page.click("#conv-units-toggle")
     check(not page.locator("#conv-units").is_hidden() and "ExecStart='/bin/sh' -c '/usr/sbin/fstrim -a'" in page.inner_text("#conv-service"),
           "units shown")
@@ -1230,7 +1239,12 @@ with sync_playwright() as p:
     page.locator("#conv-dlg .cron-checkbox").click()
     check("Persistent=true" in page.inner_text("#conv-timer"), "persistent checkbox updates unit")
     page.fill("#conv-name", "bad name")
-    check(page.is_disabled("#conv-ok") and "Nur Buchstaben" in page.inner_text("#conv-name-help"), "invalid name")
+    check("Nur Buchstaben" in page.inner_text("#conv-name-help"), "invalid name")
+    page.click("#conv-ok")
+    page.wait_for_timeout(200)
+    check(page.evaluate("() => document.activeElement.id") == "conv-name" and page.locator("#conv-dlg").is_visible() and
+          mock(page, "units['bad name']") is None and page.locator("#conv-alert").is_hidden(),
+          "converting with an invalid name goes back to the field, nothing written")
     page.fill("#conv-name", "logrotate")
     shot(page, "de-light-convert", full=False)
     page.click("#conv-ok")
@@ -1618,6 +1632,7 @@ with sync_playwright() as p:
 
     page = open_page(browser, "cron=inactive")
     check("Der cron-Dienst läuft nicht" in page.inner_text("#notices"), "cron down notice")
+    check(page.locator("#notices button.az-btn--link svg.az-icon").count() == 1, "the alert's action is a link button with an icon")
     page.locator("#notices button").click()
     check(mock(page, "jumps[0][0]") == "/system/services#/cron.service", "open cron service")
     page.context.close()
