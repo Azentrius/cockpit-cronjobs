@@ -50,7 +50,7 @@ export function renderNotices() {
         out.push(alertEl("warning", T.cronDownTitle, T.cronDownBody, b.cron.unit && b.systemd
             ? h("button", { class: "az-btn az-btn--link", type: "button",
                             onclick: () => cockpit.jump("/system/services#/" + encodeURIComponent(b.cron.unit), cockpit.transport.host) },
-                icon("external-link-alt"), T.openServices)
+                T.openServices, icon("external-link-alt"))
             : null));
     }
     if (capturedJobs.length && b.wrapper === "missing") {
@@ -265,7 +265,7 @@ function renderCrontab(r, els) {
     }
     if (r.status === "error") {
         fill(els.alerts, alertEl("danger", T.readErrorTitle(user), withFix(r.message, T.readErrorFix),
-            h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, icon("sync-alt"), T.retry)));
+            h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, T.retry)));
         fill(body, h("p", { class: "cron-state" }, T.readErrorState));
         return;
     }
@@ -312,7 +312,7 @@ function renderCrontab(r, els) {
                     timer ? h("span", { class: "az-cell-sub" }, T.convertedTo, " ",
                         h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", "data-key": keyOf(user, "timer", i),
                                       title: T.openInCockpit(timer + ".timer"), onclick: () => jumpToUnit(timer + ".timer") },
-                          timer + ".timer"))
+                          timer + ".timer", icon("external-link-alt")))
                         : note ? h("span", { class: "az-cell-sub" }, note) : null)),
             h("td", { class: "az-cell-actions" },
                 r.notUtf8 ? null : btn("run", T.actRun, "play", () => openRun(user, i, keyOf(user, "run", i))),

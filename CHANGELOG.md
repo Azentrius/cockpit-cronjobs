@@ -19,8 +19,8 @@ The page follows the Azentrius design system more closely: states, controls, ale
   for an invalid name; it leads back to the field.
 - **Run recorder:** it is updated with "Update" and the arrow-circle-up icon. "Update" and "Install run
   recorder" are link buttons in their alerts.
-- **Actions in alerts carry an icon** like every text button: "Try again" sync-alt, "Open in Services"
-  external-link-alt.
+- **Links out of the page:** "Open in Services" and the systemd timer a job was converted to carry the
+  external-link-alt icon after the text. Other links, such as "Try again" or "Record runs", have no icon.
 - **Buttons name their object:** "Run job", "Stop job", "Convert job", "Record runs", "Review runs",
   "Remove all runs" and "Install run recorder".
 - **German texts:** errors address the reader as "Sie" ("Geben Sie einen Befehl ein.") instead of the
