@@ -1,4 +1,4 @@
-# Cron Jobs for Cockpit
+# Cron Jobs
 
 A [Cockpit](https://cockpit-project.org) page for cron. It shows everything that is scheduled on a
 server, lets you change the root crontab and those of other users safely, keeps the result of every run,

@@ -119,6 +119,8 @@ with sync_playwright() as p:
     check(page.locator(".az-page-desc, #page-desc").count() == 0, "no description in the header")
     check(page.inner_text(".az-page-header h1").strip() == "Cron Jobs" and page.locator(".az-page-title__suffix").count() == 0,
           "title Cron Jobs without a suffix")
+    check(page.evaluate("getComputedStyle(document.querySelector('.az-page-title'), '::after').content") == '"."',
+          "the title carries the dot of the wordmark")
     refresh = page.evaluate("""() => { const b = document.querySelector('#reload');
         return { cls: b.className, icon: b.firstElementChild.matches('svg.az-icon'), text: b.innerText.trim(),
                  meta: b.previousElementSibling.matches('.az-meta'), inHeader: !!b.closest('.az-page-header') }; }""")

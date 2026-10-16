@@ -1,4 +1,4 @@
-# Cron Jobs for Cockpit
+# Cron Jobs, a Cockpit page for cron
 # SPDX-License-Identifier: Apache-2.0
 
 PREFIX ?= /usr/local
