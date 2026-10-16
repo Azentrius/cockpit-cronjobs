@@ -121,6 +121,7 @@
         failBackups: null,
         conflictNext: null,
         failSystem: false,
+        failTimers: false,
         lockBusy: false,
         systemd: params.get("systemd") !== "no",
         cronActive: params.get("cron") !== "inactive",
@@ -628,6 +629,7 @@
     function systemdCall(path, iface, method, args) {
         const timers = TIMERS();
         if (method === "ListUnitsByPatterns") {
+            if (M.failTimers) throw new Error("Access denied by policy");
             return [timers.map(t => [t.name, t.desc, "loaded", t.inactive ? "inactive" : "active", t.inactive ? "dead" : "waiting",
                                      "", pathOf(t.name), 0, "", "/"])];
         }

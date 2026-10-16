@@ -62,7 +62,7 @@ export function openConvert(user, index, openerKey) {
     openDialog($("conv-dlg"), openerKey, {
         kind: "convert", user, index, base, line: e.line, schedule: e.schedule, specs: cal.specs,
         command: C.cronCommand(info.command).command, shell: env.SHELL || "/bin/sh", env, unset, tz,
-        workdir: cronEnv.HOME || null, verified: null,
+        workdir: cronEnv.HOME || null, verified: null, nameTouched: false,
     }, $("conv-name"));
     updateConvert();
     verifyConvert(dialog);
@@ -78,17 +78,20 @@ function convertUnits(d) {
     };
 }
 
+/* The name's error shows once the field was left or on converting (like Save in the
+   edit dialog); until then the help names no unit. */
 export function updateConvert() {
     const d = dialog;
     if (!d || d.kind !== "convert") return;
     const u = convertUnits(d);
     const valid = SD.validUnitName(u.name);
+    const showError = !valid && d.nameTouched;
     const input = $("conv-name");
-    input.setAttribute("aria-invalid", valid ? "false" : "true");
+    input.setAttribute("aria-invalid", showError ? "true" : "false");
     const help = $("conv-name-help");
-    help.className = valid ? "az-field__help" : "az-field__error";
-    if (valid) fill(help, rich(T.convNameHelp(u.name)));
-    else fill(help, icon("exclamation-circle"), h("span", null, T.convNameInvalid));
+    help.className = showError ? "az-field__error" : "az-field__help";
+    if (showError) fill(help, icon("exclamation-circle"), h("span", null, T.convNameInvalid));
+    else fill(help, rich(T.convNameHelp(valid ? u.name : "…")));
     $("conv-service").textContent = "# " + (valid ? u.name : "…") + ".service\n" + u.service;
     $("conv-timer").textContent = "# " + (valid ? u.name : "…") + ".timer\n" + u.timer;
     const v = d.verified;
@@ -97,7 +100,15 @@ export function updateConvert() {
     if (v === null) fill(check, T.convChecking);
     else if (v.ok) fill(check, icon("check-circle"), h("span", null, T.convChecked(describe(d.schedule), v.count)));
     else fill(check, icon("exclamation-circle"), h("span", null, v.error ? T.convCheckFailed(v.error) : T.convMismatch));
-    $("conv-ok").disabled = state.busy || !valid || !v || !v.ok;
+    $("conv-ok").disabled = state.busy || !v || !v.ok;
+}
+
+/* The name field was left: from now on its error shows. */
+export function touchConvertName() {
+    const d = dialog;
+    if (!d || d.kind !== "convert" || d.nameTouched) return;
+    d.nameTouched = true;
+    updateConvert();
 }
 
 /* The next runs must be the same under systemd as under cron. Ours are computed up to
@@ -150,7 +161,12 @@ export async function submitConvert(ev) {
     const d = dialog;
     if (!d || d.kind !== "convert" || state.busy) return;
     const u = convertUnits(d);
-    if (!SD.validUnitName(u.name)) { $("conv-name").focus(); return; }
+    if (!SD.validUnitName(u.name)) {
+        d.nameTouched = true;
+        updateConvert();
+        $("conv-name").focus();
+        return;
+    }
     if (!d.verified || !d.verified.ok) return;
     dialogError("conv-alert", null);
     setBusyButton($("conv-ok"), true, T.converting);

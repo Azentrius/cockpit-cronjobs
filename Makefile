@@ -16,7 +16,8 @@ all:
 
 install:
 	install -d $(PKGDIR) $(PKGDIR)/app $(PKGDIR)/lib $(PKGDIR)/i18n
-	install -m 644 src/index.html src/manifest.json src/*.js src/*.css src/*.woff2 src/OFL.txt $(PKGDIR)/
+	install -m 644 src/index.html src/manifest.json src/*.js src/*.css src/*.woff2 src/OFL.txt \
+		src/CC-BY-4.0-Font-Awesome.txt $(PKGDIR)/
 	install -m 755 src/cockpit-cronjobs-run $(PKGDIR)/
 	install -m 644 src/app/*.js $(PKGDIR)/app/
 	install -m 644 src/lib/*.js $(PKGDIR)/lib/
@@ -74,7 +75,7 @@ stage:
 	install -D -m 644 packaging/de.azentrius.cronjobs.metainfo.xml \
 		build/root/usr/share/metainfo/de.azentrius.cronjobs.metainfo.xml
 	install -D -m 644 NOTICE build/root/usr/share/doc/cockpit-cronjobs/copyright
-	install -m 644 LICENSE build/root/usr/share/doc/cockpit-cronjobs/LICENSE
+	install -m 644 LICENSE src/CC-BY-4.0-Font-Awesome.txt build/root/usr/share/doc/cockpit-cronjobs/
 
 # cockpit-cronjobs_VERSION-1_all.deb and cockpit-cronjobs-VERSION-1.noarch.rpm in dist/
 # (needs dpkg-deb and rpmbuild), reproducible like the archive.

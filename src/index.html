@@ -64,6 +64,7 @@
       <div class="cron-tl" id="tl-body"></div>
     </section>
 
+    <div class="cron-alerts" id="root-alerts"></div>
     <section class="az-card" aria-labelledby="root-title">
       <div class="az-card__header">
         <div>
@@ -83,8 +84,15 @@
   </section>
 
   <section class="cron-panel" id="panel-timers" role="tabpanel" aria-labelledby="tab-timers" hidden>
-    <p class="cron-state" id="timers-none" data-t="timersNone" hidden>This server has no systemd timers.</p>
+    <section class="az-card" id="timers-none" aria-labelledby="timers-none-title" hidden>
+      <div class="az-empty">
+        <span class="az-empty__icon"><span data-icon="clock"></span></span>
+        <h2 class="az-empty__title" id="timers-none-title" data-t="timersNone">No systemd timers</h2>
+        <p class="az-empty__body" id="timers-none-body"></p>
+      </div>
+    </section>
 
+    <div class="cron-alerts" id="timers-alerts"></div>
     <section class="az-card" id="timers-card" aria-labelledby="timers-title" hidden>
       <div class="az-card__header">
         <div>
@@ -139,8 +147,8 @@
   </section>
 
   <footer class="az-signature cron-footer">
-    <a class="az-signature__mark" href="https://github.com/Azentrius/cockpit-cronjobs" target="_blank" rel="noopener noreferrer">Azentrius</a>
-    <span class="az-signature__meta"><span id="sig-version">Cron Jobs</span><span id="sig-host"></span></span>
+    <a class="az-signature__mark" href="https://azentrius.de" target="_blank" rel="noopener noreferrer">Azentrius</a>
+    <span class="az-signature__meta"><span id="sig-version">Cron Jobs</span><span id="sig-host"></span><a href="https://github.com/Azentrius/cockpit-cronjobs" target="_blank" rel="noopener noreferrer" data-t="sourceCode">Source code</a></span>
   </footer>
 </div>
 
@@ -168,10 +176,10 @@
         <p class="cron-field-warn" id="f-command-warn" hidden></p>
       </div>
       <div class="az-field" id="f-capture-field">
-        <label class="az-switch"><input type="checkbox" role="switch" id="f-capture" aria-describedby="f-capture-help"><span class="az-switch__track"></span><span class="az-switch__label" data-t="fCapture">Record result and output</span></label>
+        <label class="cron-checkbox"><input type="checkbox" id="f-capture" aria-describedby="f-capture-help"><span data-t="fCapture">Record result and output</span></label>
         <p class="az-field__help" id="f-capture-help"></p>
       </div>
-      <label class="az-switch"><input type="checkbox" role="switch" id="f-active"><span class="az-switch__track"></span><span class="az-switch__label" data-t="fActive">Job is active</span></label>
+      <label class="cron-checkbox"><input type="checkbox" id="f-active"><span data-t="fActive">Job is active</span></label>
     </div>
     <div class="az-modal__footer">
       <button class="az-btn az-btn--primary" type="submit" id="edit-save" data-t="save">Save</button>
@@ -339,7 +347,7 @@
         <p class="az-field__help" id="conv-check" aria-live="polite"></p>
       </div>
       <div class="az-field">
-        <label class="az-switch"><input type="checkbox" role="switch" id="conv-persistent" aria-describedby="conv-persistent-help"><span class="az-switch__track"></span><span class="az-switch__label" data-t="convPersistent">Catch up on missed runs</span></label>
+        <label class="cron-checkbox"><input type="checkbox" id="conv-persistent" aria-describedby="conv-persistent-help"><span data-t="convPersistent">Catch up on missed runs</span></label>
         <p class="az-field__help" id="conv-persistent-help" data-t="convPersistentHelp"></p>
       </div>
       <div>

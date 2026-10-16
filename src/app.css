@@ -23,8 +23,6 @@ html { background: var(--bg-page); }
 
 /* States inside a card */
 .cron-state { margin: 0; padding: var(--space-md) var(--space-lg) var(--space-lg); color: var(--text-subtle); }
-.cron-card-alert { margin: var(--space-md) var(--space-lg) var(--space-lg); }
-.cron-card-alert + .az-table-wrap { margin-block-start: calc(-1 * var(--space-sm)); }
 
 /* Leftover runs, under the root crontab */
 .cron-orphans {
@@ -50,10 +48,11 @@ html { background: var(--bg-page); }
 .cron-chips { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
 .az-table tr.is-off .cron-muted { color: var(--text-disabled); }
 
-/* A result label that opens the runs */
+/* A result label that opens the runs; like every control at least 29 px high (44 px on phones) */
 .cron-label-btn {
   display: inline-flex;
   align-items: center;
+  min-block-size: 29px;
   padding: 0;
   border: 0;
   background: none;
@@ -63,7 +62,7 @@ html { background: var(--bg-page); }
 }
 .cron-label-btn:hover .az-label { text-decoration: underline; }
 .cron-label-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.az-btn.cron-inline-link { min-block-size: 0; padding: 0; font-size: 12px; }
+.az-btn.cron-inline-link { display: inline-flex; min-block-size: 29px; padding: 0; font-size: 12px; }
 
 @media (max-width: 640px) {
   .az-table--stack .cron-chips { justify-content: flex-end; }
@@ -76,7 +75,7 @@ html { background: var(--bg-page); }
 .cron-tl { --tl-label: 220px; padding: var(--space-md) var(--space-lg) var(--space-sm); }
 .cron-tl-header { align-items: flex-start; }
 .cron-tl-legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md); font-size: 12px; color: var(--text-subtle); }
-.cron-tl-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.cron-tl-legend > span { display: inline-flex; align-items: center; gap: var(--space-sm); }
 
 .cron-tl-scale, .cron-tl-row {
   display: grid;
@@ -100,7 +99,7 @@ html { background: var(--bg-page); }
 .cron-tl-now { position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: 2px; background: var(--text); }
 
 .cron-tl-rows { list-style: none; margin: 0; padding: 0; }
-.cron-tl-row { align-items: center; padding: 6px 0; border-block-start: 1px solid var(--line); }
+.cron-tl-row { align-items: center; padding: var(--space-xs) 0; border-block-start: 1px solid var(--line); }
 .cron-tl-label { min-width: 0; display: flex; flex-direction: column; }
 .cron-tl-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cron-tl-src { font-size: 12px; color: var(--text-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -164,19 +163,21 @@ html { background: var(--bg-page); }
   z-index: 1000;
   min-inline-size: 240px;
   max-inline-size: min(360px, calc(100vw - 16px));
-  padding: var(--space-sm) 0;
+  padding: var(--space-sm);
   background: var(--bg-floating);
   border: 1px solid var(--line);
   border-radius: var(--radius-medium);
   box-shadow: var(--shadow-md);
 }
+/* Items sit inside the menu's padding, so that the focus ring (2 px, 2 px away) fits. */
 .cron-menu__item {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-sm);
   inline-size: 100%;
-  padding: 8px var(--space-md);
+  padding: var(--space-sm);
   border: 0;
+  border-radius: var(--radius-small);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -185,7 +186,7 @@ html { background: var(--bg-page); }
   cursor: pointer;
 }
 .cron-menu__item:hover, .cron-menu__item:focus { background: var(--bg-hover); outline: none; }
-.cron-menu__item:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
+.cron-menu__item:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .cron-menu__item .az-icon { flex: none; margin-block-start: 3px; color: var(--text-subtle); }
 .cron-menu__item.is-danger, .cron-menu__item.is-danger .az-icon { color: var(--danger-text); }
 .cron-menu__item[aria-disabled="true"], .cron-menu__item[aria-disabled="true"] .az-icon { color: var(--text-disabled); cursor: default; }
@@ -204,7 +205,7 @@ html { background: var(--bg-page); }
 .cron-modal-heading { min-width: 0; }
 .az-modal__body p.cron-modal-sub, .cron-modal-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-subtle); overflow-wrap: anywhere; }
 .cron-codebox {
-  padding: 12px var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   background: var(--bg-page);
@@ -215,6 +216,14 @@ html { background: var(--bg-page); }
 .cron-field-warn .az-icon { margin-block-start: 3px; color: var(--status-warning); }
 .az-field__error .az-icon { flex: none; }
 .az-btn[aria-busy="true"] { cursor: progress; }
+/* A choice in a form with "Save" is a checkbox; a switch is only for what applies at once. */
+.cron-checkbox { display: inline-flex; align-items: center; gap: var(--space-sm); min-block-size: 29px; font-size: 14px; cursor: pointer; }
+.cron-checkbox input { flex: none; inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.cron-checkbox input:disabled { cursor: not-allowed; }
+.cron-checkbox input:disabled + span { color: var(--text-disabled); }
+@media (max-width: 640px) {
+  .cron-checkbox { min-block-size: 44px; }
+}
 .az-field__help code, .az-field__error code, .cron-field-warn code, .cron-muted code { font-size: 1em; }
 .cron-actions { display: flex; flex-wrap: wrap; gap: var(--space-md); }
 
@@ -222,7 +231,7 @@ html { background: var(--bg-page); }
   margin: 0;
   max-block-size: 240px;
   overflow: auto;
-  padding: 12px var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   background: var(--bg-page);
@@ -233,7 +242,7 @@ html { background: var(--bg-page); }
 .cron-log:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 #run-log { block-size: 240px; }
 .cron-log.is-empty { color: var(--text-subtle); }
-.cron-run-status { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 14px; }
+.cron-run-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-md); font-size: 14px; }
 
 /* runs */
 .cron-runs-table { border: 1px solid var(--line); border-radius: var(--radius-small); overflow: hidden; }
@@ -270,27 +279,27 @@ html { background: var(--bg-page); }
 .cron-diff__line.is-add { background: var(--tint-success); color: var(--on-tint-success); }
 .cron-diff__mark { flex: none; }
 .cron-diff__text { white-space: pre; }
-.cron-diff__note, .cron-diff__skip { color: var(--text-subtle); font-style: italic; }
+.cron-diff__note, .cron-diff__skip { color: var(--text-subtle); }
 .cron-diff__skip { padding-inline: var(--space-sm); }
 
 /* convert */
 .cron-conv-grid {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
-  gap: 4px 12px;
-  padding: 12px var(--space-md);
+  gap: var(--space-xs) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--line);
   border-radius: var(--radius-small);
   background: var(--bg-page);
   font-size: 14px;
 }
 .cron-conv-spec { display: block; overflow-wrap: anywhere; }
-.cron-check { display: flex; align-items: flex-start; gap: 6px; }
+.cron-check { display: flex; align-items: flex-start; gap: var(--space-xs); }
 .cron-check .az-icon { flex: none; margin-block-start: 3px; }
 .cron-check.is-good .az-icon { color: var(--status-success); }
 .cron-check.is-bad { color: var(--danger-text); }
 .az-btn.cron-disclosure { padding-inline: 0; }
-.cron-units { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-block-start: var(--space-sm); }
+.cron-units { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-md); margin-block-start: var(--space-sm); }
 .cron-units .cron-log { max-block-size: none; font-size: 12px; }
 @media (max-width: 720px) {
   .cron-units { grid-template-columns: minmax(0, 1fr); }

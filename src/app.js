@@ -35,7 +35,7 @@ import {
     closeDialog, confirmDelete, confirmOk, dialog, form, openCaptureOff, openEdit, submitEdit, updateForm,
 } from "./app/dialogs.js";
 import { orphanList, removeOrphanRuns, startRun, stopRun } from "./app/runs.js";
-import { submitBack, submitConvert, toggleUnits, updateConvert } from "./app/convert.js";
+import { submitBack, submitConvert, toggleUnits, touchConvertName, updateConvert } from "./app/convert.js";
 import { openBackups } from "./app/backups.js";
 import { initTabs } from "./app/tabs.js";
 
@@ -105,6 +105,7 @@ function init() {
     $("conv-cancel").addEventListener("click", () => closeDialog());
     $("conv-close").addEventListener("click", () => closeDialog());
     $("conv-name").addEventListener("input", updateConvert);
+    $("conv-name").addEventListener("blur", touchConvertName);
     $("conv-persistent").addEventListener("change", updateConvert);
     $("conv-units-toggle").addEventListener("click", toggleUnits);
 

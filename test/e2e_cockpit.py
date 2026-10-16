@@ -246,7 +246,7 @@ with sync_playwright() as p:
     page.click("#add")
     page.fill("#f-schedule", "0 3 * * *")
     page.fill("#f-command", "sleep 307; echo never")
-    page.locator("#edit-dlg .az-switch").nth(0).click()
+    page.locator("#edit-dlg .cron-checkbox").nth(0).click()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -357,7 +357,7 @@ with sync_playwright() as p:
     wait_idle(page)
     check(page.locator("#orphans").is_visible(), "leftover runs offered")
     page.click("[data-key=orphans]")
-    check(rec_id in page.inner_text("#orph-body") and "KB" in page.inner_text("#orph-body"),
+    check(rec_id in page.inner_text("#orph-body") and "KiB" in page.inner_text("#orph-body"),
           "leftover job listed with its size: " + page.inner_text("#orph-body"))
     page.screenshot(path=os.path.join(SHOTS, "e2e-orphans.png"))
     page.click(f"[data-key='orph:{rec_id}']")
@@ -544,7 +544,7 @@ with sync_playwright() as p:
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "* * * * *")
     page.fill("#f-command", "{ " + WHO + "; } > /tmp/cj-e2e-whoami")
-    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()   # the plain line; recording comes below
+    page.locator("label.cron-checkbox").filter(has=page.locator("#f-capture")).click()   # the plain line; recording comes below
     check(not page.is_checked("#f-capture"), "recording off for the plain job")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
@@ -579,7 +579,7 @@ with sync_playwright() as p:
     card.locator(f"[data-key='add:{USER}']").click()
     page.fill("#f-schedule", "0 5 1 1 *")
     page.fill("#f-command", WHO)
-    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()
+    page.locator("label.cron-checkbox").filter(has=page.locator("#f-capture")).click()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)

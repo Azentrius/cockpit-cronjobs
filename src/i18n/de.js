@@ -23,9 +23,10 @@
         close: "Schließen",
         cancel: "Abbrechen",
         retry: "Erneut versuchen",
-        install: "Installieren",
-        update: "Aktualisieren",
+        install: "Lauf-Rekorder installieren",
+        update: "Update",
         readOnly: "Nur lesen",
+        sourceCode: "Quellcode",
         none: "keine",
         noEntries: "Keine Einträge.",
         loading: "Wird geladen …",
@@ -46,6 +47,9 @@
         noCrontabTitle: "cron ist nicht installiert",
         noCrontabBody: "Der Befehl `crontab` wurde nicht gefunden. Installieren Sie das cron-Paket Ihrer " +
                        "Distribution (etwa `cron` oder `cronie`).",
+        noCrontabState: "Die Crontab erscheint hier, sobald cron installiert ist.",
+        readErrorFix: "Beheben Sie die Ursache auf dem Server und versuchen Sie es dann erneut.",
+        reloadFix: "Beheben Sie die Ursache auf dem Server und laden Sie die Seite dann mit „Aktualisieren“ neu.",
         wrapperMissingTitle: "Der Lauf-Rekorder fehlt",
         wrapperMissingBody: (n, path) => `\`${path}\` ist nicht installiert, deshalb ${n === 1 ? "kann 1 Job, der seine Läufe erfasst," : "können " + n + " Jobs, die ihre Läufe erfassen,"} nicht starten.`,
         wrapperOldTitle: "Der Lauf-Rekorder kann aktualisiert werden",
@@ -107,7 +111,7 @@
         captureOff: "Erfassung ausschalten",
         convert: "In systemd-Timer umwandeln",
         notRecorded: "Nicht erfasst",
-        recordLink: "Erfassen",
+        recordLink: "Läufe erfassen",
         noRunYet: "Noch kein Lauf",
         statusOk: "OK",
         statusFailed: rc => `Fehler · Exit ${rc}`,
@@ -127,6 +131,7 @@
         deniedBody: "Die root-Crontab lässt sich nur mit administrativem Zugriff lesen und ändern. Schalten Sie ihn " +
                     "oben in Cockpit über „Eingeschränkter Zugriff“ ein; die Seite lädt danach von selbst neu.",
         readErrorTitle: user => `Die ${crontabName(user)} ließ sich nicht lesen`,
+        readErrorState: "Die Crontab erscheint hier, sobald sie sich lesen lässt.",
         sysErrorTitle: "Die System-Crontabs ließen sich nicht lesen",
         lockedTitle: "Nur lesend geöffnet",
         lockedBody: "Diese Crontab enthält Zeilen, die beim Zurückschreiben nicht exakt erhalten blieben. " +
@@ -138,7 +143,10 @@
         timersTitle: "systemd-Timer",
         timersDesc: "Dienste, die systemd nach Zeitplan startet. Status und Protokoll stehen in Cockpit unter Dienste.",
         timersErrorTitle: "Die systemd-Timer ließen sich nicht lesen",
-        timersNone: "Auf diesem Server gibt es keine systemd-Timer.",
+        timersErrorState: "Die Timer erscheinen hier, sobald sie sich lesen lassen.",
+        timersNone: "Keine systemd-Timer",
+        timersNoneBody: "systemd startet auf diesem Server keine Dienste nach Zeitplan.",
+        timersNoSystemd: "Dieser Server läuft ohne systemd.",
         timerInactive: "Nicht aktiv",
         fromCrontab: user => `aus der ${crontabName(user)} übernommen`,
         randomUpTo: span => `bis ${span} später`,
@@ -180,16 +188,16 @@
                       "Kürzel wie `@daily` oder `@reboot` gehen auch.",
         nextHelp: (desc, when) => `${desc} · nächster Lauf ${when}`,
         bootHelp: "Läuft einmal bei jedem Systemstart.",
-        errRequired: "Bitte einen Zeitplan eingeben.",
+        errRequired: "Geben Sie einen Zeitplan ein.",
         errCount: "Ein Zeitplan hat genau fünf Felder: Minute, Stunde, Tag, Monat, Wochentag. Oder ein Kürzel wie `@daily`.",
         errField: (name, range) => `${name}: erlaubt sind ${range}, dazu *, Listen (1,15), Bereiche (1-5) und Schritte (*/10).`,
         fieldNames: { minute: "Minute", hour: "Stunde", dom: "Tag", month: "Monat", dow: "Wochentag" },
         fieldRanges: { minute: "0–59", hour: "0–23", dom: "1–31", month: "1–12 oder jan–dec",
                        dow: "0–7 oder sun–sat (0 und 7 sind Sonntag)" },
         errNever: "Dieser Zeitplan trifft nie zu, zum Beispiel am 31. Februar.",
-        errCommand: "Bitte einen Befehl eingeben.",
+        errCommand: "Geben Sie einen Befehl ein.",
         errNewline: "Ein Befehl muss in eine Zeile passen.",
-        errLine: "cron würde diese Zeile anders lesen als eingegeben. Bitte Zeitplan und Befehl prüfen.",
+        errLine: "cron würde diese Zeile anders lesen als eingegeben. Prüfen Sie Zeitplan und Befehl.",
         commandHelp: user => `Läuft als ${user}. Ausgaben gehen an die lokale Mail von ${user}.`,
         commandHelpMailto: user => `Läuft als ${user}. Ausgaben gehen an die lokale Mail von ${user}, sofern MAILTO in der ` +
                                    "Crontab nichts anderes festlegt.",
@@ -197,8 +205,8 @@
             (user === "root" ? "verloren, außer der Job erfasst seine Läufe oder leitet sie um, etwa `>> /var/log/meinjob.log 2>&1`."
                 : "verloren, außer der Job leitet sie um, etwa `>> $HOME/meinjob.log 2>&1`."),
         commandHelpNoMtaRecorded: user => `Läuft als ${user}. Ergebnis und Ausgabe werden erfasst.`,
-        percentWarn: "cron liest % als Zeilenumbruch und gibt den Rest als Eingabe weiter. Für ein Prozentzeichen " +
-                     "`\\%` schreiben, etwa `date +\\%F`.",
+        percentWarn: "cron liest % als Zeilenumbruch und gibt den Rest als Eingabe weiter. Schreiben Sie für ein " +
+                     "Prozentzeichen `\\%`, etwa `date +\\%F`.",
 
         /* Löschen */
         delTitle: "Job löschen?",
@@ -227,9 +235,9 @@
         unverifiedTitle: "Gespeichert, aber nicht bestätigt",
         unverifiedBody: "Die Crontab wurde geschrieben, ließ sich danach aber nicht mit dem erwarteten Inhalt " +
                         "zurücklesen. Bitte prüfen Sie den angezeigten Stand.",
-        stillLoading: "Die Seite lädt gerade neu. Bitte gleich noch einmal versuchen.",
+        stillLoading: "Die Seite lädt gerade neu. Versuchen Sie es gleich noch einmal.",
         stillBusy: "Eine andere Änderung wird gerade gespeichert.",
-        lockBusy: "Die Crontab wird gerade an anderer Stelle geändert. Bitte gleich noch einmal versuchen.",
+        lockBusy: "Die Crontab wird gerade an anderer Stelle geändert. Versuchen Sie es gleich noch einmal.",
 
         /* Erfassung ausschalten */
         captureOffTitle: "Erfassung ausschalten?",
@@ -244,14 +252,14 @@
         runRecorded: "Ergebnis und Ausgabe werden erfasst.",
         runStdin: "Der Text nach % in der Zeile wird als Eingabe übergeben, wie bei cron.",
         runKeepOpen: "Der Job wird angehalten, wenn Sie diese Seite schließen, während er läuft.",
-        runStart: "Ausführen",
-        runStop: "Anhalten",
+        runStart: "Job ausführen",
+        runStop: "Job anhalten",
         stopping: "Wird angehalten …",
         runAgain: "Erneut ausführen",
         runElapsed: t => `seit ${t}`,
         runDone: (dur, time) => `nach ${dur} · um ${time}`,
         runOutput: "Ausgabe",
-        runOutputCut: "Gezeigt werden nur die letzten 256 KB der Ausgabe.",
+        runOutputCut: "Gezeigt werden nur die letzten 256 KiB der Ausgabe.",
         runCouldNotStart: "Start fehlgeschlagen",
         deniedRun: "Zum Ausführen ist administrativer Zugriff nötig.",
         noOutput: "Keine Ausgabe.",
@@ -269,17 +277,19 @@
         hideOutput: "Ausgabe ausblenden",
         copyOutput: "Ausgabe kopieren",
         copied: "Kopiert",
-        outputError: "Die Ausgabe ließ sich nicht lesen.",
-        outputTruncated: "Von dieser Ausgabe wurden nur die letzten 64 KB aufbewahrt.",
+        outputError: "Die Ausgabe ließ sich nicht lesen. Schließen Sie den Dialog und öffnen Sie die Läufe erneut.",
+        outputTruncated: "Von dieser Ausgabe wurden nur die letzten 64 KiB aufbewahrt.",
         runsEmpty: "Noch keine Läufe erfasst.",
-        runsNote: (n, path) => `Aufbewahrt werden die letzten ${n} Läufe mit je bis zu 64 KB Ausgabe, unter \`${path}\`.`,
+        runsNote: (n, path) => `Aufbewahrt werden die letzten ${n} Läufe mit je bis zu 64 KiB Ausgabe, unter \`${path}\`.`,
         runsJournalNote: unit => `Die Läufe von \`${unit}\` stammen aus dem Journal; wie weit es zurückreicht, hängt von seinen Einstellungen ab.`,
         journalFailed: "Das Journal ließ sich nicht lesen",
+        journalFix: "Schließen Sie den Dialog und öffnen Sie die Läufe erneut. Bleibt der Fehler, prüfen Sie den " +
+                    "Dienst systemd-journald.",
 
         /* Übrig gebliebene Läufe */
         orphansLine: n => n === 1 ? "Die erfassten Läufe von 1 Job sind noch gespeichert, aber keine Crontab verwendet sie mehr."
             : `Die erfassten Läufe von ${n} Jobs sind noch gespeichert, aber keine Crontab verwendet sie mehr.`,
-        orphansShow: "Ansehen",
+        orphansShow: "Läufe ansehen",
         orphansTitle: "Übrig gebliebene Läufe",
         orphansIntro: "Keine Crontab verwendet diese erfassten Läufe mehr, etwa weil ihre Zeile außerhalb dieser Seite " +
                       "geändert oder entfernt wurde.",
@@ -288,7 +298,7 @@
         colSize: "Größe",
         orphansNote: path => `Entfernen löscht die erfassten Ergebnisse und Ausgaben in \`${path}\`. Keine Crontab wird geändert.`,
         orphansRemove: id => `Läufe von ${id} entfernen`,
-        orphansRemoveAll: "Alle entfernen",
+        orphansRemoveAll: "Alle Läufe entfernen",
         removing: "Wird entfernt …",
         orphansNone: "Keine übrig gebliebenen Läufe.",
         okOrphansRemoved: n => n === 1 ? "Übrig gebliebene Läufe von 1 Job entfernt" : `Übrig gebliebene Läufe von ${n} Jobs entfernt`,
@@ -306,6 +316,8 @@
                                   `in \`${path}\`.`,
         backupsNone: "Noch keine Sicherungen. Die erste entsteht mit der ersten Änderung auf dieser Seite.",
         backupsReadError: "Die Sicherungen konnten nicht gelesen werden",
+        backupsReadFix: path => "Schließen Sie den Dialog und öffnen Sie die Sicherungen erneut. Bleibt der Fehler, " +
+                                `prüfen Sie \`${path}\` auf dem Server.`,
         colSaved: "Gesichert",
         colRestoring: "Wiederherstellen ändert",
         backupSame: "Nichts, sie ist die aktuelle Crontab",
@@ -353,7 +365,7 @@
         convHideUnits: "Einheiten ausblenden",
         convAfter: user => `Danach wird die Zeile in der ${crontabName(user)} ausgeschaltet und mit einem Hinweis versehen. ` +
                    "Vorher wird ein Backup angelegt.",
-        convConfirm: "Umwandeln",
+        convConfirm: "Job umwandeln",
         converting: "Wird umgewandelt …",
         convFailed: "Umwandeln fehlgeschlagen",
         convUnitMismatch: "systemd hat den Befehl oder seine Umgebung nicht wie vorgesehen gelesen. Es wurde nichts geändert.",

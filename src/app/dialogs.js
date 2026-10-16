@@ -102,6 +102,8 @@ function setFieldState(input, help, ok, message) {
     fill(help, ok ? rich(message) : [icon("exclamation-circle"), h("span", null, rich(message))]);
 }
 
+/* Errors show once a field was left (touched) or on saving (showAll); until then the
+   field keeps its help. */
 export function updateForm(showAll) {
     const d = dialog && dialog.kind === "edit" ? dialog : null;
     const user = d ? d.base.user : "root";
@@ -112,7 +114,7 @@ export function updateForm(showAll) {
     const showCmd = showAll || form.touched.command;
 
     if (sched.ok) setFieldState(form.schedule(), $("f-schedule-help"), true, sched.help);
-    else if (showSched || !sched.empty) setFieldState(form.schedule(), $("f-schedule-help"), false, sched.msg);
+    else if (showSched) setFieldState(form.schedule(), $("f-schedule-help"), false, sched.msg);
     else setFieldState(form.schedule(), $("f-schedule-help"), true, T.scheduleHelp);
 
     const capture = form.capture();
@@ -120,7 +122,7 @@ export function updateForm(showAll) {
     const cmdHelp = state.basics.mta === false && !mailto
         ? (recorded ? T.commandHelpNoMtaRecorded(user) : T.commandHelpNoMta(user))
         : mailto ? T.commandHelpMailto(user) : T.commandHelp(user);
-    if (!cmd.ok && (showCmd || !cmd.empty)) setFieldState(form.command(), $("f-command-help"), false, cmd.msg);
+    if (!cmd.ok && showCmd) setFieldState(form.command(), $("f-command-help"), false, cmd.msg);
     else setFieldState(form.command(), $("f-command-help"), true, cmdHelp);
 
     const warn = $("f-command-warn");
@@ -161,6 +163,8 @@ export function openEdit(user, index, openerKey) {
 export async function submitEdit(ev) {
     ev.preventDefault();
     if (!dialog || dialog.kind !== "edit" || state.busy) return;
+    form.touched.schedule = true;
+    form.touched.command = true;
     const { sched, cmd } = updateForm(true);
     if (!sched.ok) { form.schedule().focus(); return; }
     if (!cmd.ok) { form.command().focus(); return; }
