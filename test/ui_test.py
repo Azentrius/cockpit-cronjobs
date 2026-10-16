@@ -995,7 +995,8 @@ with sync_playwright() as p:
     ghost_alert = page.inner_text("#ut-ghost-alerts")
     check(ghost.count() == 1 and "Die Crontab von ghost ließ sich nicht lesen" in ghost_alert and "unknown" in ghost_alert and
           "Beheben Sie die Ursache" in ghost_alert and "sobald sie sich lesen lässt" in ghost.inner_text() and
-          page.locator("#ut-ghost-alerts button.az-btn--link svg.az-icon").count() == 1 and
+          page.locator("#ut-ghost-alerts button.az-btn--link").count() == 1 and
+          page.locator("#ut-ghost-alerts button.az-btn--link svg").count() == 0 and
           page.evaluate("() => document.getElementById('ut-ghost-alerts').nextElementSibling.dataset.user") == "ghost",
           "unreadable crontab: the alert above its card: " + ghost_alert)
     check(page.locator("#user-crontabs section[data-user='bad name']").count() == 0, "no card for a name the scripts refuse")
@@ -1301,6 +1302,8 @@ with sync_playwright() as p:
     ct = conv.inner_text()
     check("Umgewandelt in systemd-Timer" in ct and "fstrim-weekly.timer" in ct and "Converted to" not in ct,
           "converted job recognised: " + ct)
+    check(conv.locator("button", has_text="fstrim-weekly.timer").evaluate("b => b.lastElementChild.matches('svg.az-icon')"),
+          "the link out of the page carries its icon after the text")
     conv.locator("button", has_text="fstrim-weekly.timer").click()
     check(mock(page, "jumps")[-1][0] == "/system/services#/fstrim-weekly.timer", "link to the timer")
     conv.locator("[data-key^=more]").click()
@@ -1632,7 +1635,8 @@ with sync_playwright() as p:
 
     page = open_page(browser, "cron=inactive")
     check("Der cron-Dienst läuft nicht" in page.inner_text("#notices"), "cron down notice")
-    check(page.locator("#notices button.az-btn--link svg.az-icon").count() == 1, "the alert's action is a link button with an icon")
+    check(page.evaluate("() => document.querySelector('#notices button.az-btn--link').lastElementChild.matches('svg.az-icon')"),
+          "a link out of the page carries its icon after the text")
     page.locator("#notices button").click()
     check(mock(page, "jumps[0][0]") == "/system/services#/cron.service", "open cron service")
     page.context.close()
