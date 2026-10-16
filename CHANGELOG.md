@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.7.0 – 2026-10-16
 
 The page follows the Azentrius design system more closely: states, controls, alerts and texts.
 
