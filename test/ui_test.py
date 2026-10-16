@@ -153,6 +153,13 @@ with sync_playwright() as p:
     check(row(page, 2).locator("td[data-last]").inner_text().strip() == "—", "disabled, not recorded: dash")
     check("/home/eve/run.sh" not in page.inner_text("#tl-card"), "skipped cron.d file not in timeline")
     check(f"Cron Jobs {VERSION}" in page.inner_text("footer"), "signature version")
+    sig = page.evaluate("""() => [document.querySelector('.az-signature__mark').href,
+        Array.from(document.querySelectorAll('.az-signature__meta a')).map(a => [a.href, a.innerText.trim()])]""")
+    check(sig == ["https://azentrius.de/", [["https://github.com/Azentrius/cockpit-cronjobs", "Quellcode"]]],
+          "signature: the word mark links to azentrius.de, the source code follows the facts: " + repr(sig))
+    low = page.evaluate("""() => Array.from(document.querySelectorAll('button'))
+        .filter(b => b.offsetParent && b.getBoundingClientRect().height < 29).map(b => b.textContent || b.className)""")
+    check(not low, "controls >= 29px on the desktop: " + repr(low))
     check(re.search(r"Ortszeit", page.inner_text("#root-body")) is not None, "local time hint (browser Berlin, server UTC)")
     check(page.inner_text("#notices").strip() == "", "no notices on a healthy server")
     # timeline
@@ -175,6 +182,7 @@ with sync_playwright() as p:
     # System tab: /etc/crontab, /etc/cron.d, other users, periodic scripts
     show_tab(page, "system")
     check(page.locator("#crond-body .az-label--warning").count() == 2, "ignored cron.d files flagged (name, owner)")
+    check(page.locator("#crond-body .az-label--warning svg.az-icon").count() == 2, "ignored: with the warning icon")
     check(page.locator("#crond-body .az-label--warning").nth(1).get_attribute("title").startswith("cron überspringt diese Datei, weil"),
           "owner reason as hint")
     check(not page.locator("#etc-card").is_hidden() and not page.locator("#crond-card").is_hidden(), "/etc/crontab and /etc/cron.d")
@@ -188,6 +196,8 @@ with sync_playwright() as p:
     check(page.locator("#timers-body tbody tr").count() == 6, "6 timers")
     check("aus der root-Crontab übernommen" in tm, "converted timer recognised")
     check("Fehler · Exit 32" in tm and "Läuft" in tm and "Nicht aktiv" in tm, "timer states")
+    check(page.locator("#timers-body .az-label--success", has_text="Läuft").count() >= 1 and
+          page.locator("#timers-body .az-label--info").count() == 0, "running is a good state, not a hint")
     check("Täglich um 06:00 und 18:00, zufällig verzögert" in tm, "timer described")
     check("15min nach dem Systemstart" in tm, "monotonic timer described")
     page.locator("#timers-body tbody tr", has_text="apt-daily.timer").locator("button[aria-label='apt-daily.timer in Cockpit öffnen']").click()
@@ -333,7 +343,10 @@ with sync_playwright() as p:
     check("Sonntags um 01:30 · nächster Lauf" in page.inner_text("#f-schedule-help"), "live help")
     shot(page, "de-light-edit", full=False)
     page.fill("#f-schedule", "61 * * * *")
-    check("Minute: erlaubt sind 0–59" in page.inner_text("#edit-dlg"), "field error minute")
+    check("Minute: erlaubt" not in page.inner_text("#edit-dlg") and page.get_attribute("#f-schedule", "aria-invalid") == "false",
+          "no field error while typing")
+    page.press("#f-schedule", "Tab")
+    check("Minute: erlaubt sind 0–59" in page.inner_text("#edit-dlg"), "field error minute once the field is left")
     check(page.get_attribute("#f-schedule", "aria-invalid") == "true", "aria-invalid set")
     writes = mock(page, "writes")
     page.click("#edit-save")
@@ -371,20 +384,22 @@ with sync_playwright() as p:
     check(page.locator("#edit-title").inner_text() == "Job hinzufügen", "add title")
     check("Fünf Felder" in page.inner_text("#f-schedule-help"), "empty schedule help")
     check(page.is_checked("#f-capture"), "new jobs record their runs by default")
+    check(page.locator("#edit-dlg .az-switch, #edit-dlg [role=switch]").count() == 0 and
+          page.locator("#edit-dlg .cron-checkbox input[type=checkbox]").count() == 2, "a form with Save has checkboxes, not switches")
     page.keyboard.press("Escape")
     check(page.locator("#edit-dlg").is_hidden(), "escape closes")
     check(page.evaluate("() => document.activeElement.id") == "add", "focus returns to add")
     page.click("#add")
     page.click("#edit-save")
-    check("Bitte einen Zeitplan eingeben." in page.inner_text("#edit-dlg"), "required schedule")
-    check("Bitte einen Befehl eingeben." in page.inner_text("#edit-dlg"), "required command")
+    check("Geben Sie einen Zeitplan ein." in page.inner_text("#edit-dlg"), "required schedule")
+    check("Geben Sie einen Befehl ein." in page.inner_text("#edit-dlg"), "required command")
     page.fill("#f-schedule", "@daily")
     page.fill("#f-command", "date +%F > /tmp/heute")
     check(not page.locator("#f-command-warn").is_hidden() and "Zeilenumbruch" in page.inner_text("#f-command-warn"), "percent warning")
     check(page.is_disabled("#f-capture") and "nicht erfassen" in page.inner_text("#f-capture-help"), "no recording with %")
     page.fill("#f-command", "date +\\%F > /tmp/heute")
     check(page.locator("#f-command-warn").is_hidden() and page.is_enabled("#f-capture"), "escaped percent ok")
-    page.locator("#edit-dlg .az-switch").nth(1).click()
+    page.locator("#edit-dlg .cron-checkbox").nth(1).click()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -488,7 +503,7 @@ with sync_playwright() as p:
     check("/var/lib/cockpit-cronjobs/runs/" in page.inner_text("#runs-note"), "runs note")
     page.locator("#runs-body [data-key^='out:']").first.click()
     wait_js(page, "document.querySelector('#runs-body pre') && document.querySelector('#runs-body pre').textContent.includes('download failed')")
-    check("letzten 64 KB" in page.inner_text("#runs-body"), "truncated note")
+    check("letzten 64 KiB" in page.inner_text("#runs-body"), "truncated note")
     check(page.locator("#runs-body [data-key^='copy:']").count() == 1, "copy button")
     check(page.locator("#runs-body [data-key^='out:']").first.get_attribute("aria-expanded") == "true", "aria-expanded on output toggle")
     shot(page, "de-light-runs", full=False)
@@ -500,6 +515,7 @@ with sync_playwright() as p:
     page.click("#reload")
     wait_idle(page)
     check("Läuft" in row(page, 0).inner_text() and "seit" in row(page, 0).inner_text(), "running state in table")
+    check(row(page, 0).locator(".az-label--success", has_text="Läuft").count() == 1, "running as a good state")
 
     # recording off through the menu: confirm, unwrap, delete runs
     before = root_text(page)
@@ -523,7 +539,7 @@ with sync_playwright() as p:
     check(page.evaluate("() => document.activeElement.id") == "orph-close-btn", "focus on close in the leftover dialog")
     ot = page.inner_text("#orph-body")
     check("gone-0000" in ot and "update-geoip-1a2b" not in ot, "only the job no line uses: " + ot)
-    check("8 KB" in ot and "OK" in ot and page.locator("#orph-body tbody tr").count() == 1, "size and last run: " + ot)
+    check("8 KiB" in ot and "OK" in ot and page.locator("#orph-body tbody tr").count() == 1, "size and last run: " + ot)
     check(page.locator("#orph-all").is_hidden(), "no 'remove all' for one job")
     check("/var/lib/cockpit-cronjobs/" in page.inner_text("#orph-note"), "leftover note names the directory")
     shot(page, "de-light-orphans", full=False)
@@ -563,7 +579,7 @@ with sync_playwright() as p:
     ids = page.locator("#orph-body tbody tr td:first-child").all_inner_texts()
     check(ids == ["gone-0000", "old-1111", "older-2222"], "newest last run first: " + repr(ids))
     ot = page.inner_text("#orph-body")
-    check("2 MB" in ot and "Fehler · Exit 2" in ot and "Noch kein Lauf" in ot, "sizes and results: " + ot)
+    check("2 MiB" in ot and "Fehler · Exit 2" in ot and "Noch kein Lauf" in ot, "sizes and results: " + ot)
     check(page.locator("#orph-all").is_visible(), "'remove all' for several jobs")
     page.click("[data-key='orph:old-1111']")
     wait_js(page, "document.querySelectorAll('#orph-body tbody tr').length === 2")
@@ -719,8 +735,9 @@ with sync_playwright() as p:
     page.click("#bk-close")
     page.click("#backups")
     wait_js(page, "!document.querySelector('#bk-alert').hidden")
-    check("konnten nicht gelesen werden" in page.inner_text("#bk-alert") and "Input/output error" in page.inner_text("#bk-alert"),
-          "list unreadable: " + page.inner_text("#bk-alert"))
+    check("konnten nicht gelesen werden" in page.inner_text("#bk-alert") and "Input/output error" in page.inner_text("#bk-alert") and
+          "öffnen Sie die Sicherungen erneut" in page.inner_text("#bk-alert"),
+          "list unreadable, with what to do: " + page.inner_text("#bk-alert"))
     page.evaluate("() => { window.__mock.failBackups = null; }")
     page.click("#bk-close")
     check(not page.problems, "no console problems (backups): " + repr(page.problems))
@@ -802,7 +819,7 @@ with sync_playwright() as p:
     # add, then delete
     card.locator("[data-key='add:www-data']").click()
     check(page.inner_text("#edit-title") == "Job hinzufügen" and page.is_checked("#f-capture"), "add dialog for www-data")
-    page.locator("label.az-switch").filter(has=page.locator("#f-capture")).click()
+    page.locator("label.cron-checkbox").filter(has=page.locator("#f-capture")).click()
     page.fill("#f-schedule", "0 4 * * *")
     page.fill("#f-command", "/usr/bin/php /var/www/nextcloud/occ files:scan --all")
     page.click("#edit-save")
@@ -975,8 +992,11 @@ with sync_playwright() as p:
     page.click("#reload")
     wait_idle(page)
     ghost = page.locator("#user-crontabs section[data-user='ghost']")
-    check(ghost.count() == 1 and "Die Crontab von ghost ließ sich nicht lesen" in ghost.inner_text() and "unknown" in ghost.inner_text(),
-          "unreadable crontab: " + (ghost.inner_text() if ghost.count() else "no card"))
+    ghost_alert = page.inner_text("#ut-ghost-alerts")
+    check(ghost.count() == 1 and "Die Crontab von ghost ließ sich nicht lesen" in ghost_alert and "unknown" in ghost_alert and
+          "Beheben Sie die Ursache" in ghost_alert and "sobald sie sich lesen lässt" in ghost.inner_text() and
+          page.evaluate("() => document.getElementById('ut-ghost-alerts').nextElementSibling.dataset.user") == "ghost",
+          "unreadable crontab: the alert above its card: " + ghost_alert)
     check(page.locator("#user-crontabs section[data-user='bad name']").count() == 0, "no card for a name the scripts refuse")
     show_tab(page, "system")
     check(not page.locator("#users-card").is_hidden() and "bad name" in page.inner_text("#users-body") and
@@ -1040,8 +1060,9 @@ with sync_playwright() as p:
     page.evaluate("() => { window.__mock.journal['apt-daily.service'] = false; }")
     page.click("[data-key='timer-runs:apt-daily.timer']")
     wait_js(page, "document.querySelector('#runs-body').innerText.includes('Journal')")
-    check("Das Journal ließ sich nicht lesen" in page.inner_text("#runs-body") and "journal unreadable" in page.inner_text("#runs-body"),
-          "journal not readable: " + page.inner_text("#runs-body"))
+    check("Das Journal ließ sich nicht lesen" in page.inner_text("#runs-body") and "journal unreadable" in page.inner_text("#runs-body") and
+          "systemd-journald" in page.inner_text("#runs-body"),
+          "journal not readable, with what to do: " + page.inner_text("#runs-body"))
     page.click("#runs-close-btn")
     show_tab(page, "overview")
     # a recorded job converted to a timer keeps its history: the recorded runs and those from the journal together
@@ -1206,8 +1227,8 @@ with sync_playwright() as p:
           "UnsetEnvironment=USER\n" in service and "LOGNAME" not in service,
           "the unit gets cron's environment; USER, which Debian's cron does not set, is unset: " + service)
     check("OnCalendar=Sun *-*-* 01:30:00" in page.inner_text("#conv-timer") and "Persistent=false" in page.inner_text("#conv-timer"), "timer unit")
-    page.locator("#conv-dlg .az-switch").click()
-    check("Persistent=true" in page.inner_text("#conv-timer"), "persistent switch updates unit")
+    page.locator("#conv-dlg .cron-checkbox").click()
+    check("Persistent=true" in page.inner_text("#conv-timer"), "persistent checkbox updates unit")
     page.fill("#conv-name", "bad name")
     check(page.is_disabled("#conv-ok") and "Nur Buchstaben" in page.inner_text("#conv-name-help"), "invalid name")
     page.fill("#conv-name", "logrotate")
@@ -1327,6 +1348,8 @@ with sync_playwright() as p:
     # ---------- run recorder notices ----------
     page = open_page(browser, "wrapper=missing")
     check("Der Lauf-Rekorder fehlt" in page.inner_text("#notices") and "1 Job" in page.inner_text("#notices"), "missing wrapper notice")
+    btn = page.evaluate("() => { const b = document.querySelector('#wrapper-install'); return [b.className, b.innerText.trim(), !!b.querySelector('svg')]; }")
+    check(btn == ["az-btn az-btn--link", "Lauf-Rekorder installieren", True], "install: a link button in the alert: " + repr(btn))
     page.click("#wrapper-install")
     wait_js(page, "window.__mock.wrapperInstalls.length === 1")
     wait_js(page, "!document.querySelector('#notices').innerText.includes('fehlt')")
@@ -1344,6 +1367,8 @@ with sync_playwright() as p:
     page.context.close()
     page = open_page(browser, "wrapper=0")
     check("kann aktualisiert werden" in page.inner_text("#notices"), "outdated wrapper notice")
+    btn = page.evaluate("() => { const b = document.querySelector('#wrapper-install'); return [b.className, b.innerText.trim(), !!b.querySelector('svg')]; }")
+    check(btn == ["az-btn az-btn--link", "Update", True], "update: a link button named Update: " + repr(btn))
     page.click("#wrapper-install")
     wait_js(page, "window.__mock.wrapperInstalls.length === 1")
     page.context.close()
@@ -1414,7 +1439,9 @@ with sync_playwright() as p:
     page.evaluate("() => { window.__mock.latin1 = true; window.__mock.root += '# caf\\x01\\n'; }")
     page.click("#reload")
     wait_idle(page)
-    check("nicht UTF-8" in page.inner_text("#root-body"), "not UTF-8: read-only notice")
+    check("nicht UTF-8" in page.inner_text("#root-alerts") and
+          page.evaluate("() => document.getElementById('root-alerts').nextElementSibling.contains(document.getElementById('root-body'))"),
+          "not UTF-8: read-only notice above the root crontab's card")
     check(page.locator("#root-body [data-key^='run:'], #root-body [data-key^='edit:'], #root-body input[type=checkbox]").count() == 0,
           "not UTF-8: no run, edit or switch")
     check(not page.problems, "no console problems (latin1): " + repr(page.problems))
@@ -1512,7 +1539,7 @@ with sync_playwright() as p:
     page.click("[data-key=add-empty]")
     page.fill("#f-schedule", "0 4 * * *")
     page.fill("#f-command", "/usr/local/bin/backup.sh")
-    page.locator("#edit-dlg .az-switch").nth(0).click()
+    page.locator("#edit-dlg .cron-checkbox").nth(0).click()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -1584,7 +1611,7 @@ with sync_playwright() as p:
     check("gehen auf diesem Server verloren" in page.inner_text("#notices"), "no-MTA notice")
     row(page, 1).locator("[data-key^=edit]").click()
     check("kein Mailprogramm" in page.inner_text("#f-command-help"), "no-MTA hint for unrecorded job")
-    page.locator("#edit-dlg .az-switch").nth(0).click()
+    page.locator("#edit-dlg .cron-checkbox").nth(0).click()
     check("werden erfasst" in page.inner_text("#f-command-help"), "recorded hint once recording is on")
     shot(page, "de-light-edit-nomta", full=False)
     page.context.close()
@@ -1599,11 +1626,28 @@ with sync_playwright() as p:
     check(not page.locator("#tl-card").is_hidden(), "timeline without systemd")
     show_tab(page, "timers")
     check(page.locator("#timers-card").is_hidden() and page.locator("#timers-none").is_visible() and
-          "keine systemd-Timer" in page.inner_text("#timers-none"), "the timers tab says there are none")
+          "Keine systemd-Timer" in page.inner_text("#timers-none") and "ohne systemd" in page.inner_text("#timers-none"),
+          "the timers tab says there are none")
+    empty = page.evaluate("""() => { const c = document.getElementById('timers-none');
+        return [c.matches('.az-card'), !!c.querySelector('.az-empty'), c.querySelector('.az-empty__icon svg').getBoundingClientRect().height]; }""")
+    check(empty == [True, True, 48], "an empty state with a 48 px icon in a card: " + repr(empty))
     show_tab(page, "overview")
     row(page, 1).locator("[data-key^=more]").click()
     check("umwandeln" not in page.inner_text("#row-menu"), "no conversion without systemd")
     check(not page.problems, "no console problems (no systemd): " + repr(page.problems))
+    page.context.close()
+
+    # timers that cannot be read: the alert above their card, the card says what it waits for
+    page = open_page(browser)
+    page.evaluate("() => { window.__mock.failTimers = true; }")
+    page.click("#reload")
+    wait_idle(page)
+    show_tab(page, "timers")
+    ta = page.inner_text("#timers-alerts")
+    check("Die systemd-Timer ließen sich nicht lesen" in ta and "Access denied by policy" in ta and "Aktualisieren" in ta and
+          page.evaluate("() => document.getElementById('timers-alerts').nextElementSibling.id") == "timers-card" and
+          "sobald sie sich lesen lassen" in page.inner_text("#timers-body"),
+          "timers error above the card: " + ta)
     page.context.close()
 
     page = browser.new_context(viewport={"width": 1280, "height": 900}).new_page()

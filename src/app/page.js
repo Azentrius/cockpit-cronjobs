@@ -7,7 +7,7 @@
 
 import {
     $, C, cap, clock, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon, keyOf, R, rich,
-    S, SD, state, T, tzLabel,
+    S, SD, state, T, tzLabel, withFix,
 } from "./core.js";
 import { errText, installWrapper } from "./system.js";
 import {
@@ -55,12 +55,12 @@ export function renderNotices() {
     }
     if (capturedJobs.length && b.wrapper === "missing") {
         out.push(alertEl("danger", T.wrapperMissingTitle, T.wrapperMissingBody(capturedJobs.length, C.WRAPPER_PATH),
-            h("button", { class: "az-btn az-btn--secondary", type: "button", id: "wrapper-install",
+            h("button", { class: "az-btn az-btn--link", type: "button", id: "wrapper-install",
                           disabled: state.busy || loading, onclick: () => repairWrapper() }, icon("plus"), T.install)));
     } else if (typeof b.wrapper === "number" && b.wrapper < C.WRAPPER_VERSION) {
         out.push(alertEl("warning", T.wrapperOldTitle, T.wrapperOldBody(C.WRAPPER_PATH),
-            h("button", { class: "az-btn az-btn--secondary", type: "button", id: "wrapper-install",
-                          disabled: state.busy || loading, onclick: () => repairWrapper() }, icon("sync-alt"), T.update)));
+            h("button", { class: "az-btn az-btn--link", type: "button", id: "wrapper-install",
+                          disabled: state.busy || loading, onclick: () => repairWrapper() }, icon("arrow-circle-up"), T.update)));
     }
     if (b.mta === false && state.root.status === "ok" && !state.root.mailto) {
         out.push(alertEl("info", T.noMtaTitle, T.noMtaBody));
@@ -160,7 +160,7 @@ function lastCell(user, e, i, editable, frozen) {
         const runsKey = keyOf(user, "runs", i);
         const open = { "data-key": runsKey, "aria-describedby": cmdId, title: T.showRuns,
                        onclick: () => openRuns(user, i, runsKey) };
-        if (timer.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("info", "sync-alt", T.statusRunning, open)));
+        if (timer.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("success", "check-circle", T.statusRunning, open)));
         const l = timer.last !== null ? timerRunLabel(timer) : null;
         if (!l) return h("span", { class: "cron-muted" }, T.noRunYet);
         const d = timerDuration(timer);
@@ -186,7 +186,7 @@ function lastCell(user, e, i, editable, frozen) {
     if (job.running.length) {
         const start = Math.min.apply(null, job.running.map(r => r.start)) * 1000;
         return h("div", { class: "cron-cell" },
-            h("span", null, labelEl("info", "sync-alt", T.statusRunning, open)),
+            h("span", null, labelEl("success", "check-circle", T.statusRunning, open)),
             h("span", { class: "az-cell-sub" }, T.runningSince(clock(start), fmtDuration((Date.now() - start) / 1000))));
     }
     const last = job.runs[0];
@@ -200,12 +200,12 @@ function lastCell(user, e, i, editable, frozen) {
 
 /* The crontabs: root's card (in index.html), then one card for each other user. */
 export function renderCrontabs() {
-    renderCrontab(state.root, { body: $("root-body"), add: $("add"), backups: $("backups") });
+    renderCrontab(state.root, { body: $("root-body"), alerts: $("root-alerts"), add: $("add"), backups: $("backups") });
     renderUserCards();
 }
 
 /* The cards of the other users' crontabs, only with administrative access; built
-   afresh each time, like the rows. */
+   afresh each time, like the rows. Each card has its alerts above it. */
 function renderUserCards() {
     const box = $("user-crontabs");
     const users = Object.keys(state.users).sort();
@@ -217,23 +217,24 @@ function renderUserCards() {
         }, icon(iconName), text);
         const els = {
             body: h("div", { id: id + "-body" }),
+            alerts: h("div", { class: "cron-alerts", id: id + "-alerts" }),
             add: button("add", "plus", T.add, () => openEdit(user, null, keyOf(user, "add"))),
             backups: button("backups", "history", T.backups, () => openBackups(user, keyOf(user, "backups"))),
         };
         renderCrontab(state.users[user], els);
-        return h("section", { class: "az-card", "aria-labelledby": id + "-title", "data-user": user },
+        return [els.alerts, h("section", { class: "az-card", "aria-labelledby": id + "-title", "data-user": user },
             h("div", { class: "az-card__header" },
                 h("div", null,
                     h("h2", { class: "az-card__title", id: id + "-title" }, T.userTitle(user)),
                     h("p", { class: "az-card__desc" }, rich(T.userDesc(user)))),
                 h("div", { class: "az-card__actions" }, els.backups, els.add)),
-            els.body);
+            els.body)];
     }));
 }
 
-/* One crontab r into els.body, with its buttons els.add and els.backups. Every job
-   can be switched, edited, deleted and run now; root's can also be recorded and
-   converted. */
+/* One crontab r into els.body, with its buttons els.add and els.backups and its
+   alerts in els.alerts (above the card). Every job can be switched, edited, deleted
+   and run now; root's can also be recorded and converted. */
 function renderCrontab(r, els) {
     const user = r.user;
     const body = els.body;
@@ -244,6 +245,7 @@ function renderCrontab(r, els) {
     els.add.disabled = frozen;
     els.backups.hidden = r.status !== "ok";
     els.backups.disabled = frozen;
+    fill(els.alerts);
 
     if (r.status === "loading") {
         fill(body, h("p", { class: "cron-state" }, T.loading));
@@ -257,13 +259,14 @@ function renderCrontab(r, els) {
         return;
     }
     if (r.status === "missing") {
-        fill(body, h("div", { class: "cron-card-alert" }, alertEl("warning", T.noCrontabTitle, T.noCrontabBody)));
+        fill(els.alerts, alertEl("warning", T.noCrontabTitle, T.noCrontabBody));
+        fill(body, h("p", { class: "cron-state" }, T.noCrontabState));
         return;
     }
     if (r.status === "error") {
-        fill(body, h("div", { class: "cron-card-alert" },
-            alertEl("danger", T.readErrorTitle(user), r.message,
-                    h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, T.retry))));
+        fill(els.alerts, alertEl("danger", T.readErrorTitle(user), withFix(r.message, T.readErrorFix),
+            h("button", { class: "az-btn az-btn--link", type: "button", onclick: () => requestLoad() }, T.retry)));
+        fill(body, h("p", { class: "cron-state" }, T.readErrorState));
         return;
     }
     if (jobs.length === 0) {
@@ -326,9 +329,8 @@ function renderCrontab(r, els) {
         h("th", { scope: "col" }, T.colCommand),
         h("th", { scope: "col" }, h("span", { class: "az-sr" }, T.colActions)));
 
+    if (r.locked) fill(els.alerts, alertEl("warning", T.lockedTitle, r.notUtf8 ? T.lockedEncodingBody : T.lockedBody));
     fill(body,
-        r.locked ? h("div", { class: "cron-card-alert" },
-            alertEl("warning", T.lockedTitle, r.notUtf8 ? T.lockedEncodingBody : T.lockedBody)) : null,
         h("div", { class: "az-card__body--flush az-table-wrap" },
             h("table", { class: "az-table az-table--stack cron-root-table" }, h("thead", null, head), h("tbody", null, rows))));
 }
@@ -398,7 +400,7 @@ export function timerRunLabel(t) {
 export const timerDuration = t => t.startUs !== null && t.exitUs !== null && t.exitUs >= t.startUs ? (t.exitUs - t.startUs) / 1000 : null;
 
 function timerLastCell(t) {
-    if (t.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("info", "sync-alt", T.statusRunning)));
+    if (t.running) return h("div", { class: "cron-cell" }, h("span", null, labelEl("success", "check-circle", T.statusRunning)));
     if (t.last === null) return h("span", { class: "cron-muted" }, T.noRunYet);
     const l = timerRunLabel(t);
     const label = l ? labelEl(l.kind, l.icon, l.text) : null;
@@ -414,9 +416,12 @@ function renderTimers() {
     card.hidden = tm.status === "none" || (tm.status === "ok" && tm.list.length === 0);
     /* Without systemd or without timers the tab says so, once the page has loaded. */
     $("timers-none").hidden = !card.hidden || !state.loadedAt;
+    $("timers-none-body").textContent = tm.status === "none" ? T.timersNoSystemd : T.timersNoneBody;
+    fill($("timers-alerts"), tm.status === "error"
+        ? alertEl("warning", T.timersErrorTitle, withFix(tm.message, T.reloadFix)) : null);
     if (card.hidden) return;
     if (tm.status === "error") {
-        fill($("timers-body"), h("div", { class: "cron-card-alert" }, alertEl("warning", T.timersErrorTitle, tm.message)));
+        fill($("timers-body"), h("p", { class: "cron-state" }, T.timersErrorState));
         return;
     }
     fill($("timers-body"), h("div", { class: "az-card__body--flush az-table-wrap" },
@@ -469,7 +474,7 @@ function renderSystem() {
     const sys = state.sys;
     ["etc-card", "crond-card", "users-card", "periodic-card"].forEach(id => { $(id).hidden = !sys; });
     fill($("sys-alerts"), !sys && state.sysError !== null
-        ? alertEl("warning", T.sysErrorTitle, state.sysError) : null);
+        ? alertEl("warning", T.sysErrorTitle, withFix(state.sysError, T.reloadFix)) : null);
     if (!sys) return;
 
     fill($("etc-body"), sys.etc.length === 0 ? emptyState() : readOnlyTable(
@@ -486,7 +491,8 @@ function renderSystem() {
                 h("div", { class: "cron-cell" },
                     h("div", { class: "cron-title-row" },
                         h("span", { class: "az-mono" }, j.file),
-                        j.ignored ? h("span", { class: "az-label az-label--warning", title: T.ignoredWhy[j.ignored] }, T.ignored) : null),
+                        j.ignored ? h("span", { class: "az-label az-label--warning", title: T.ignoredWhy[j.ignored] },
+                            icon("exclamation-triangle"), T.ignored) : null),
                     j.ignored ? h("span", { class: "az-cell-sub cron-ignored-why" }, T.ignoredWhy[j.ignored]) : null)),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule },
                 j.schedule ? scheduleCell(j.schedule) : h("span", { class: "cron-muted" }, "—")),

@@ -5,7 +5,7 @@
 
 import {
     $, C, clock, codeSafe, fill, fmtDuration, fmtElapsed, fmtShort, h, icon, joinList, KEEP_RUNS, LOCALE, R, rich,
-    RUN_OUTPUT_LIMIT, setBusyButton, state, STATE_DIR, T,
+    RUN_OUTPUT_LIMIT, setBusyButton, state, STATE_DIR, T, withFix,
 } from "./core.js";
 import { errText, isDenied, readJournal, readOutput, removeOrphans, RUN_SCRIPT, runsDirOf } from "./system.js";
 import { convertedTimer, crontabOf, jobInfo, loadIfPending, loading, refreshRuns, rootVersion, runsOf } from "./crontab.js";
@@ -136,7 +136,7 @@ function renderRunDialog() {
     $("run-status").hidden = confirm;
     $("run-log-wrap").hidden = confirm;
     if (running) {
-        fill($("run-label"), labelEl("info", "sync-alt", T.statusRunning));
+        fill($("run-label"), labelEl("success", "check-circle", T.statusRunning));
         $("run-time").textContent = T.runElapsed(fmtElapsed((Date.now() - r.started) / 1000));
     } else if (done) {
         let l;
@@ -229,7 +229,7 @@ export function renderRunsDialog() {
                                                               : Object.assign({ journal: true }, r)) : [])
         .sort((a, b) => b.start - a.start);
     const failed = d.journal && d.journal.status === "error"
-        ? h("div", { class: "cron-dialog-alert" }, alertEl("warning", T.journalFailed, d.journal.error)) : null;
+        ? h("div", { class: "cron-dialog-alert" }, alertEl("warning", T.journalFailed, withFix(d.journal.error, T.journalFix))) : null;
     if (!items.length) {
         fill(body, failed, failed && !waiting ? null : h("p", { class: "cron-state" }, waiting ? T.loading : denied ? T.deniedTitle : T.runsEmpty));
         return;
@@ -237,7 +237,7 @@ export function renderRunsDialog() {
     const rows = [];
     items.forEach(r => {
         const key = r.out || ("s" + r.start);
-        const label = r.running ? { kind: "info", icon: "sync-alt", text: T.statusRunning } : runLabel(r);
+        const label = r.running ? { kind: "success", icon: "check-circle", text: T.statusRunning } : runLabel(r);
         const dur = r.running ? null : R.duration(r);
         const hasOut = !r.running && (r.journal ? !!r.output : !!r.out);
         const isOpen = hasOut && d.open === r.out;
@@ -325,11 +325,13 @@ export function orphanList() {
     return R.orphans(state.runs.byId, [state.root.text].concat(state.sys.texts).join("\n"));
 }
 
-/* "12 KB", "3.4 MB" */
+/* "12 KiB", "3,4 MiB", "1,7 GiB" (kb in KiB, as du -k gives it) */
 function fmtSize(kb) {
     if (typeof kb !== "number") return "—";
-    if (kb < 1024) return kb + " KB";
-    return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 }).format(kb / 1024) + " MB";
+    const n = v => new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 }).format(v);
+    if (kb < 1024) return n(kb) + " KiB";
+    if (kb < 1024 * 1024) return n(kb / 1024) + " MiB";
+    return n(kb / (1024 * 1024)) + " GiB";
 }
 
 /* A line under the root crontab while there are leftover runs. Only redrawn when

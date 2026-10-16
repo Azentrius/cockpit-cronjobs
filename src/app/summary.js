@@ -13,7 +13,7 @@ import { openRuns, openTimerRuns } from "./runs.js";
 let showOk = false;
 
 const ORDER = { failed: 0, running: 1, ok: 2 };
-const RUNNING = { kind: "info", icon: "sync-alt" };
+const RUNNING = { kind: "success", icon: "check-circle" };
 
 /* Everything with a last result: { state: "failed" | "running" | "ok", label, when (ms),
    dur (s or null), name, source, key, title, open }. A run that was aborted counts as

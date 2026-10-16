@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, B, backupDirOf, cap, fill, fmtWhen, h, icon, KEEP_BACKUPS, rich, state, T } from "./core.js";
+import { $, B, backupDirOf, cap, fill, fmtWhen, h, icon, KEEP_BACKUPS, rich, state, T, withFix } from "./core.js";
 import { errText, isDenied, readBackups } from "./system.js";
 import { crontabOf, loading, restoreCrontab } from "./crontab.js";
 import { showAlert } from "./page.js";
@@ -27,7 +27,8 @@ export function openBackups(user, openerKey) {
     const d = dialog;
     renderBackups();
     readBackups(user).then(list => { d.list = list; }, ex => {
-        d.error = isDenied(ex) ? T.deniedTitle : ex && ex.exit_status === 4 ? T.lockBusy : errText(ex);
+        d.error = isDenied(ex) ? T.deniedTitle : ex && ex.exit_status === 4 ? T.lockBusy
+            : withFix(errText(ex), T.backupsReadFix(backupDirOf(user) + "/"));
     }).finally(() => { if (dialog === d) renderBackups(); });
 }
 

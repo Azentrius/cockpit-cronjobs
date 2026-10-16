@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+The page follows the Azentrius design system more closely: states, controls, alerts and texts.
+
+- **Running is a good state:** a job or timer that runs shows "Running" as a success label with the
+  check-circle icon, no longer as a hint with sync-alt. "Ignored" in `/etc/cron.d` carries the warning
+  triangle.
+- **Checkboxes in forms:** "Record result and output", "Job is active" and "Catch up on missed runs" are
+  checkboxes, since they only apply with Save or Convert. The switches in the tables stay: they apply at
+  once.
+- **Alerts above their card:** that cron is not installed, that a crontab or the systemd timers could not
+  be read, or that a crontab opened read-only now shows above the card it is about, and the card says what
+  it waits for. These errors also say how to fix them, as do those of the journal, of an output and of the
+  backups.
+- **Field errors once a field is left:** the edit dialog shows an error when the field is left or on
+  saving, not while typing.
+- **Run recorder:** it is updated with "Update" and the arrow-circle-up icon. "Update" and "Install run
+  recorder" are link buttons in their alerts.
+- **Buttons name their object:** "Run job", "Stop job", "Convert job", "Record runs", "Review runs",
+  "Remove all runs" and "Install run recorder".
+- **German texts:** errors address the reader as "Sie" ("Geben Sie einen Befehl ein.") instead of the
+  infinitive.
+- **Sizes:** in KiB, MiB and GiB, which they always were (1024 based), with a decimal comma in German.
+- **No systemd timers:** the systemd timers tab shows an empty state in a card and says whether the server
+  has no systemd or no timers.
+- **Details:** every control is at least 29 px high on the desktop (44 px on phones), the inline links and
+  the result labels too; the row menu shows focus as a 2 px ring; spacing comes from the scale of
+  4, 8, 16, 24, 32 and 48 px only; notes in the changes of a backup are no longer italic.
+- **Signature:** the word mark links to azentrius.de; a link to the source code follows version and host.
+- **Icons:** `icons.js`, NOTICE and the README name where the icons come from (Font Awesome Free 5.15.4 by
+  Fonticons, Inc., through `@patternfly/react-icons` 6.4.0). The license text, CC BY 4.0, comes along as
+  `CC-BY-4.0-Font-Awesome.txt`, installed with the page and in the packages' documentation.
+- Tests: the browser tests check the checkboxes, the alerts above their cards, field errors only after a
+  field is left, controls of at least 29 px, the signature and an empty state for the timers.
+
 ## 2.6.0 – 2026-10-16
 
 Packages: Cron Jobs comes as `cockpit-cronjobs` (`.deb` and `.rpm`) from the Azentrius package

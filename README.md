@@ -244,6 +244,8 @@ The page contains no code from Cockpit; it uses Cockpit's API `cockpit.js` at ru
 itself ships.
 
 The fonts DM Sans and DM Serif Display are licensed under the SIL Open Font License 1.1
-([src/OFL.txt](src/OFL.txt)); the icons are Font Awesome Free 5, licensed under CC BY 4.0.
+([src/OFL.txt](src/OFL.txt)); the icons are Font Awesome Free 5.15.4 by Fonticons, Inc., taken over through
+`@patternfly/react-icons` 6.4.0 and licensed under CC BY 4.0
+([src/CC-BY-4.0-Font-Awesome.txt](src/CC-BY-4.0-Font-Awesome.txt)).
 
 Made by [Azentrius](https://azentrius.de).

@@ -94,6 +94,8 @@ export function rich(value) {
 }
 /* Text from the system (names, paths) that goes into a rich text. */
 export const codeSafe = s => String(s).replace(/`/g, "'");
+/* An error message from the system, then on its own line what to do about it (a rich text). */
+export const withFix = (message, fix) => [message ? codeSafe(message) : null, fix].filter(Boolean).join("\n");
 
 export function icon(name) {
     const def = ICONS[name];
