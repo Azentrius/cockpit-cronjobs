@@ -37,6 +37,12 @@ The page follows the Azentrius design system more closely: states, controls, ale
   `CC-BY-4.0-Font-Awesome.txt`, installed with the page and in the packages' documentation.
 - Tests: the browser tests check the checkboxes, the alerts above their cards, field errors only after a
   field is left, controls of at least 29 px, the signature and an empty state for the timers.
+- **Name with the dot:** the page title reads "Cron Jobs." with the dot of the Azentrius wordmark, the way
+  the design system now shows a product name without a suffix. The menu, the signature and AppStream keep
+  the plain "Cron Jobs", and the README and NOTICE drop "for Cockpit" from the name.
+- **Shared design files:** `azentrius.css` gains `az-page-title--dot`, the project-page classes
+  `az-btn--lg` and `az-eyebrow` and their spacing tokens; `tools/build-packages.sh` can name packages
+  that a package replaces under a new name (`CONFLICTS` in `packaging/package.conf`).
 
 ## 2.6.0 – 2026-10-16
 
