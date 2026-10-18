@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.7.2 – 2026-10-18
+
+The archive of a release carries the license and the notice; the page itself is unchanged.
 
 - **Licenses in the archive:** `cockpit-cronjobs-VERSION.tar.gz` contains `LICENSE` and `NOTICE` (as
   `cronjobs/LICENSE` and `cronjobs/NOTICE`, listed in `SHA256SUMS`), as the `.deb` and `.rpm` already do.
