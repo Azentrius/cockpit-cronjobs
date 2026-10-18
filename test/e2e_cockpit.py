@@ -111,6 +111,15 @@ def wait_file(path, timeout=75):
     return read(path)
 
 
+def clear_of_cron_check():
+    """Debian's cron looks at the crontabs once a minute, at second 1, and keeps their mtimes in whole
+    seconds (load_database in database.c): a crontab written in the same second as the write before
+    it, with cron looking in between, has the mtime cron already knows and is not read again. So a
+    write the test then waits on cron for is made between seconds 5 and 50 of a minute."""
+    while not 5 <= int(time.time()) % 60 <= 50:
+        time.sleep(0.5)
+
+
 # /etc/environment as pam_env reads it: cron gives these to every job, so run now and a
 # converted unit must too (quotes, "export", a comment that ends the value)
 ETC_ENV = "/etc/environment"
@@ -187,6 +196,7 @@ with sync_playwright() as p:
     page.fill("#f-schedule", "* * * * *")
     page.fill("#f-command", "echo hello-from-cron; echo to-stderr >&2; date +\\%F")
     check(page.is_checked("#f-capture"), "recording on by default")
+    clear_of_cron_check()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -384,6 +394,7 @@ with sync_playwright() as p:
     # locale, the crontab's, cron's own; no USER from Debian's cron)
     start = crontab()
     sh("rm -f /tmp/cj-e2e-root-cron /tmp/cj-e2e-root-out")
+    clear_of_cron_check()
     sh("crontab -u root -", input=start + "* * * * * { " + WHO + "; } > /tmp/cj-e2e-root-cron\n"
                                           "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n")
     page.click("#reload")
@@ -490,6 +501,7 @@ with sync_playwright() as p:
     # the latest results: a recorded job and a systemd timer that fail show up within a minute of
     # their run, failed first, while the page stays open (it reads runs and timers every half minute)
     start = crontab()
+    clear_of_cron_check()
     sh("crontab -u root -", input=start + f"* * * * * {WRAP} sumfail-0001 'echo about to fail; exit 3'\n")
     fail_timer = "cj-e2e-fail"
     r = sh(f"systemd-run --unit={fail_timer} --on-calendar='*-*-* *:*:00' --timer-property=AccuracySec=1s "
@@ -548,6 +560,7 @@ with sync_playwright() as p:
     page.fill("#f-command", "{ " + WHO + "; } > /tmp/cj-e2e-whoami")
     page.locator("label.cron-checkbox").filter(has=page.locator("#f-capture")).click()   # the plain line; recording comes below
     check(not page.is_checked("#f-capture"), "recording off for the plain job")
+    clear_of_cron_check()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
@@ -603,6 +616,7 @@ with sync_playwright() as p:
     page.fill("#f-schedule", "* * * * *")
     page.fill("#f-command", "echo recorded-for-" + USER)
     check(page.is_checked("#f-capture"), "recording on by default for the user's job")
+    clear_of_cron_check()
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
