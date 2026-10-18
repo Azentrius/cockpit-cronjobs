@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Red Hat Mono comes with the page:** commands, paths and schedules are set in Red Hat Mono, as the
+  design system asks, from the page's own `RedHatMono.woff2` (a Latin subset, SIL Open Font License 1.1,
+  in `OFL.txt` and NOTICE). Until now `azentrius.css` took the font from Cockpit's
+  `/cockpit/static/fonts/RedHatMono/RedHatMonoVF.woff2`, which Cockpit 314 from Ubuntu 24.04 does not
+  have: every load of the page got a 404 for it, and code was shown in a fallback (Courier New or the
+  browser's monospace font). The shared design files gain
+  the font file; the browser tests no longer stand in a font for Cockpit's, and a unit test checks that
+  every `url()` in the stylesheets names a file of the page.
+
 ## 2.7.2 – 2026-10-18
 
 The archive of a release carries the license and the notice; the page itself is unchanged.

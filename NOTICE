@@ -15,11 +15,12 @@ DM Serif Display (src/DMSerifDisplay-Regular.woff2, subset to the word mark)
   Reserved Font Name 'Source'. Copyright 2019 Google LLC.
   SIL Open Font License 1.1, see src/OFL.txt
 
+Red Hat Mono (src/RedHatMono.woff2, a Latin subset)
+  Copyright 2024 The Red Hat Project Authors (https://github.com/RedHatOfficial/RedHatFont)
+  SIL Open Font License 1.1, see src/OFL.txt
+
 Icons (src/icons.js): Font Awesome Free 5.15.4 (Solid) by Fonticons, Inc.
   (https://fontawesome.com), as shipped in @patternfly/react-icons 6.4.0
   (Red Hat, Inc.); the path data is unchanged.
   Creative Commons Attribution 4.0 International, see
   src/CC-BY-4.0-Font-Awesome.txt
-
-The page uses Red Hat Mono from Cockpit's own static files; it is not part of
-this project.

@@ -44,6 +44,7 @@ check:
 	node test/units.test.js
 	node test/backups.test.js
 	node test/i18n.test.js
+	node test/files.test.js
 
 check-ui:
 	python3 test/ui_test.py

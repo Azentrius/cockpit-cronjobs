@@ -259,7 +259,7 @@ and including 2.1.1 were released under the GNU Lesser General Public License, v
 The page contains no code from Cockpit; it uses Cockpit's API `cockpit.js` at runtime, which Cockpit
 itself ships.
 
-The fonts DM Sans and DM Serif Display are licensed under the SIL Open Font License 1.1
+The fonts DM Sans, DM Serif Display and Red Hat Mono are licensed under the SIL Open Font License 1.1
 ([src/OFL.txt](src/OFL.txt)); the icons are Font Awesome Free 5.15.4 by Fonticons, Inc., taken over through
 `@patternfly/react-icons` 6.4.0 and licensed under CC BY 4.0
 ([src/CC-BY-4.0-Font-Awesome.txt](src/CC-BY-4.0-Font-Awesome.txt)).
