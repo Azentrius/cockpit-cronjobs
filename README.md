@@ -69,8 +69,8 @@ the system crontabs and timers, and nothing of other users' crontabs.
 
 ## Installation
 
-**From the Azentrius package repository.** Set up [packages.azentrius.de](https://packages.azentrius.de)
-once:
+**From the Azentrius package repository** (Debian, Ubuntu, Fedora, RHEL). Set up
+[packages.azentrius.de](https://packages.azentrius.de) once:
 
 ```sh
 # Debian and Ubuntu
@@ -78,25 +78,37 @@ curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
 sudo apt install ./azentrius-repository.deb
 sudo apt update
 
-# Fedora, RHEL and openSUSE
+# Fedora and RHEL
 sudo rpm --import https://packages.azentrius.de/azentrius.asc
 sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
 ```
 
+RHEL and its derivatives use the same `dnf` set-up, but it is tested on Fedora only. The repository
+has no set-up for openSUSE: there, install the `.rpm` of a release (below).
+
 Then install **Cron Jobs** in Cockpit under **Applications** (with administrative access), or on the
 console with `sudo apt install cockpit-cronjobs` or `sudo dnf install cockpit-cronjobs`. The system's
 updates keep it current. The repository takes a package only after checking that this repository's
-release workflow built it.
+release workflow built it, and signs it.
 
-**From a release.** Every [release](https://github.com/Azentrius/cockpit-cronjobs/releases) has the
-`.deb` and the `.rpm`, `SHA256SUMS` and a signed build provenance (`X.Y.Z` is the version):
+**From the files of a release** (on openSUSE the only way). Every
+[release](https://github.com/Azentrius/cockpit-cronjobs/releases) has the `.deb` and the `.rpm`,
+`SHA256SUMS` and a signed build provenance. Download the package and `SHA256SUMS` into one folder,
+check both, then install (`X.Y.Z` is the version):
 
 ```sh
-sudo apt install ./cockpit-cronjobs_X.Y.Z-1_all.deb     # Debian, Ubuntu
-sudo dnf install ./cockpit-cronjobs-X.Y.Z-1.noarch.rpm  # Fedora, RHEL, openSUSE
-sha256sum --ignore-missing -c SHA256SUMS                # check a download
-gh attestation verify <file> --repo Azentrius/cockpit-cronjobs   # built by the release workflow
+sha256sum --ignore-missing -c SHA256SUMS                         # complete and unchanged
+gh attestation verify <file> --repo Azentrius/cockpit-cronjobs   # built by this repository's release workflow
+
+sudo apt install ./cockpit-cronjobs_X.Y.Z-1_all.deb                              # Debian, Ubuntu
+sudo dnf install ./cockpit-cronjobs-X.Y.Z-1.noarch.rpm                           # Fedora, RHEL
+sudo zypper install --allow-unsigned-rpm ./cockpit-cronjobs-X.Y.Z-1.noarch.rpm   # openSUSE
 ```
+
+The `.rpm` of a release carries no package signature (the repository signs its own copy): `zypper`
+needs `--allow-unsigned-rpm`, and the two checks above take the place of the signature. The tests
+install the `.deb` on Debian 13 and the `.rpm` on Fedora 43; installing the packages on Ubuntu,
+RHEL or openSUSE is untested.
 
 On other systems the archive `cockpit-cronjobs-X.Y.Z.tar.gz` of a release holds the page:
 `sudo tar -xzf cockpit-cronjobs-X.Y.Z.tar.gz -C /usr/share/cockpit`.
@@ -183,7 +195,7 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
 ## Uninstall
 
 ```sh
-sudo apt remove cockpit-cronjobs          # or: sudo dnf remove cockpit-cronjobs
+sudo apt remove cockpit-cronjobs          # or: sudo dnf remove / sudo zypper remove cockpit-cronjobs
 sudo rm -rf /usr/share/cockpit/cronjobs   # installed from the archive
 sudo make uninstall                       # installed from the source
 # only when no job records its runs any more:
