@@ -210,6 +210,9 @@ with sync_playwright() as p:
     check(fonts, "fonts available")
     loaded = page.evaluate("() => Array.from(document.fonts).filter(f => f.status === 'loaded').map(f => f.family)")
     check(any("DM Sans" in f for f in loaded), "DM Sans loaded: " + repr(loaded))
+    # The code font comes with the page too (Cockpit's own Red Hat Mono is missing on some servers).
+    mono = page.evaluate("() => document.fonts.load('13px \"Red Hat Mono\"').then(l => l.map(f => f.family), e => 'failed: ' + e.name)")
+    check(isinstance(mono, list) and mono and all("Red Hat Mono" in f for f in mono), "Red Hat Mono loaded: " + repr(mono))
     check(not page.evaluate("() => document.documentElement.classList.contains('pf-v6-theme-dark')"), "light theme")
     shot(page, "de-light-1280-timers")
     check(not page.problems, "no console problems (light): " + repr(page.problems))
