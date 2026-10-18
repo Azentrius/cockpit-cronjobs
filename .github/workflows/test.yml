@@ -23,10 +23,20 @@ jobs:
           python-version: "3.12"
       - name: Unit tests (crontab logic, systemd conversion against systemd-analyze, run recorder with dash and bash)
         run: make check
-      - name: Package and changelog for the current version
+      - name: Package (with LICENSE and NOTICE, built twice to the same bytes) and changelog for the current version
         run: |
           make package
           version=$(sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
+          archive=cockpit-cronjobs-$version.tar.gz
+          for f in LICENSE NOTICE; do
+            tar -xzOf "$archive" "cronjobs/$f" | cmp - "$f"
+            tar -tvzf "$archive" "cronjobs/$f" | grep -q '^-rw-r--r-- 0/0 '
+            grep -qx "$(sha256sum < "$f" | cut -d ' ' -f 1)  cronjobs/$f" SHA256SUMS
+          done
+          sha256sum "$archive" > "$RUNNER_TEMP/archive.sha256"
+          rm -f "$archive" SHA256SUMS
+          make package > /dev/null
+          sha256sum -c "$RUNNER_TEMP/archive.sha256"
           tools/release-notes.sh "$version" > /dev/null || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
       - name: Packages (.deb, .rpm) with valid AppStream data, built twice to the same bytes
         run: |
