@@ -159,8 +159,8 @@ with sync_playwright() as p:
     check(f"Cron Jobs {VERSION}" in page.inner_text("footer"), "signature version")
     sig = page.evaluate("""() => [document.querySelector('.az-signature__mark').href,
         Array.from(document.querySelectorAll('.az-signature__meta a')).map(a => [a.href, a.innerText.trim()])]""")
-    check(sig == ["https://azentrius.de/", [["https://github.com/Azentrius/cockpit-cronjobs", "Quellcode"]]],
-          "signature: the word mark links to azentrius.de, the source code follows the facts: " + repr(sig))
+    check(sig == ["https://azentrius.com/", [["https://github.com/Azentrius/cockpit-cronjobs", "Quellcode"]]],
+          "signature: the word mark links to azentrius.com, the source code follows the facts: " + repr(sig))
     low = page.evaluate("""() => Array.from(document.querySelectorAll('button'))
         .filter(b => b.offsetParent && b.getBoundingClientRect().height < 29).map(b => b.textContent || b.className)""")
     check(not low, "controls >= 29px on the desktop: " + repr(low))

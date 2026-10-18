@@ -70,17 +70,17 @@ the system crontabs and timers, and nothing of other users' crontabs.
 ## Installation
 
 **From the Azentrius package repository** (Debian, Ubuntu, Fedora, RHEL). Set up
-[packages.azentrius.de](https://packages.azentrius.de) once:
+[packages.azentrius.com](https://packages.azentrius.com) once:
 
 ```sh
 # Debian and Ubuntu
-curl -fsSLO https://packages.azentrius.de/azentrius-repository.deb
+curl -fsSLO https://packages.azentrius.com/azentrius-repository.deb
 sudo apt install ./azentrius-repository.deb
 sudo apt update
 
 # Fedora and RHEL
-sudo rpm --import https://packages.azentrius.de/azentrius.asc
-sudo dnf install https://packages.azentrius.de/azentrius-repository.rpm
+sudo rpm --import https://packages.azentrius.com/azentrius.asc
+sudo dnf install https://packages.azentrius.com/azentrius-repository.rpm
 ```
 
 RHEL and its derivatives use the same `dnf` set-up, but it is tested on Fedora only. The repository
@@ -249,7 +249,7 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
    build provenance for each file; `gh attestation verify <file> --repo Azentrius/cockpit-cronjobs`
    shows that it was built by this workflow from this repository (the archive since 2.1.1, the
    packages since 2.6.0).
-4. packages.azentrius.de takes the packages from the release within an hour
+4. packages.azentrius.com takes the packages from the release within an hour
    ([Azentrius/packages](https://github.com/Azentrius/packages)).
 
 ## License
@@ -264,4 +264,4 @@ The fonts DM Sans, DM Serif Display and Red Hat Mono are licensed under the SIL 
 `@patternfly/react-icons` 6.4.0 and licensed under CC BY 4.0
 ([src/CC-BY-4.0-Font-Awesome.txt](src/CC-BY-4.0-Font-Awesome.txt)).
 
-Made by [Azentrius](https://azentrius.de).
+Made by [Azentrius](https://azentrius.com).
