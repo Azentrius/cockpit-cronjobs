@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, backupDirOf, C, fill, h, icon, pad2, rich, SD, setBusyButton, state, T } from "./core.js";
+import { $, backupDirOf, C, cronRuns, fill, h, icon, pad2, rich, SD, setBusyButton, state, T } from "./core.js";
 import {
     analyzeCalendar, errText, getProp, REMOVE_UNITS_SCRIPT, spawn, SPAWN_ROOT, unitPath, UNITS_SCRIPT,
     WRITE_UNITS_SCRIPT,
@@ -40,7 +40,7 @@ export function openConvert(user, index, openerKey) {
     const info = jobInfo(e);
     if (convertBlocker(base, index)) return;
     const tz = jobTz(base.entries, index);
-    const cal = SD.calendarFromCron(e.schedule, tz !== state.tz ? tz : null);
+    const cal = SD.calendarFromCron(e.schedule, tz && tz !== state.tz ? tz : null);
     const cronEnv = C.envBefore(base.entries, index);
     const jobEnv = C.jobEnvironment(cronEnv, user === "root" ? null : base.home, user, state.basics.cronEnv);
     const { env, unset } = SD.serviceEnvironment(jobEnv, cronEnv, state.basics.managerEnv, user);
@@ -120,7 +120,7 @@ async function verifyConvert(d) {
         const t0 = Date.now() - 60000;
         const iter = await analyzeCalendar(d.specs, 5);
         const theirs = Array.from(new Set([].concat(...d.specs.map(s => iter[s] || [])))).sort((a, b) => a - b).slice(0, 5);
-        const ours = theirs.length ? C.runsBetween(d.schedule, t0, theirs[theirs.length - 1], d.tz, theirs.length + 2) : [];
+        const ours = theirs.length ? cronRuns(d.schedule, t0, theirs[theirs.length - 1], d.tz, theirs.length + 2) : [];
         res = SD.sameRuns(theirs, ours) ? { ok: true, count: theirs.length } : { ok: false };
     } catch (ex) {
         res = { ok: false, error: errText(ex) };
@@ -156,6 +156,11 @@ function convertNote(name) {
     return SD.convertNote(name, w.y + "-" + pad2(w.mo) + "-" + pad2(w.d));
 }
 
+/* The token of one conversion (see WRITE_UNITS_SCRIPT): 32 random hex digits. */
+function conversionToken() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
+}
+
 export async function submitConvert(ev) {
     ev.preventDefault();
     const d = dialog;
@@ -180,22 +185,25 @@ export async function submitConvert(ev) {
         $("conv-close").disabled = false;
         updateConvert();
     };
-    const fail = async (message, written) => {
-        if (written) await spawn(["sh", "-c", REMOVE_UNITS_SCRIPT, "cockpit-cronjobs", u.name], SPAWN_ROOT).catch(() => {});
+    /* Whatever fails, the units are taken back, but only while they are this
+       conversion's: the root steps check its token. */
+    const token = conversionToken();
+    const fail = async message => {
+        await spawn(["sh", "-c", REMOVE_UNITS_SCRIPT, "cockpit-cronjobs", u.name, token], SPAWN_ROOT).catch(() => {});
         done();
         dialogError("conv-alert", message, T.convFailed);
     };
 
     try {
-        await spawn(["sh", "-c", WRITE_UNITS_SCRIPT, "cockpit-cronjobs", u.name, u.service, u.timer], SPAWN_ROOT);
+        await spawn(["sh", "-c", WRITE_UNITS_SCRIPT, "cockpit-cronjobs", u.name, u.service, u.timer, token], SPAWN_ROOT);
     } catch (ex) {
-        if (ex && ex.exit_status === 6) { await fail(T.convNameTaken(u.name), false); $("conv-name").focus(); return; }
-        await fail(errText(ex), true);
+        if (ex && ex.exit_status === 6) { await fail(T.convNameTaken(u.name)); $("conv-name").focus(); return; }
+        await fail(ex && ex.exit_status === 4 ? T.lockBusy : errText(ex));
         return;
     }
     let good = false;
     try { good = await verifyUnit(u.name, d.user, d.shell, d.command, d.env, d.unset || []); } catch (_) { good = false; }
-    if (!good) { await fail(T.convUnitMismatch, true); return; }
+    if (!good) { await fail(T.convUnitMismatch); return; }
 
     /* Switching the cron line off and starting the timer happen in one root step
        (SAVE_SCRIPT); if the timer cannot start, the script puts the crontab back. */
@@ -207,9 +215,9 @@ export async function submitConvert(ev) {
         copy[d.index] = C.setEnabled(cur, false);
         copy.splice(d.index, 0, C.rawLine(note));
         return copy;
-    }, null, { quiet: true, timer: u.name + ".timer" });
+    }, null, { quiet: true, timer: u.name + ".timer", token });
     if (!res.ok) {
-        await fail((res.error || T.conflictBody(d.user)) + (res.timerFailed ? "\n" + T.convRolledBack : ""), true);
+        await fail((res.error || T.conflictBody(d.user)) + (res.timerFailed ? "\n" + T.convRolledBack : ""));
         if (res.timerFailed) requestLoad();
         return;
     }
@@ -319,7 +327,7 @@ export async function submitBack() {
         try {
             await unitsStep("remove", d.name, d.user);
         } catch (ex) {
-            left = ex && ex.exit_status === 8 ? T.backUnitsChanged : errText(ex);
+            left = ex && ex.exit_status === 8 ? T.backUnitsChanged : ex && ex.exit_status === 4 ? T.lockBusy : errText(ex);
         }
     }
     d.locked = false;

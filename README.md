@@ -59,7 +59,10 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`: present on any normal installation
 - systemd, optionally: for the timers, the timeline entries of timers and the conversion
 
-With cronie, `CRON_TZ` is taken into account for next runs, the timeline and the conversion.
+With cronie, `CRON_TZ` is taken into account for next runs, the timeline and the conversion, in every
+crontab including `/etc/crontab` and `/etc/cron.d`. When the clock changes, next runs and the timeline
+follow cron: when summer time ends, the repeated hour runs only the jobs with `*` in the minute or hour
+field again; when it starts, jobs at a fixed time of the skipped hour run right after the change.
 
 Changes need administrative access in Cockpit (“Limited access” turned off). Without it the page shows
 the system crontabs and timers, and nothing of other users' crontabs.
@@ -174,7 +177,8 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
 | `/var/lib/cockpit-cronjobs/users/USER/runs/` | Recorded runs of the jobs of USER (owned by USER) |
 | `/usr/local/libexec/cockpit-cronjobs-run` | The run recorder |
 | `/etc/systemd/system/NAME.service`, `NAME.timer` | Jobs converted to systemd timers |
-| `/var/lib/cockpit-cronjobs/.crontab.lock` | Lock while the crontab is written |
+| `/var/lib/cockpit-cronjobs/converting/` | While a conversion is under way: which one wrote the units of a name (directory 700) |
+| `/var/lib/cockpit-cronjobs/.crontab.lock` | Lock while the crontab or the units of a conversion are written |
 
 ## Uninstall
 

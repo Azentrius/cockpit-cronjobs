@@ -63,6 +63,9 @@ export function readCrontab(user) {
      $3    = optional: a systemd timer to enable and start right after (for a
              conversion), or with $4 = stop to stop and disable (back to cron); if
              that fails, the previous crontab is put back (exit 7)
+     $5    = for a conversion, its token (see WRITE_UNITS_SCRIPT): the timer is only
+             started while its units are that conversion's (else exit 8, before
+             anything changes); once it runs, the conversion is finished
      stdin = the new version
    The current version is backed up first: root's in BACKUP_DIR, another user's in
    BACKUP_DIR/users/USER (directories 700, files 600, the last ten of each user are
@@ -72,7 +75,7 @@ export function readCrontab(user) {
    does not interrupt the script (SIGTERM and SIGHUP are ignored).
    Output: path of the backup, empty when there was no crontab before.
    Exit 2 = not a user, 3 = changed meanwhile, 4 = locked, 5 = backup failed,
-   7 = timer failed, else crontab's error. */
+   7 = timer failed, 8 = not the conversion's units, else crontab's error. */
 const SAVE_SCRIPT = `set -eu
 trap '' TERM HUP INT
 umask 077
@@ -81,13 +84,23 @@ expect=$2
 timer="\${3-}"
 verb=enable
 if [ "\${4-}" = stop ]; then verb=disable; fi
+tok="\${5-}"
 case $user in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
 id -u "$user" > /dev/null 2>&1 || exit 2
+owner=
+if [ -n "$tok" ]; then
+  case $timer in *.timer) ;; *) exit 2 ;; esac
+  case \${timer%.timer} in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) exit 2 ;; esac
+  case $tok in *[!0-9a-f]*) exit 2 ;; esac
+  [ "$verb" = enable ] || exit 2
+  owner='${STATE_DIR}/converting/'\${timer%.timer}
+fi
 dir='${BACKUP_DIR}'
 if [ "$user" != root ]; then dir=$dir/users/$user; fi
 install -d -m 711 '${STATE_DIR}' || exit 5
 exec 9>'${STATE_DIR}/.crontab.lock'
 flock -w 10 9 || exit 4
+if [ -n "$owner" ] && [ "$(cat "$owner" 2>/dev/null)" != "$tok" ]; then exit 8; fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/new"
@@ -129,16 +142,18 @@ if [ -n "$timer" ]; then
     cat "$tmp/err" >&2
     exit 7
   fi
+  if [ -n "$owner" ]; then rm -f "$owner"; fi
 fi
 printf '%s\\n' "$f"
 `;
 
 /* user: whose crontab; expected: the text shown (exactly as crontab -l gave it),
    next: the new text, timer: optional unit to enable and start once the crontab is
-   written, or to stop and disable when stop is set. */
-export function saveCrontab(user, expected, next, timer, stop) {
+   written, or to stop and disable when stop is set; token: a conversion's token
+   (with a timer to start). */
+export function saveCrontab(user, expected, next, timer, stop, token) {
     const args = ["sh", "-c", SAVE_SCRIPT, "cockpit-cronjobs", user, C.cksum(expected)]
-        .concat(timer ? [timer].concat(stop ? ["stop"] : []) : []);
+        .concat(timer ? [timer].concat(stop ? ["stop"] : token ? ["", token] : []) : []);
     return spawn(args, SPAWN_ROOT, next).then(out => String(out || "").trim());
 }
 
@@ -389,13 +404,19 @@ export function readSystem(flavor) {
 }
 
 /* sys.texts: every crontab as read, for finding the recorded jobs no line uses
-   any more (see orphanList). sys.userNames: whose crontabs there are (as root only). */
+   any more (see orphanList). sys.userNames: whose crontabs there are (as root only).
+   Every job has tz, its own zone under cronie (CRON_TZ above it in its file), else null. */
 function parseSystem(out, flavor) {
     const sys = { etc: [], crond: [], users: [], userNames: [], periodic: [], root: false, texts: [] };
+    const zoneOf = env => {
+        const tz = flavor === "cronie" ? env.CRON_TZ : null;
+        return tz && C.validTimeZone(tz) ? tz : null;
+    };
+    const systemJobs = body => C.parseSystemCrontab(body).map(j => Object.assign(j, { tz: zoneOf(j.env) }));
     sections(out).forEach(({ name, body }) => {
         if (name === "etc" || name === "anacron" || /^[du]:/.test(name)) sys.texts.push(body);
         if (name === "uid") sys.root = body.trim() === "0";
-        else if (name === "etc") sys.etc = C.parseSystemCrontab(body);
+        else if (name === "etc") sys.etc = systemJobs(body);
         else if (name.startsWith("d:")) {
             const m = /^d:([0-9a-f]*):(\d*):([0-9a-f]*):(\d*):(\d*):(.*)$/.exec(name);
             if (!m) return;
@@ -408,19 +429,18 @@ function parseSystem(out, flavor) {
                 target: m[3] && m[4] && m[5] ? { regular: (mode & S_IFMT) === S_IFREG, mode: mode & 0o7777, uid: +m[4], nlink: +m[5] }
                     : null,
             }, flavor !== "cronie");
-            const jobs = C.parseSystemCrontab(body);
+            const jobs = systemJobs(body);
             jobs.forEach(j => sys.crond.push(Object.assign({ file, ignored }, j)));
             /* Skipped and nothing to show (a link to nothing, a directory): the file alone. */
-            if (!jobs.length && ignored) sys.crond.push({ file, ignored, schedule: null, user: null, command: null });
+            if (!jobs.length && ignored) sys.crond.push({ file, ignored, schedule: null, user: null, command: null, tz: null });
         } else if (name.startsWith("u:")) {
             const user = name.slice(2);
             sys.userNames.push(user);
             const entries = C.parseUserCrontab(body);
             entries.forEach((e, i) => {
                 if (e.kind !== "job") return;
-                const cronTz = flavor === "cronie" ? C.envBefore(entries, i).CRON_TZ : null;
                 sys.users.push({ user, schedule: e.schedule, command: e.command, enabled: e.enabled,
-                                 tz: cronTz && C.validTimeZone(cronTz) ? cronTz : null });
+                                 tz: zoneOf(C.envBefore(entries, i)) });
             });
         } else if (name.startsWith("p:")) {
             const scripts = body.split("\n").filter(Boolean).map(x => x.replace(/^.*\//, ""))
@@ -884,30 +904,81 @@ done
 exit "$rc"
 `;
 
-/* Writes NAME.service and NAME.timer of a conversion ($1 the name, $2 and $3 the
-   units) and reloads systemd; exit 6 when a unit of that name exists already. */
+/* A conversion owns the units it writes: the page makes a token for it (32 hex digits),
+   and STATE_DIR/converting/NAME holds that token from writing the units until
+   SAVE_SCRIPT has started the timer, or until REMOVE_UNITS_SCRIPT has taken them back.
+   Writing, starting and taking back happen under the crontab lock and check the token,
+   so two conversions cannot both take a name, and a conversion that fails never
+   removes the units of another one, nor those of a conversion that finished. */
+
+/* Writes NAME.service and NAME.timer of a conversion and reloads systemd: $1 the name,
+   $2 and $3 the units, $4 the conversion's token. Creates them only when neither
+   exists nor is known to systemd, and removes again what it created if anything fails.
+   Exit 2 = not a name or token, 4 = locked, 5 = state directory, 6 = name taken. */
 export const WRITE_UNITS_SCRIPT = `set -eu
+trap '' TERM HUP INT
 umask 022
 n=$1
+tok=$4
+case $n in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) exit 2 ;; esac
+case $tok in *[!0-9a-f]*) exit 2 ;; esac
+[ \${#tok} -eq 32 ] || exit 2
 d=/etc/systemd/system
+own='${STATE_DIR}/converting'
+install -d -m 711 '${STATE_DIR}' || exit 5
+exec 9>'${STATE_DIR}/.crontab.lock'
+flock -w 10 9 || exit 4
 for u in "$n.service" "$n.timer"; do
   if [ -e "$d/$u" ] || [ -L "$d/$u" ]; then exit 6; fi
   st=$(systemctl show -p LoadState --value "$u" 2>/dev/null || :)
   case $st in ''|not-found) ;; *) exit 6 ;; esac
 done
-printf '%s' "$2" > "$d/.$n.service.tmp"
-printf '%s' "$3" > "$d/.$n.timer.tmp"
-mv -f "$d/.$n.service.tmp" "$d/$n.service"
-mv -f "$d/.$n.timer.tmp" "$d/$n.timer"
+madeService=0
+madeTimer=0
+ok=0
+undo() {
+  [ "$ok" = 0 ] || return 0
+  if [ "$madeService" = 1 ]; then rm -f "$d/$n.service"; fi
+  if [ "$madeTimer" = 1 ]; then rm -f "$d/$n.timer"; fi
+  if [ "$madeService$madeTimer" != 00 ]; then systemctl daemon-reload > /dev/null 2>&1 || :; fi
+  if [ "$(cat "$own/$n" 2>/dev/null)" = "$tok" ]; then rm -f "$own/$n"; fi
+}
+trap undo EXIT
+install -d -m 700 "$own" || exit 5
+printf '%s\\n' "$tok" > "$own/$n"
+for u in service timer; do
+  if ! (set -C; : > "$d/$n.$u") 2> /dev/null; then
+    if [ -e "$d/$n.$u" ] || [ -L "$d/$n.$u" ]; then exit 6; fi
+    exit 1
+  fi
+  if [ "$u" = service ]; then madeService=1; else madeTimer=1; fi
+done
+printf '%s' "$2" > "$d/$n.service"
+printf '%s' "$3" > "$d/$n.timer"
 systemctl daemon-reload
+ok=1
 `;
 
-/* Takes back the units a failed conversion has just written ($1 the name). */
-export const REMOVE_UNITS_SCRIPT = `n=$1
+/* Takes back the units of a conversion that did not finish: $1 the name, $2 its token.
+   Only while the token is that conversion's (see above). Exit 8 = not its units (any
+   more), 4 = locked. */
+export const REMOVE_UNITS_SCRIPT = `set -u
+trap '' TERM HUP INT
+n=$1
+tok=$2
+case $n in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) exit 2 ;; esac
+case $tok in ''|*[!0-9a-f]*) exit 2 ;; esac
+own='${STATE_DIR}/converting'
+[ -f "$own/$n" ] || exit 8
+exec 9>'${STATE_DIR}/.crontab.lock'
+flock -w 30 9 || exit 4
+[ "$(cat "$own/$n" 2>/dev/null)" = "$tok" ] || exit 8
 d=/etc/systemd/system
 systemctl disable --now "$n.timer" > /dev/null 2>&1 || :
 rm -f "$d/$n.service" "$d/$n.timer"
+rm -f "$own/$n"
 systemctl daemon-reload
+systemctl reset-failed "$n.service" "$n.timer" > /dev/null 2>&1 || :
 `;
 
 /* The units of a converted job in /etc/systemd/system, only when Cron Jobs wrote
@@ -916,15 +987,22 @@ systemctl daemon-reload
    and runs as that user, and both have the Description= of such a conversion. So a
    note another user writes into their own crontab cannot reach root's units or theirs.
      $1 check:  exit 0 when both are ours, 9 when neither exists
-     $1 remove: checks again, then stops, disables and removes them
+     $1 remove: checks again, then stops, disables and removes them, all under the
+                crontab lock, so that no conversion writes units of that name meanwhile
      $2 the name, $3 the user (default root)
    Exit 8 = not ours (changed, a link, only one of them, or not written by Cron Jobs
-   from this crontab). */
+   from this crontab), 4 = locked. */
 export const UNITS_SCRIPT = `set -u
 n=$2
 u=\${3:-root}
 case $n in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) exit 2 ;; esac
 case $u in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) exit 2 ;; esac
+if [ "$1" = remove ]; then
+  trap '' TERM HUP INT
+  install -d -m 711 '${STATE_DIR}' || exit 5
+  exec 9>'${STATE_DIR}/.crontab.lock'
+  flock -w 10 9 || exit 4
+fi
 if [ "$u" = root ]; then from='root crontab'; else from="crontab of $u"; fi
 d=/etc/systemd/system
 s=$d/$n.service
@@ -938,7 +1016,6 @@ grep -qxF "Description=$n (from the $from)" "$t" || exit 8
 case $1 in
   check) ;;
   remove)
-    trap '' TERM HUP INT
     systemctl disable --now "$n.timer" > /dev/null 2>&1 || :
     rm -f "$s" "$t" || exit 1
     systemctl daemon-reload

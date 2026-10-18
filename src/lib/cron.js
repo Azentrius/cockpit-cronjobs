@@ -4,7 +4,8 @@
  *    that is not touched is written back byte for byte.
  *  - Validates schedules field by field (ranges, steps, names).
  *  - Describes schedules in words (texts come from the language files).
- *  - Computes the next runs in the server's time zone.
+ *  - Computes the next runs as cron does, also when the clock changes, in the
+ *    server's time zone or a job's CRON_TZ.
  *  - Wraps and unwraps commands for run capture (cockpit-cronjobs-run).
  *
  * Loaded in the browser as window.CronLogic and in Node via require().
@@ -54,7 +55,9 @@
         return null;
     }
 
-    /* One field -> { raw, star, values: sorted array } or null when invalid. */
+    /* One field -> { raw, star, values: sorted array } or null when invalid.
+       A step needs "*" or a range before it: Debian's cron and cronie both refuse
+       "5/10" (get_range in their entry.c), so the page does too. */
     function parseField(text, spec) {
         if (typeof text !== "string" || text === "") return null;
         const set = new Set();
@@ -77,7 +80,8 @@
                     hi = parseValue(r[1], spec);
                     if (hi === null || hi < lo) return null;
                 } else {
-                    hi = m[2] === undefined ? lo : spec.max; // "5/10" = 5-max/10
+                    if (m[2] !== undefined) return null;
+                    hi = lo;
                 }
             }
             for (let v = lo; v <= hi; v += step) set.add(spec.key === "dow" && v === 7 ? 0 : v);
@@ -250,12 +254,20 @@
         return { kind: "raw", line };
     }
 
-    /* System crontab (/etc/crontab, /etc/cron.d/*): jobs with a user field. */
+    /* System crontab (/etc/crontab, /etc/cron.d/*): jobs with a user field, each with
+       env, the variables set above it in the same file (cron applies them to the lines
+       below; cronie takes CRON_TZ from them). Every file starts without any. */
     function parseSystemCrontab(text) {
         const out = [];
+        const env = {};
         splitLines(text).lines.forEach(line => {
+            const v = parseEnvLine(line);
+            if (v) {
+                env[v.name] = v.value;
+                return;
+            }
             const j = splitJob(line, true);
-            if (j) out.push(j);
+            if (j) out.push(Object.assign(j, { env: Object.assign({}, env) }));
         });
         return out;
     }
@@ -643,18 +655,61 @@
         return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, mi: +p.minute };
     }
 
-    /* Wall clock in tz -> instant (ms).
-     * Repeated hour (DST end): the first occurrence, as cron runs it then.
-     * Skipped hour (DST start): the time after the jump; cron runs such jobs
-     * right after the change. */
-    function wallToInstant(wallMs, tz) {
-        const wallOf = ms => { const w = wallParts(ms, tz); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi); };
-        const offsetAt = ms => wallOf(ms) - Math.floor(ms / 60000) * 60000;
-        const a = wallMs - offsetAt(wallMs - 43200000);
-        const b = wallMs - offsetAt(wallMs + 43200000);
-        const exact = [a, b].filter(ms => wallOf(ms) === wallMs);
-        if (exact.length) return Math.min.apply(null, exact);
-        return Math.max(a, b);
+    const MINUTE = 60000;
+
+    /* Minutes the wall clock of tz is ahead of UTC at instant ms. */
+    function offsetAt(ms, tz) {
+        const w = wallParts(ms, tz);
+        return (Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - Math.floor(ms / MINUTE) * MINUTE) / MINUTE;
+    }
+
+    /* The changes of tz's offset in one year (UTC): [{ at, shift }], at the first
+       minute of the new offset, shift its change in minutes (positive: the clock jumps
+       ahead). Found day by day, then to the minute; kept for the next call. */
+    const transitionCache = {};
+    function transitions(tz, year) {
+        const key = tz + " " + year;
+        if (transitionCache[key]) return transitionCache[key];
+        const out = [];
+        if (tz === "UTC") return (transitionCache[key] = out);
+        let prev = Date.UTC(year, 0, 1);
+        let prevOff = offsetAt(prev, tz);
+        for (let day = 1; prev < Date.UTC(year + 1, 0, 1); day++) {
+            const next = Date.UTC(year, 0, 1 + day);
+            const off = offsetAt(next, tz);
+            if (off !== prevOff) {
+                let lo = prev;
+                let hi = next;
+                while (hi - lo > MINUTE) {
+                    const mid = lo + Math.floor((hi - lo) / MINUTE / 2) * MINUTE;
+                    if (offsetAt(mid, tz) === prevOff) lo = mid;
+                    else hi = mid;
+                }
+                out.push({ at: hi, shift: off - prevOff });
+            }
+            prev = next;
+            prevOff = off;
+        }
+        return (transitionCache[key] = out);
+    }
+
+    /* The first change of tz's offset after ms (before until), or null. */
+    function nextTransition(tz, ms, until) {
+        for (let y = new Date(ms).getUTCFullYear(); Date.UTC(y, 0, 1) < until; y++) {
+            const tr = transitions(tz, y).find(x => x.at > ms && x.at < until);
+            if (tr) return tr;
+        }
+        return null;
+    }
+
+    /* The last change of tz's offset at or before ms, within three hours, or null. */
+    function recentTransition(tz, ms) {
+        let last = null;
+        const years = new Set([new Date(ms - 3 * 3600000).getUTCFullYear(), new Date(ms).getUTCFullYear()]);
+        years.forEach(y => transitions(tz, y).forEach(x => {
+            if (x.at <= ms && x.at > ms - 3 * 3600000) last = x;
+        }));
+        return last;
     }
 
     function dayMatches(f, y, mo, d) {
@@ -665,16 +720,9 @@
         return domOk || dowOk;
     }
 
-    /* Next run strictly after `fromMs`, as an instant (ms); null if never/@reboot. */
-    function nextRun(schedule, fromMs, tz) {
-        const p = typeof schedule === "string" ? parseSchedule(schedule) : schedule;
-        if (!p || !p.ok || p.reboot) return null;
-        tz = validTimeZone(tz) ? tz : "UTC";
-        const f = p.fields;
-        const w = wallParts(fromMs, tz);
-        let t = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) + 60000;
-        const limit = Date.UTC(w.y + 6, 0, 1);
-        for (let guard = 0; guard < 200000 && t < limit; guard++) {
+    /* The first wall clock time in [t, last] (as UTC ms) that the fields match, or null. */
+    function nextWall(f, t, last) {
+        for (let guard = 0; guard < 200000 && t <= last; guard++) {
             const dt = new Date(t);
             const y = dt.getUTCFullYear();
             const mo = dt.getUTCMonth() + 1;
@@ -689,21 +737,94 @@
                 t = nm === undefined ? Date.UTC(y, mo - 1, d, h + 1) : Date.UTC(y, mo - 1, d, h, nm);
                 continue;
             }
-            const inst = wallToInstant(t, tz);
-            if (inst > fromMs) return inst;
-            t += 60000;
+            return t;
         }
         return null;
     }
 
-    /* All runs in (fromMs, toMs], at most `max`. */
-    function runsBetween(schedule, fromMs, toMs, tz, max) {
+    /* cron's own words for a job with "*" at the start of the minute or hour field
+       (MIN_STAR, HR_STAR; @hourly too): a "wildcard" job, as opposed to one at a fixed
+       time. They differ when the clock changes. */
+    function isWildcard(p) {
+        return p.fields[0].star || p.fields[1].star;
+    }
+
+    /* Whether a job of cron's own zone runs at the first minute after its clock jumped
+       ahead by shift minutes to wall time `wall` (main loop of cron.c, timeDiff =
+       shift + 1): up to 5 minutes late, everything missed runs now; up to three hours,
+       the jobs at a fixed time missed and the wildcard jobs of now; beyond that, only
+       what is due now (the clock was set). */
+    function runsAfterJump(p, wall, shift) {
+        const f = p.fields;
+        const now = nextWall(f, wall, wall) !== null;
+        if (shift >= 180) return now;
+        const missed = nextWall(f, wall - shift * MINUTE, wall) !== null;
+        if (shift <= 4 || !isWildcard(p)) return missed;
+        return now;
+    }
+
+    /* Next run strictly after fromMs, as an instant (ms); null if never or @reboot.
+       tz: the zone the schedule is read in. serverTz: only for a job with its own zone
+       (cronie's CRON_TZ, then tz), the zone of cron's clock; without it, tz is that.
+       As cron's main loop (cron.c of Debian's cron and of cronie) runs jobs, which looks
+       at its clock every minute:
+         - When the clock goes back (summer time ends), the repeated hour runs only the
+           wildcard jobs again, those at a fixed time ran in the first pass. Jobs with
+           CRON_TZ too: in that hour cron runs only their wildcard jobs.
+         - When the clock jumps ahead (summer time starts), the jobs at a fixed time of
+           the skipped hour run right after the jump; wildcard jobs do not catch up, and
+           neither do jobs with CRON_TZ.
+         - A job with CRON_TZ is otherwise read in its zone minute by minute: a time its
+           zone skips does not come, one it repeats comes twice.
+         - A larger change (back by more than three hours, ahead by three or more)
+           counts as the clock being set: going back, everything runs again; going
+           ahead, what was skipped is lost. */
+    function nextRun(schedule, fromMs, tz, serverTz) {
+        const p = typeof schedule === "string" ? parseSchedule(schedule) : schedule;
+        if (!p || !p.ok || p.reboot) return null;
+        tz = validTimeZone(tz) ? tz : "UTC";
+        const own = !!serverTz;
+        const server = own ? (validTimeZone(serverTz) ? serverTz : "UTC") : tz;
+        const f = p.fields;
+        const wild = isWildcard(p);
+        let m = Math.floor(fromMs / MINUTE) * MINUTE + MINUTE;
+        const until = Date.UTC(new Date(m).getUTCFullYear() + 6, 0, 1);
+        while (m < until) {
+            const off = offsetAt(m, tz) * MINUTE;
+            let end = until;
+            [tz].concat(own ? [server] : []).forEach(z => {
+                const tr = nextTransition(z, m, until);
+                if (tr) end = Math.min(end, tr.at);
+            });
+            const tr = recentTransition(server, m);
+            if (tr && tr.shift < 0 && tr.shift >= -180 && m < tr.at - tr.shift * MINUTE) {
+                /* the hour cron's clock repeats */
+                end = Math.min(end, tr.at - tr.shift * MINUTE);
+                const w = wild ? nextWall(f, m + off, end - MINUTE + off) : null;
+                if (w !== null) return w - off;
+                m = end;
+                continue;
+            }
+            if (!own && tr && tr.shift > 0 && m === tr.at) {
+                if (runsAfterJump(p, m + off, tr.shift)) return m;
+                m += MINUTE;
+                continue;
+            }
+            const w = nextWall(f, m + off, end - MINUTE + off);
+            if (w !== null) return w - off;
+            m = end;
+        }
+        return null;
+    }
+
+    /* All runs in (fromMs, toMs], at most `max` (tz and serverTz as for nextRun). */
+    function runsBetween(schedule, fromMs, toMs, tz, max, serverTz) {
         const p = typeof schedule === "string" ? parseSchedule(schedule) : schedule;
         const out = [];
         let t = fromMs;
         const limit = max || 2000;
         while (out.length < limit) {
-            const n = nextRun(p, t, tz);
+            const n = nextRun(p, t, tz, serverTz);
             if (n === null || n > toMs) break;
             out.push(n);
             t = n;
@@ -869,7 +990,7 @@
         parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, jobName, slug,
         cksum,
-        validTimeZone, wallParts, wallToInstant, nextRun, runsBetween,
+        validTimeZone, wallParts, isWildcard, nextRun, runsBetween,
         describe,
     };
 }));

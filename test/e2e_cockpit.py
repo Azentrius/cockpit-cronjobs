@@ -321,6 +321,8 @@ with sync_playwright() as p:
           "\n#[cronjobs:off] 30 1 * * 0 /usr/sbin/fstrim -a\n" in converted, "line off with a note: " + repr(converted))
     check(sh(f"systemctl is-enabled {unit}.timer").stdout.strip() == "enabled" and
           sh(f"systemctl is-active {unit}.timer").stdout.strip() == "active", "timer enabled and active")
+    check(not os.path.exists(f"{STATE}/converting/{unit}") and
+          oct(os.stat(f"{STATE}/converting").st_mode & 0o777) == "0o700", "a finished conversion keeps no token")
     check("Umgewandelt in systemd-Timer" in row_of(page, "fstrim").inner_text(), "converted job recognised")
     row_of(page, "fstrim").locator("[data-key^='more:']").click()
     page.locator(".cron-menu__item", has_text="Zurück zu cron").click()

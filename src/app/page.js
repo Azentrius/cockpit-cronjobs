@@ -6,8 +6,8 @@
  */
 
 import {
-    $, C, cap, clock, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon, keyOf, R, rich,
-    S, SD, state, T, tzLabel, withFix,
+    $, C, cap, clock, cronNext, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon, keyOf, R,
+    rich, S, SD, state, T, tzLabel, withFix,
 } from "./core.js";
 import { errText, installWrapper } from "./system.js";
 import {
@@ -121,7 +121,7 @@ function nextCell(r, e, i) {
     if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
     const p = C.parseSchedule(e.schedule);
     if (p.reboot) return h("span", null, T.nextBoot);
-    const ms = C.nextRun(p, Date.now(), jobTz(r.entries, i));
+    const ms = cronNext(p, Date.now(), jobTz(r.entries, i));
     if (ms === null) return h("span", null, T.neverRuns);
     return whenCell(ms);
 }
@@ -480,7 +480,7 @@ function renderSystem() {
     fill($("etc-body"), sys.etc.length === 0 ? emptyState() : readOnlyTable(
         [T.colSchedule, T.colUser, T.colCommand],
         sys.etc.map(j => h("tr", null,
-            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule)),
+            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule, j.tz)),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
 
@@ -495,7 +495,7 @@ function renderSystem() {
                             icon("exclamation-triangle"), T.ignored) : null),
                     j.ignored ? h("span", { class: "az-cell-sub cron-ignored-why" }, T.ignoredWhy[j.ignored]) : null)),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule },
-                j.schedule ? scheduleCell(j.schedule) : h("span", { class: "cron-muted" }, "—")),
+                j.schedule ? scheduleCell(j.schedule, j.tz) : h("span", { class: "cron-muted" }, "—")),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user || h("span", { class: "cron-muted" }, "—")),
             h("td", { "data-label": T.colCommand },
                 j.command ? h("span", { class: "az-mono" }, j.command) : h("span", { class: "cron-muted" }, "—"))))));
@@ -507,7 +507,7 @@ function renderSystem() {
         [T.colUser, T.colSchedule, T.colCommand],
         readOnlyUsers.map(j => h("tr", { class: j.enabled ? null : "is-off" },
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
-            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule)),
+            h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule, j.tz)),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
 
     $("periodic-card").hidden = sys.periodic.length === 0;
