@@ -130,6 +130,10 @@
         removedRuns: [],
         orphanCalls: [],
         units: {},
+        /* STATE_DIR/converting: the token of each conversion in progress, by unit name */
+        converting: {},
+        /* REMOVE_UNITS_SCRIPT calls: [name, removed] */
+        takeBacks: [],
         enabled: [],
         failEnable: null,
         failDisable: null,
@@ -323,11 +327,57 @@
                 return "removed " + id;
             }).join("\n") + "\n";
         }
-        /* SAVE_SCRIPT: user, cksum, [timer [stop]] */
+        /* WRITE_UNITS_SCRIPT: name, service, timer, token. The name is taken (exit 6) when a
+           unit of it exists; the token stays with the units until SAVE_SCRIPT starts the
+           timer or REMOVE_UNITS_SCRIPT takes them back. */
+        if (/\(set -C; : > /.test(script)) {
+            const name = args[4];
+            if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
+            if (M.units[name] || ["logrotate", "apt-daily"].includes(name)) fail({ exit_status: 6, problem: null, message: "" });
+            M.units[name] = { service: args[5], timer: args[6] };
+            M.converting[name] = args[7];
+            /* another conversion takes the name over right after (its token, its units) */
+            if (M.stealAfterWrite) { M.converting[name] = "f".repeat(32); M.stealAfterWrite = false; }
+            return "";
+        }
+        /* REMOVE_UNITS_SCRIPT: name, token; only the units of the conversion with that token. */
+        if (/\ntok=\$2\n/.test(script)) {
+            const [name, token] = args.slice(4);
+            const ours = !!M.converting[name] && M.converting[name] === token;
+            M.takeBacks.push([name, ours]);
+            if (!ours) fail({ exit_status: 8, problem: null, message: "" });
+            delete M.units[name];
+            delete M.converting[name];
+            M.enabled = M.enabled.filter(n => n !== name + ".timer");
+            return "";
+        }
+        /* Back to cron: units checked (and removed) only when the page wrote them from
+           this user's crontab (header, User=, Description=). */
+        if (/\n {2}check\) ;;/.test(script)) {
+            const [step, name, user] = args.slice(4);
+            const who = user || "root";
+            const from = who === "root" ? "root crontab" : "crontab of " + who;
+            const u = M.units[name];
+            if (step === "remove" && M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
+            if (!u) fail({ exit_status: 9, problem: null, message: "" });
+            M.unitChecks.push([step, name, who]);
+            const ours = u.service.split("\n")[0] === "# Created by Cockpit Cron Jobs from this line of the " + from + ":" &&
+                u.service.split("\n").includes("User=" + who) && u.timer.split("\n").includes("Description=" + name + " (from the " + from + ")");
+            if (u.foreign || !ours) fail({ exit_status: 8, problem: null, message: "" });
+            if (step === "remove") {
+                delete M.units[name];
+                M.enabled = M.enabled.filter(n => n !== name + ".timer");
+                M.unitsRemoved.push(name);
+            }
+            return "";
+        }
+        /* SAVE_SCRIPT: user, cksum, [timer [stop | "" token]] */
         if (/flock -w 10 9/.test(script)) {
             const user = args[4];
             if (M.lockBusy) fail({ exit_status: 4, problem: null, message: "" });
             if (user !== "root" && !(user in M.sys.users)) fail({ exit_status: 2, problem: null, message: "" });
+            const token = args[8];
+            if (token && M.converting[args[6].replace(/\.timer$/, "")] !== token) fail({ exit_status: 8, problem: null, message: "" });
             if (user === "root" && M.conflictNext !== null) { M.root = M.conflictNext; M.conflictNext = null; }
             if (user !== "root" && M.userConflictNext) {
                 M.sys.users[user] = M.userConflictNext;
@@ -359,6 +409,7 @@
             M.writes++;
             if (timer && stop) M.enabled = M.enabled.filter(n => n !== timer);
             else if (timer) M.enabled.push(timer);
+            if (token) delete M.converting[timer.replace(/\.timer$/, "")];
             if (user !== "root") {
                 M.sys.users[user] = input;
                 M.userWrites.push({ user, text: input });
@@ -426,36 +477,6 @@
             M.journalReads.push(args[4]);
             if (M.journal[args[4]] === false) fail({ exit_status: 1, problem: null, message: "journal unreadable" });
             return journalOutput(args[4]);
-        }
-        if (/systemctl daemon-reload/.test(script) && /mv -f/.test(script)) {
-            const name = args[4];
-            if (M.units[name] || ["logrotate", "apt-daily"].includes(name)) fail({ exit_status: 6, problem: null, message: "" });
-            M.units[name] = { service: args[5], timer: args[6] };
-            return "";
-        }
-        /* Back to cron: units checked (and removed) only when the page wrote them from
-           this user's crontab (header, User=, Description=). */
-        if (/\n {2}check\) ;;/.test(script)) {
-            const [step, name, user] = args.slice(4);
-            const who = user || "root";
-            const from = who === "root" ? "root crontab" : "crontab of " + who;
-            const u = M.units[name];
-            if (!u) fail({ exit_status: 9, problem: null, message: "" });
-            M.unitChecks.push([step, name, who]);
-            const ours = u.service.split("\n")[0] === "# Created by Cockpit Cron Jobs from this line of the " + from + ":" &&
-                u.service.split("\n").includes("User=" + who) && u.timer.split("\n").includes("Description=" + name + " (from the " + from + ")");
-            if (u.foreign || !ours) fail({ exit_status: 8, problem: null, message: "" });
-            if (step === "remove") {
-                delete M.units[name];
-                M.enabled = M.enabled.filter(n => n !== name + ".timer");
-                M.unitsRemoved.push(name);
-            }
-            return "";
-        }
-        if (/disable --now/.test(script)) {
-            delete M.units[args[4]];
-            M.enabled = M.enabled.filter(n => n !== args[4] + ".timer");
-            return "";
         }
         fail({ problem: "not-found", message: "unexpected command " + JSON.stringify(args) });
     }

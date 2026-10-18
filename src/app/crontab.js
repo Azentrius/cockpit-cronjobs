@@ -109,12 +109,12 @@ export function convertedTimer(r, i) {
     return from && from.name === name && from.user === r.user ? t : null;
 }
 
-/* cronie runs a job in CRON_TZ when the crontab sets it above the job;
-   Debian's cron does not know CRON_TZ. */
+/* cronie runs a job in CRON_TZ when the crontab sets it above the job; Debian's cron
+   does not know CRON_TZ. The job's own zone, or null for the server's (see cronNext). */
 export function jobTz(entries, index) {
-    if (state.basics.flavor !== "cronie") return state.tz;
+    if (state.basics.flavor !== "cronie") return null;
     const tz = C.envBefore(entries, index).CRON_TZ;
-    return tz && C.validTimeZone(tz) ? tz : state.tz;
+    return tz && C.validTimeZone(tz) ? tz : null;
 }
 
 /* The recorded runs of job id of user's crontab, or null while they are not known. */
@@ -252,7 +252,8 @@ export function jobAt(entries, i, line) {
    switch is clicked). mutate: entries -> new entries, or null when the line no
    longer fits. opts.quiet: no success message (the caller reports); opts.timer: a
    systemd timer to enable and start in the same step, or to stop and disable with
-   opts.stopTimer (see SAVE_SCRIPT).
+   opts.stopTimer; opts.token: the token of the conversion whose timer it is (see
+   SAVE_SCRIPT).
    Result: { ok, unchanged?, conflict?, error?, timerFailed?, backup?, saved?, verified? }
    (verified: read back as written; if not, a warning is shown already). */
 export function commit(base, mutate, okTitle, opts) {
@@ -295,7 +296,7 @@ async function write(base, next, same, okTitle, opts) {
     try {
         let backup;
         try {
-            backup = await saveCrontab(user, base.text, next, opts.timer, opts.stopTimer);
+            backup = await saveCrontab(user, base.text, next, opts.timer, opts.stopTimer, opts.token);
         } catch (ex) {
             if (isDenied(ex)) { loadPending = true; return { ok: false, conflict: true }; }
             if (ex && ex.exit_status === 3) {
@@ -306,6 +307,7 @@ async function write(base, next, same, okTitle, opts) {
             if (ex && ex.exit_status === 5)
                 return { ok: false, error: T.backupFailed + (errText(ex) ? "\n" + errText(ex) : "") };
             if (ex && ex.exit_status === 7) return { ok: false, error: errText(ex), timerFailed: true };
+            if (ex && ex.exit_status === 8) return { ok: false, error: T.convUnitsTaken };
             return { ok: false, error: errText(ex) };
         }
         const saved = backup ? T.backupAt(codeSafe(backup)) : T.noBackup(user);

@@ -2,6 +2,8 @@
 """Browser tests for Cron Jobs against the mock Cockpit (with Cockpit's strict CSP).
 Run: python3 test/ui_test.py   (needs Playwright with Chromium)"""
 import atexit, os, re, subprocess, sys, time
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from playwright.sync_api import sync_playwright
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -1253,6 +1255,8 @@ with sync_playwright() as p:
     page.click("#conv-ok")
     wait_js(page, "!document.querySelector('#conv-alert').hidden")
     check("Es gibt bereits logrotate.service" in page.inner_text("#conv-alert"), "name taken")
+    check(mock(page, "takeBacks") == [["logrotate", False]] and "logrotate" not in mock(page, "units"),
+          "name taken: taking back with this conversion's token removes nothing: " + repr(mock(page, "takeBacks")))
     before = root_text(page)
     before_convert = before
     page.fill("#conv-name", "fstrim-weekly")
@@ -1261,6 +1265,8 @@ with sync_playwright() as p:
     wait_idle(page)
     units = mock(page, "units")
     check("fstrim-weekly" in units and "fstrim-weekly.timer" in mock(page, "enabled"), "units written and enabled")
+    check(mock(page, "converting") == {} and len(mock(page, "takeBacks")) == 1,
+          "a finished conversion keeps no token and takes nothing back: " + repr(mock(page, "converting")))
     after = root_text(page).split("\n")
     k = after.index("#[cronjobs:off] 30 1 * * 0 /usr/sbin/fstrim -a") if "#[cronjobs:off] 30 1 * * 0 /usr/sbin/fstrim -a" in after else -1
     check(k > 0 and after[k - 1].startswith("# Converted to systemd timer fstrim-weekly.timer by Cockpit Cron Jobs on "),
@@ -1287,6 +1293,8 @@ with sync_playwright() as p:
     check("Access denied" in page.inner_text("#conv-alert") and "wieder eingeschaltet" in page.inner_text("#conv-alert"), "rollback reported")
     check(root_text(page) == before, "crontab restored after failed enable")
     check(list(mock(page, "units").keys()) == ["fstrim-weekly"], "units of failed conversion removed")
+    check(mock(page, "takeBacks")[-1][1] is True and mock(page, "converting") == {},
+          "taken back with its own token: " + repr(mock(page, "takeBacks")))
     page.click("#conv-cancel")
     # systemd reads the command differently: nothing changes
     page.evaluate("() => { window.__mock.failEnable = null; window.__mock.mangleExec = true; }")
@@ -1298,6 +1306,22 @@ with sync_playwright() as p:
     check("nicht wie vorgesehen" in page.inner_text("#conv-alert") and root_text(page) == before, "unit mismatch refused")
     check(list(mock(page, "units").keys()) == ["fstrim-weekly"], "mismatching units removed")
     page.click("#conv-cancel")
+    # another conversion took over the name meanwhile (its units had gone, and it wrote its own):
+    # this one starts no timer, changes no crontab and leaves the other one's units alone
+    page.evaluate("() => { window.__mock.mangleExec = false; window.__mock.stealAfterWrite = true; }")
+    row(page, 0).locator("[data-key^=more]").click()
+    page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    wait_js(page, "!document.querySelector('#conv-ok').disabled")
+    page.fill("#conv-name", "taken-over")
+    page.click("#conv-ok")
+    wait_js(page, "!document.querySelector('#conv-alert').hidden")
+    wait_idle(page)
+    check("anderen Umwandlung übernommen" in page.inner_text("#conv-alert") and root_text(page) == before and
+          "taken-over" in mock(page, "units") and "taken-over.timer" not in mock(page, "enabled") and
+          mock(page, "takeBacks")[-1] == ["taken-over", False],
+          "units taken over by another conversion: not started, not removed: " + repr(mock(page, "takeBacks")))
+    page.click("#conv-cancel")
+    page.evaluate("() => { delete window.__mock.units['taken-over']; delete window.__mock.converting['taken-over']; }")
 
     # back to cron: the converted line is recognised, and going back restores the crontab byte for byte
     conv = page.locator("#root-body tbody tr", has_text="/usr/sbin/fstrim -a")
@@ -1480,6 +1504,45 @@ with sync_playwright() as p:
     row(page, 0).locator("[data-key^=more]").click()
     check("RANDOM_DELAY" in page.inner_text("#row-menu"), "RANDOM_DELAY blocks conversion")
     page.context.close()
+
+    # CRON_TZ in /etc/crontab and /etc/cron.d: cronie runs each job in the zone set above it in
+    # its file (two in /etc/crontab; a file of /etc/cron.d does not pass its zone to the next);
+    # Debian's cron does not know CRON_TZ. Server in Berlin; midnights as the server's clock shows them.
+    def berlin_clock_of_midnight(zone):
+        now = datetime.now(timezone.utc).astimezone(ZoneInfo(zone))
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight.astimezone(ZoneInfo("Europe/Berlin")).strftime("%H:%M")
+    for flavor in ("cronie", "debian"):
+        page = open_page(browser, "flavor=" + flavor + "&tz=Europe/Berlin")
+        page.evaluate("""() => {
+            window.__mock.sys.etc = 'CRON_TZ=UTC\\n0 0 * * * root /usr/local/bin/utc-midnight\\n' +
+                                    'CRON_TZ=Asia/Tokyo\\n0 0 * * * root /usr/local/bin/tokyo-midnight\\n';
+            window.__mock.sys.crond['a-ny'] = 'CRON_TZ=America/New_York\\n0 0 * * * root /usr/local/bin/ny\\n';
+            window.__mock.sys.crond['b-plain'] = '0 0 * * * root /usr/local/bin/plain\\n';
+        }""")
+        page.click("#reload")
+        wait_idle(page)
+        times = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#tl-card .cron-tl-row')).map(li => [
+            li.querySelector('.cron-tl-name').textContent, li.querySelector('.az-sr').textContent.replace(/^: /, '')]))""")
+        cronie = flavor == "cronie"
+        want = {"utc-midnight": berlin_clock_of_midnight("UTC") if cronie else "00:00",
+                "tokyo-midnight": berlin_clock_of_midnight("Asia/Tokyo") if cronie else "00:00",
+                "a-ny": berlin_clock_of_midnight("America/New_York") if cronie else "00:00",
+                "b-plain": "00:00"}
+        check(all(times.get(name) == clock for name, clock in want.items()),
+              f"{flavor}: timeline of jobs with CRON_TZ in system crontabs: {times!r}, want {want!r}")
+        show_tab(page, "system")
+        etc = page.inner_text("#etc-body")
+        crond = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
+            tr.querySelector('.az-mono').textContent, tr.innerText]))""")
+        if cronie:
+            check("0 0 * * * · UTC" in etc and "0 0 * * * · Asia/Tokyo" in etc, "cronie: /etc/crontab names each zone: " + etc)
+            check("0 0 * * * · America/New_York" in crond["a-ny"] and "·" not in crond["b-plain"],
+                  f"cronie: cron.d names its zone, the next file has none: {crond!r}")
+        else:
+            check("·" not in etc and "·" not in crond["a-ny"], f"debian: no zone shown: {etc!r} {crond!r}")
+        check(not page.problems, f"no console problems (CRON_TZ in system crontabs, {flavor}): " + repr(page.problems))
+        page.context.close()
 
     # /etc/cron.d: links, types, modes and hard links, as Debian's cron and cronie read them
     # (raw mode in hex and owner of the entry, then mode, owner, hard links of what it opens)

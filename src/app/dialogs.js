@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, backupDirOf, C, fill, fmtLocal, fmtWhen, h, icon, keyOf, rich, setBusyButton, state, T } from "./core.js";
+import {
+    $, backupDirOf, C, cronNext, fill, fmtLocal, fmtWhen, h, icon, keyOf, rich, setBusyButton, state, T,
+} from "./core.js";
 import { ensureUserRuns, errText, installWrapper, removeRunsIfUnused, wrapperCurrent } from "./system.js";
 import {
     commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, setCapture, takenIds,
@@ -82,7 +84,7 @@ function checkSchedule(value, tz) {
         return { ok: false, msg: T.errField(T.fieldNames[p.field], T.fieldRanges[p.field]) };
     }
     if (p.reboot) return { ok: true, text: p.text, help: T.bootHelp };
-    const ms = C.nextRun(p, Date.now(), tz || state.tz);
+    const ms = cronNext(p, Date.now(), tz);
     if (ms === null) return { ok: false, msg: T.errNever };
     const local = fmtLocal(ms);
     const help = T.nextHelp(describe(p), fmtWhen(ms)) + (local ? " · " + local : "");

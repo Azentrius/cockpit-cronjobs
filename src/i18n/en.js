@@ -191,7 +191,7 @@
         bootHelp: "Runs once at every system start.",
         errRequired: "Enter a schedule.",
         errCount: "A schedule has exactly five fields: minute, hour, day, month, weekday. Or a shortcut like `@daily`.",
-        errField: (name, range) => `${name}: allowed are ${range}, plus *, lists (1,15), ranges (1-5) and steps (*/10).`,
+        errField: (name, range) => `${name}: allowed are ${range}, plus *, lists (1,15), ranges (1-5) and steps after * or a range (*/10, 5-59/10).`,
         fieldNames: { minute: "Minute", hour: "Hour", dom: "Day", month: "Month", dow: "Weekday" },
         fieldRanges: { minute: "0–59", hour: "0–23", dom: "1–31", month: "1–12 or jan–dec",
                        dow: "0–7 or sun–sat (0 and 7 are Sunday)" },
@@ -366,6 +366,8 @@
         converting: "Converting …",
         convFailed: "Conversion failed",
         convUnitMismatch: "systemd did not read the command or its environment as intended. Nothing was changed.",
+        convUnitsTaken: "The units of this name were changed or taken by another conversion meanwhile. " +
+                        "The crontab was not changed, and the units were left as they are.",
         convRolledBack: "The crontab line was turned back on and the units were removed.",
         convNotActive: "Only for active jobs.",
         convReboot: "Not for @reboot jobs.",

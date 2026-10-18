@@ -143,6 +143,11 @@ const BACK = {
     "Fri..Sun *-*-* 01:00:00": "0 1 * * 5-7",
     "*-*-* 00/2:00:00": "0 */2 * * *",
     "*-*-* 01..05:00:00": "0 1-5 * * *",
+    /* systemd's "A/B" without a range: cron needs one ("5/10" is refused) */
+    "*-*-* *:05/10:00": "5-59/10 * * * *",
+    "*-*-* 03/6:00:00": "0 3-23/6 * * *",
+    "*-*-02/7 00:00:00": "0 0 2-31/7 * *",
+    "*-02/3-01 00:00:00": "0 0 1 2-12/3 *",
 };
 Object.keys(BACK).forEach(spec => t("back to cron: " + spec, () => assert.strictEqual(SD.calendarToCron(spec), BACK[spec])));
 ["*-*-* 00:00:30", "2027-*-* 00:00:00", "*-*-* 00:00:00 Europe/Berlin", "Mon *-*-01 00:00:00", "*-*~01 00:00:00", "garbage"]

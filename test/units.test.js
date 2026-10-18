@@ -48,6 +48,7 @@ function setup() {
     fs.writeFileSync(path.join(root, "bin", "systemctl"),
         "#!/bin/sh\n" +
         "echo \"$*\" >> \"$FAKE/systemctl.log\"\n" +
+        "if [ \"$1\" = show ] && [ -n \"${FAKE_SLOW-}\" ]; then sleep \"$FAKE_SLOW\"; fi\n" +
         "if [ -n \"${FAKE_FAIL-}\" ] && [ \"$1\" = \"$FAKE_FAIL\" ]; then echo \"Failed to $1 unit: Access denied\" >&2; exit 1; fi\n",
         { mode: 0o755 });
     return root;
@@ -123,7 +124,7 @@ for (const sh of SHELLS) {
 /* ---------- UNITS_SCRIPT ---------- */
 
 function units(root) {
-    const s = appScript("UNITS_SCRIPT", { SD });
+    const s = appScript("UNITS_SCRIPT", { SD, STATE_DIR: root + "/state" });
     assert.ok(s.includes("d=/etc/systemd/system\n"));
     return s.replace("d=/etc/systemd/system\n", "d=" + root + "/etc/systemd/system\n");
 }
@@ -185,6 +186,155 @@ for (const sh of SHELLS) {
         assert.strictEqual(r.rc, 0, r.err);
         assert.ok(!fs.existsSync(path.join(root, UNITS, "trim.service")) && !fs.existsSync(path.join(root, UNITS, "trim.timer")));
         assert.strictEqual(read(root, "systemctl.log"), "disable --now trim.timer\ndaemon-reload\nreset-failed trim.service trim.timer\n");
+    });
+
+    t(sh + ": units: removing waits for the crontab lock", () => {
+        const root = setup();
+        writeUnits(root, "trim");
+        const r = spawnSync("sh", ["-c", "flock \"$1\" sleep 2 & sleep 0.5; t0=$(date +%s%N)\n" +
+                                   "\"$2\" -c \"$3\" cockpit-cronjobs remove trim; echo \"rc=$?\"\n" +
+                                   "echo \"waited=$(( ($(date +%s%N) - t0) / 1000000 ))\"; wait",
+                                   "lock", root + "/state/.crontab.lock", sh, units(root)],
+                            { env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", FAKE: root }, timeout: 30000 });
+        const out = r.stdout.toString();
+        assert.ok(/rc=0/.test(out) && +(/waited=(\d+)/.exec(out) || [0, 0])[1] >= 1000, out + r.stderr.toString());
+        assert.ok(!fs.existsSync(path.join(root, UNITS, "trim.service")));
+    });
+}
+
+/* ---------- a conversion owns its units: WRITE_UNITS_SCRIPT, SAVE_SCRIPT, REMOVE_UNITS_SCRIPT ---------- */
+
+function inRoot(root, name) {
+    const s = appScript(name, { STATE_DIR: root + "/state" });
+    assert.ok(s.includes("d=/etc/systemd/system\n"), name);
+    return s.replace("d=/etc/systemd/system\n", "d=" + root + "/etc/systemd/system\n");
+}
+const TOKEN_A = "0123456789abcdef0123456789abcdef";
+const TOKEN_B = "fedcba9876543210fedcba9876543210";
+const unitsOf = who => ({
+    service: SD.serviceUnit({ name: "trim", line: "30 1 * * 0 " + who, shell: "/bin/sh", command: who, env: {} }),
+    timer: SD.timerUnit({ name: "trim", specs: ["Sun *-*-* 01:30:00"], persistent: false }) + "# " + who + "\n",
+});
+const A = unitsOf("/usr/sbin/fstrim -a");
+const Bu = unitsOf("/usr/local/bin/other");
+const write = (sh, root, u, token, env) => run(sh, root, inRoot(root, "WRITE_UNITS_SCRIPT"), ["trim", u.service, u.timer, token], { env });
+const takeBack = (sh, root, token) => run(sh, root, inRoot(root, "REMOVE_UNITS_SCRIPT"), ["trim", token]);
+const start = (sh, root, token, env) => {
+    const cur = read(root, "root.crontab") || "";
+    return run(sh, root, save(root), ["root", C.cksum(cur), "trim.timer", "", token],
+               { input: cur.replace("30 1 * * 0 /usr/sbin/fstrim -a", "#[cronjobs:off] 30 1 * * 0 /usr/sbin/fstrim -a"), env });
+};
+const owner = root => read(root, "state/converting/trim");
+const unitFiles = root => [read(root, UNITS + "trim.service"), read(root, UNITS + "trim.timer")];
+const JOB = "30 1 * * 0 /usr/sbin/fstrim -a\n";
+
+for (const sh of SHELLS) {
+    t(sh + ": two conversions of one name at the same time: one writes, the other finds the name taken", () => {
+        const root = setup();
+        /* systemctl show takes a second, so both look at the name before either writes */
+        const r = spawnSync("sh", ["-c",
+            "\"$SH\" -c \"$W\" cockpit-cronjobs trim \"$S1\" \"$T1\" \"$K1\" > /dev/null 2>&1 & a=$!\n" +
+            "\"$SH\" -c \"$W\" cockpit-cronjobs trim \"$S2\" \"$T2\" \"$K2\" > /dev/null 2>&1 & b=$!\n" +
+            "wait $a; echo \"a=$?\"; wait $b; echo \"b=$?\"\n"], {
+            env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", FAKE: root, FAKE_SLOW: "1", SH: sh,
+                   W: inRoot(root, "WRITE_UNITS_SCRIPT"), S1: A.service, T1: A.timer, K1: TOKEN_A, S2: Bu.service, T2: Bu.timer, K2: TOKEN_B },
+            timeout: 60000,
+        });
+        const rc = Object.fromEntries(r.stdout.toString().trim().split("\n").map(l => l.split("=")));
+        assert.deepStrictEqual(Object.values(rc).sort(), ["0", "6"], r.stdout.toString() + r.stderr.toString());
+        const [winner, token] = rc.a === "0" ? [A, TOKEN_A] : [Bu, TOKEN_B];
+        assert.deepStrictEqual(unitFiles(root), [winner.service, winner.timer], "the units of the one that wrote, whole");
+        assert.strictEqual(owner(root), token + "\n");
+        assert.strictEqual((read(root, "systemctl.log").match(/^daemon-reload$/mg) || []).length, 1);
+    });
+
+    t(sh + ": the second conversion fails after the first finished: the first one's units stay", () => {
+        const root = setup();
+        fs.writeFileSync(path.join(root, "root.crontab"), JOB);
+        assert.strictEqual(write(sh, root, A, TOKEN_A).rc, 0);
+        assert.strictEqual(write(sh, root, Bu, TOKEN_B).rc, 6, "name taken");
+        let r = start(sh, root, TOKEN_A);
+        assert.strictEqual(r.rc, 0, r.err);
+        assert.strictEqual(owner(root), null, "a finished conversion keeps no token");
+        r = takeBack(sh, root, TOKEN_B);
+        assert.strictEqual(r.rc, 8, "the second one takes nothing back");
+        r = takeBack(sh, root, TOKEN_A);
+        assert.strictEqual(r.rc, 8, "a finished conversion is not taken back either");
+        assert.deepStrictEqual(unitFiles(root), [A.service, A.timer]);
+        assert.ok(!/disable/.test(read(root, "systemctl.log")), read(root, "systemctl.log"));
+        assert.strictEqual(read(root, "root.crontab"), "#[cronjobs:off] " + JOB);
+    });
+
+    t(sh + ": the second conversion fails before the first finished: the first one still finishes", () => {
+        const root = setup();
+        fs.writeFileSync(path.join(root, "root.crontab"), JOB);
+        assert.strictEqual(write(sh, root, A, TOKEN_A).rc, 0);
+        assert.strictEqual(write(sh, root, Bu, TOKEN_B).rc, 6);
+        assert.strictEqual(takeBack(sh, root, TOKEN_B).rc, 8);
+        assert.strictEqual(start(sh, root, TOKEN_B).rc, 8, "nor can it start the first one's timer");
+        assert.strictEqual(read(root, "root.crontab"), JOB, "and nothing changed");
+        assert.strictEqual(start(sh, root, TOKEN_A).rc, 0);
+        assert.deepStrictEqual(unitFiles(root), [A.service, A.timer]);
+        assert.strictEqual(read(root, "systemctl.log").split("\n").filter(l => /^(enable|disable)/.test(l)).join(";"), "enable --now trim.timer");
+    });
+
+    t(sh + ": a conversion takes back only its own units, also after they were replaced", () => {
+        const root = setup();
+        assert.strictEqual(write(sh, root, A, TOKEN_A).rc, 0);
+        /* A's units go (by hand); B converts under the same name */
+        fs.unlinkSync(path.join(root, UNITS, "trim.service"));
+        fs.unlinkSync(path.join(root, UNITS, "trim.timer"));
+        assert.strictEqual(write(sh, root, Bu, TOKEN_B).rc, 0);
+        assert.strictEqual(takeBack(sh, root, TOKEN_A).rc, 8);
+        assert.deepStrictEqual(unitFiles(root), [Bu.service, Bu.timer]);
+        const r = takeBack(sh, root, TOKEN_B);
+        assert.strictEqual(r.rc, 0, r.err);
+        assert.deepStrictEqual(unitFiles(root), [null, null]);
+        assert.strictEqual(owner(root), null);
+        assert.ok(/disable --now trim.timer\ndaemon-reload\nreset-failed trim.service trim.timer\n$/.test(read(root, "systemctl.log")));
+    });
+
+    t(sh + ": when the timer cannot start, the crontab goes back and the units can still be taken back", () => {
+        const root = setup();
+        fs.writeFileSync(path.join(root, "root.crontab"), JOB);
+        assert.strictEqual(write(sh, root, A, TOKEN_A).rc, 0);
+        assert.strictEqual(start(sh, root, TOKEN_A, { FAKE_FAIL: "enable" }).rc, 7);
+        assert.strictEqual(read(root, "root.crontab"), JOB);
+        assert.strictEqual(owner(root), TOKEN_A + "\n");
+        assert.strictEqual(takeBack(sh, root, TOKEN_A).rc, 0);
+        assert.deepStrictEqual(unitFiles(root), [null, null]);
+    });
+
+    t(sh + ": writing removes what it created when it fails, and leaves what was there", () => {
+        let root = setup();
+        let r = write(sh, root, A, TOKEN_A, { FAKE_FAIL: "daemon-reload" });
+        assert.notStrictEqual(r.rc, 0);
+        assert.deepStrictEqual(unitFiles(root), [null, null]);
+        assert.strictEqual(owner(root), null);
+
+        root = setup();
+        fs.writeFileSync(path.join(root, UNITS, "trim.timer"), "mine\n");
+        r = write(sh, root, A, TOKEN_A);
+        assert.strictEqual(r.rc, 6);
+        assert.deepStrictEqual(unitFiles(root), [null, "mine\n"]);
+        assert.strictEqual(owner(root), null);
+
+        root = setup();
+        fs.symlinkSync("/nonexistent", path.join(root, UNITS, "trim.service"));
+        assert.strictEqual(write(sh, root, A, TOKEN_A).rc, 6, "a link to nothing takes the name too");
+    });
+
+    t(sh + ": names and tokens are checked", () => {
+        const root = setup();
+        const W = inRoot(root, "WRITE_UNITS_SCRIPT");
+        assert.strictEqual(run(sh, root, W, ["../x", "s", "t", TOKEN_A]).rc, 2);
+        assert.strictEqual(run(sh, root, W, ["trim", "s", "t", "short"]).rc, 2);
+        assert.strictEqual(run(sh, root, W, ["trim", "s", "t", TOKEN_A.toUpperCase()]).rc, 2);
+        assert.strictEqual(run(sh, root, inRoot(root, "REMOVE_UNITS_SCRIPT"), ["trim", ""]).rc, 2);
+        assert.strictEqual(run(sh, root, save(root), ["root", C.cksum(""), "../../x.timer", "", TOKEN_A], { input: JOB }).rc, 2);
+        assert.strictEqual(run(sh, root, save(root), ["root", C.cksum(""), "trim.timer", "stop", TOKEN_A], { input: JOB }).rc, 2);
+        assert.deepStrictEqual(unitFiles(root), [null, null]);
+        assert.strictEqual(read(root, "root.crontab"), null);
     });
 }
 

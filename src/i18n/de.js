@@ -190,7 +190,7 @@
         bootHelp: "Läuft einmal bei jedem Systemstart.",
         errRequired: "Geben Sie einen Zeitplan ein.",
         errCount: "Ein Zeitplan hat genau fünf Felder: Minute, Stunde, Tag, Monat, Wochentag. Oder ein Kürzel wie `@daily`.",
-        errField: (name, range) => `${name}: erlaubt sind ${range}, dazu *, Listen (1,15), Bereiche (1-5) und Schritte (*/10).`,
+        errField: (name, range) => `${name}: erlaubt sind ${range}, dazu *, Listen (1,15), Bereiche (1-5) und Schritte nach * oder einem Bereich (*/10, 5-59/10).`,
         fieldNames: { minute: "Minute", hour: "Stunde", dom: "Tag", month: "Monat", dow: "Wochentag" },
         fieldRanges: { minute: "0–59", hour: "0–23", dom: "1–31", month: "1–12 oder jan–dec",
                        dow: "0–7 oder sun–sat (0 und 7 sind Sonntag)" },
@@ -369,6 +369,8 @@
         converting: "Wird umgewandelt …",
         convFailed: "Umwandeln fehlgeschlagen",
         convUnitMismatch: "systemd hat den Befehl oder seine Umgebung nicht wie vorgesehen gelesen. Es wurde nichts geändert.",
+        convUnitsTaken: "Die Einheiten dieses Namens wurden inzwischen verändert oder von einer anderen Umwandlung " +
+                        "übernommen. Die Crontab wurde nicht geändert, die Einheiten bleiben, wie sie sind.",
         convRolledBack: "Die Crontab-Zeile wurde wieder eingeschaltet und die Einheiten entfernt.",
         convNotActive: "Nur für aktive Jobs.",
         convReboot: "Nicht für @reboot-Jobs.",

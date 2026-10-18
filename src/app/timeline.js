@@ -5,20 +5,21 @@
  */
 
 import {
-    $, C, clock, codeSafe, DAY, fill, h, icon, joinList, lowerFirst, pad2, rich, S, SD, state, T, weekdayShort,
+    $, C, clock, codeSafe, cronRuns, DAY, fill, h, icon, joinList, lowerFirst, pad2, rich, S, SD, state, T, weekdayShort,
 } from "./core.js";
 import { jobInfo, jobsOf, jobTz, rootJobs } from "./crontab.js";
 import { describe } from "./page.js";
 
 /* ---------- timeline ---------- */
 
-/* Rows of everything that runs in (from, to]: { name, src, kind, runs, band } */
+/* Rows of everything that runs in (from, to]: { name, src, kind, runs, band }; tz: a
+   job's own zone (cronie's CRON_TZ), else null. */
 function timelineRows(from, to) {
     const rows = [];
     const addCron = (name, src, schedule, group, tz) => {
         const p = C.parseSchedule(schedule);
         if (!p.ok || p.reboot) return;
-        const runs = C.runsBetween(p, from, to, tz || state.tz, 25);
+        const runs = cronRuns(p, from, to, tz, 25);
         if (!runs.length) return;
         rows.push({ name, src: src + " · " + lowerFirst(describe(schedule)), kind: "cron", runs,
                     band: runs.length > 24, group });
@@ -27,8 +28,8 @@ function timelineRows(from, to) {
         if (e.enabled) addCron(C.jobName(jobInfo(e).command), T.srcRoot, e.schedule, 0, jobTz(state.root.entries, i));
     });
     if (state.sys) {
-        state.sys.etc.forEach(j => addCron(C.jobName(j.command), "/etc/crontab", j.schedule, 1));
-        state.sys.crond.forEach(j => { if (!j.ignored) addCron(j.file, "/etc/cron.d", j.schedule, 2); });
+        state.sys.etc.forEach(j => addCron(C.jobName(j.command), "/etc/crontab", j.schedule, 1, j.tz));
+        state.sys.crond.forEach(j => { if (!j.ignored) addCron(j.file, "/etc/cron.d", j.schedule, 2, j.tz); });
         /* Other users: as the page shows their crontabs (also right after a change), else as read */
         Object.keys(state.users).forEach(user => jobsOf(state.users[user]).forEach(({ e, i }) => {
             if (e.enabled) addCron(C.jobName(e.command), T.srcUser(user), e.schedule, 3, jobTz(state.users[user].entries, i));

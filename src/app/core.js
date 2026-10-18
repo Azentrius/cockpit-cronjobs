@@ -148,6 +148,11 @@ function dayLabel(ms) {
     return new Intl.DateTimeFormat(LOCALE, { timeZone: tz, weekday: "short", month: "short", day: "numeric",
                                              year: w.y !== n.y ? "numeric" : undefined }).format(ms);
 }
+/* The next run and the runs of a job as cron starts them: in the job's own zone tz
+   (cronie's CRON_TZ, see jobTz), with cron's clock in the server's, or else in that. */
+export const cronNext = (p, from, tz) => C.nextRun(p, from, tz || state.tz, tz ? state.tz : null);
+export const cronRuns = (p, from, to, tz, max) => C.runsBetween(p, from, to, tz || state.tz, max, tz ? state.tz : null);
+
 export function clock(ms, tz) {
     const w = C.wallParts(ms, tz || state.tz);
     return pad2(w.h) + ":" + pad2(w.mi);

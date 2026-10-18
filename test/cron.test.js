@@ -162,13 +162,23 @@ t("added job is parsed back as the same job", () => {
 /* ---------- validation ---------- */
 
 const valid = ["* * * * *", "0 3 * * *", "*/15 * * * *", "0 9-17 * * 1-5", "0 0 1,15 * *",
-    "30 2 * * sun", "0 0 1 jan *", "0 */2 * * *", "5/10 * * * *", "0 0 * * 7", "0 0 * * mon-fri",
-    "@daily", "@reboot", "@hourly", "0-59/5 1,2,3 1-31/2 1-12 0-7"];
+    "30 2 * * sun", "0 0 1 jan *", "0 */2 * * *", "5-59/10 * * * *", "0 0 * * 7", "0 0 * * mon-fri",
+    "@daily", "@reboot", "@hourly", "0-59/5 1,2,3 1-31/2 1-12 0-7", "0 0 * jan-dec/3 *", "0 0 1,10-20/5 * *"];
+/* A step needs "*" or a range in front: "5/10" is refused by Debian's cron ("Step specified
+   without range") and by cronie (get_range in entry.c), in every field. */
 const invalid = ["", "* * * *", "* * * * * *", "60 * * * *", "* 24 * * *", "* * 0 * *", "* * 32 * *",
     "* * * 13 *", "* * * * 8", "*/0 * * * *", "5-1 * * * *", "a * * * *", "@sometimes", "1,,2 * * * *",
-    "1-2-3 * * * *", "* * * foo *"];
+    "1-2-3 * * * *", "* * * foo *", "5/10 * * * *", "0 3/6 * * *", "0 0 1/2 * *", "0 0 * jan/3 *", "0 0 * * mon/2",
+    "1,5/10 * * * *"];
 valid.forEach(s => t("valid: " + s, () => assert.ok(C.parseSchedule(s).ok, s)));
 invalid.forEach(s => t("invalid: " + s, () => assert.ok(!C.parseSchedule(s).ok, s)));
+t("steps after * or a range", () => {
+    assert.deepStrictEqual(C.parseSchedule("*/10 * * * *").fields[0].values, [0, 10, 20, 30, 40, 50]);
+    assert.deepStrictEqual(C.parseSchedule("5-59/10 * * * *").fields[0].values, [5, 15, 25, 35, 45, 55]);
+    assert.deepStrictEqual(C.parseSchedule("0 0 * jan-dec/3 *").fields[3].values, [1, 4, 7, 10]);
+    assert.strictEqual(C.parseSchedule("0 3/6 * * *").field, "hour");
+    assert.strictEqual(C.splitJob("5/10 * * * * /bin/true", false), null, "cron does not read such a line as a job");
+});
 t("dow 7 is sunday", () => assert.deepStrictEqual(C.parseField("7", { key: "dow", min: 0, max: 7, names: [], nameBase: 0 }).values, [0]));
 
 /* ---------- descriptions ---------- */
@@ -236,22 +246,147 @@ const SCHEDS = ["0 3 * * *", "30 1 * * 0", "*/7 * * * *", "0 3 2 * *", "15 2 * *
     "45 23 31 * *", "0 0 1,15 * 1", "5 4 * * sun", "0 2 29 2 *", "@hourly", "@monthly", "59 1 * * *"];
 const FROMS = [Date.UTC(2026, 9, 12, 0, 1), Date.UTC(2026, 2, 28, 23, 30), Date.UTC(2026, 9, 24, 23, 59),
     Date.UTC(2026, 11, 31, 23, 59, 30)];
+/* cron's main loop (cron.c of Debian's cron and of cronie 1.7.2), minute by minute: the
+   minutes in (fromMs, toMs] in which it starts the job. Every minute it compares its
+   clock (local time in minutes) with the minute it handled last (timeDiff): 1 is the
+   normal case; 2 to 5 runs all it missed; 6 to 180 the wildcard jobs of now and the
+   fixed ones it missed (summer time starts); 0 down to -180 only the wildcard jobs of
+   now (summer time ends); anything else counts as the clock being set. cronie reads a
+   job with CRON_TZ (serverTz given, tz its zone) in that zone at the real time, and not
+   at all while it catches up with the offset it had before. */
+const offsets = new Map();
+function zoneWall(ms, tz) {
+    const key = tz + " " + ms;
+    if (!offsets.has(key)) offsets.set(key, C.wallParts(ms, tz));
+    return offsets.get(key);
+}
+function cronLoop(sched, fromMs, toMs, tz, serverTz) {
+    const p = C.parseSchedule(sched);
+    const own = !!serverTz;
+    const server = own ? serverTz : tz;
+    const wild = p.fields[0].star || p.fields[1].star;
+    const clock = M => { const w = zoneWall(M * 60000, server); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) / 60000; };
+    const wallOf = v => {
+        const d = new Date(v * 60000);
+        return { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(), h: d.getUTCHours(), mi: d.getUTCMinutes() };
+    };
+    const runs = [];
+    let M = Math.floor(fromMs / 60000) - 600;
+    let gmtOff = clock(M) - M;
+    let virtual = clock(M);
+    for (M++; M * 60000 <= toMs; M++) {
+        const oldOff = gmtOff;
+        const now = clock(M);
+        gmtOff = now - M;
+        let run = false;
+        const find = (v, doWild, doFixed, vOff) => {
+            const hit = own ? vOff === gmtOff && matches(p, zoneWall((v - vOff) * 60000, tz)) : matches(p, wallOf(v));
+            if (hit && (wild ? doWild : doFixed)) run = true;
+        };
+        const diff = now - virtual;
+        if (diff === 1 || diff > 180 || diff < -180) {
+            virtual = now;
+            find(now, true, true, gmtOff);
+        } else if (diff > 5) {
+            find(now, true, false, gmtOff);
+            for (let v = virtual + 1; v <= now; v++) find(v, false, true, v < now ? oldOff : gmtOff);
+            virtual = now;
+        } else if (diff > 0) {
+            for (let v = virtual + 1; v <= now; v++) find(v, true, true, v < now ? oldOff : gmtOff);
+            virtual = now;
+        } else {
+            find(now, true, false, gmtOff);
+        }
+        if (run && M * 60000 > fromMs) runs.push(M * 60000);
+    }
+    return runs;
+}
+const isoList = list => list.map(ms => new Date(ms).toISOString());
+
 for (const tz of ["UTC", "Europe/Berlin"]) {
     for (const s of SCHEDS) {
         for (const from of FROMS) {
             t(`next ${tz} ${s} from ${new Date(from).toISOString()}`, () => {
                 const got = C.nextRun(s, from, tz);
-                const exp = brute(s, from, tz, 60 * 24 * 40);
-                if (exp === undefined) { assert.ok(got === null || got - from > 40 * 86400000); return; }
-                // DST start in Berlin (2026-03-29 02:00 -> 03:00): cron runs jobs of the
-                // skipped hour right after the jump, the minute walk skips them.
-                const gap = tz === "Europe/Berlin" && got >= Date.UTC(2026, 2, 29, 1) && got < Date.UTC(2026, 2, 29, 2);
-                if (gap && exp > got) return;
+                /* UTC never changes, so there each minute counts once; in Berlin, three
+                   days of cron's loop (the summer time starts or ends in two of them). */
+                const days = tz === "UTC" ? 40 : 3;
+                const exp = tz === "UTC" ? brute(s, from, tz, 60 * 24 * days) : cronLoop(s, from, from + days * 86400000, tz)[0];
+                if (exp === undefined) { assert.ok(got === null || got - from > days * 86400000); return; }
                 assert.strictEqual(new Date(got).toISOString(), new Date(exp).toISOString());
             });
         }
     }
 }
+
+/* Around every change of the clock in 2026, in zones with an hour (Berlin, New York,
+   Sydney) and with half an hour (Lord Howe Island), all runs as cron's loop has them. */
+function changesIn(tz, year) {
+    const out = [];
+    let prev = null;
+    for (let ms = Date.UTC(year, 0, 1); ms < Date.UTC(year + 1, 0, 1); ms += 3600000) {
+        const w = C.wallParts(ms, tz);
+        const off = Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - ms;
+        if (prev !== null && off !== prev) out.push(ms);
+        prev = off;
+    }
+    return out;
+}
+const DST_SCHEDS = ["* * * * *", "*/7 * * * *", "0 * * * *", "30 * * * *", "@hourly", "@daily", "0 2 * * *",
+    "30 2 * * *", "15 2 * * *", "59 1 * * *", "0 3 * * *", "30 1 * * *", "45 0 * * *", "*/10 2 * * *",
+    "*/15 0-3 * * *", "0 */2 * * *", "5 1-3 * * *", "0,30 2 * * 0", "0-59/20 2 * * *", "30 2,3 * * *",
+    "0 1,2 * * *", "45 2 25 10 *", "30 2 29 3 *", "0 2 * * 0", "15 3 * * *", "30 0 * * *", "0 4 * * *"];
+const ZONES = [["Europe/Berlin"], ["America/New_York"], ["Australia/Sydney"], ["Australia/Lord_Howe"],
+    ["UTC", "Europe/Berlin"], ["America/New_York", "Europe/Berlin"], ["Europe/Berlin", "Europe/Berlin"],
+    ["Europe/Berlin", "UTC"], ["Australia/Lord_Howe", "America/New_York"]];
+for (const [tz, serverTz] of ZONES) {
+    const changes = changesIn(tz, 2026).concat(serverTz ? changesIn(serverTz, 2026) : []);
+    assert.ok(tz === "UTC" ? changes.length === 2 : changes.length >= 2, tz + " changes its clock");
+    for (const at of changes) {
+        const from = at - 14 * 3600000;
+        const to = at + 12 * 3600000;
+        t(`as cron's loop: ${tz}${serverTz ? " (CRON_TZ, cron in " + serverTz + ")" : ""} around ${new Date(at).toISOString()}`, () => {
+            for (const s of DST_SCHEDS) {
+                assert.deepStrictEqual(isoList(C.runsBetween(s, from, to, tz, 5000, serverTz)), isoList(cronLoop(s, from, to, tz, serverTz)), s);
+            }
+        });
+    }
+}
+
+const B = "Europe/Berlin";
+const on = (s, from, to, tz, serverTz) => isoList(C.runsBetween(s, Date.parse(from), Date.parse(to), tz || B, 100, serverTz));
+t("summer time ends: a job every minute runs on in the repeated hour", () => {
+    assert.strictEqual(new Date(C.nextRun("* * * * *", Date.parse("2026-10-25T00:59:00Z"), B)).toISOString(),
+                       "2026-10-25T01:00:00.000Z");
+});
+t("summer time ends: a job at a fixed time runs once", () => {
+    assert.deepStrictEqual(on("30 2 * * *", "2026-10-24T22:00:00Z", "2026-10-25T22:00:00Z"), ["2026-10-25T00:30:00.000Z"]);
+    assert.deepStrictEqual(on("0 1,2 * * *", "2026-10-24T22:00:00Z", "2026-10-25T22:00:00Z"),
+                           ["2026-10-24T23:00:00.000Z", "2026-10-25T00:00:00.000Z"]);
+});
+t("summer time ends: wildcard jobs run in both passes", () => {
+    assert.deepStrictEqual(on("*/30 2 * * *", "2026-10-24T22:00:00Z", "2026-10-25T22:00:00Z"),
+                           ["2026-10-25T00:00:00.000Z", "2026-10-25T00:30:00.000Z", "2026-10-25T01:00:00.000Z", "2026-10-25T01:30:00.000Z"]);
+    assert.deepStrictEqual(on("0 * * * *", "2026-10-24T23:30:00Z", "2026-10-25T02:30:00Z"),
+                           ["2026-10-25T00:00:00.000Z", "2026-10-25T01:00:00.000Z", "2026-10-25T02:00:00.000Z"]);
+});
+t("summer time starts: fixed times of the skipped hour run right after the jump, once", () => {
+    assert.deepStrictEqual(on("30 2 * * *", "2026-03-28T22:00:00Z", "2026-03-29T22:00:00Z"), ["2026-03-29T01:00:00.000Z"]);
+    assert.deepStrictEqual(on("15,45 2 * * *", "2026-03-28T22:00:00Z", "2026-03-29T22:00:00Z"), ["2026-03-29T01:00:00.000Z"]);
+    assert.deepStrictEqual(on("0 3 * * *", "2026-03-28T22:00:00Z", "2026-03-29T22:00:00Z"), ["2026-03-29T01:00:00.000Z"]);
+});
+t("summer time starts: wildcard jobs of the skipped hour do not catch up", () => {
+    assert.deepStrictEqual(on("*/30 2 * * *", "2026-03-28T22:00:00Z", "2026-03-29T22:00:00Z"), []);
+    assert.deepStrictEqual(on("0 * * * *", "2026-03-28T23:30:00Z", "2026-03-29T01:30:00Z"),
+                           ["2026-03-29T00:00:00.000Z", "2026-03-29T01:00:00.000Z"]);
+});
+t("CRON_TZ (cronie): read in its zone; a fixed time in cron's repeated hour does not run", () => {
+    assert.deepStrictEqual(on("0 0 * * *", "2026-07-01T00:00:00Z", "2026-07-02T00:00:00Z", "UTC", B), ["2026-07-02T00:00:00.000Z"]);
+    assert.deepStrictEqual(on("30 1 * * *", "2026-10-24T22:00:00Z", "2026-10-25T22:00:00Z", "UTC", B), []);
+    assert.deepStrictEqual(on("*/30 1 * * *", "2026-10-24T22:00:00Z", "2026-10-25T22:00:00Z", "UTC", B),
+                           ["2026-10-25T01:00:00.000Z", "2026-10-25T01:30:00.000Z"]);
+    assert.deepStrictEqual(on("30 2 * * *", "2026-03-28T22:00:00Z", "2026-03-29T22:00:00Z", B, B), [], "no catching up");
+});
 t("leap day finds 2028", () => {
     const got = C.nextRun("0 0 29 2 *", Date.UTC(2026, 9, 12), "UTC");
     assert.strictEqual(new Date(got).toISOString(), "2028-02-29T00:00:00.000Z");
@@ -325,6 +460,16 @@ t("system crontab parsing", () => {
     const r = C.parseSystemCrontab(s);
     assert.deepStrictEqual(r.map(x => [x.schedule, x.user]), [["17 * * * *", "root"], ["@reboot", "www-data"]]);
     assert.strictEqual(r[0].command, "cd / && run-parts --report /etc/cron.hourly");
+});
+t("system crontab: each job has the variables set above it in its file", () => {
+    const s = "SHELL=/bin/sh\nCRON_TZ=UTC\n0 0 * * * root a\nCRON_TZ = \"America/New_York\"\n0 0 * * * root b\n" +
+              "# CRON_TZ=Asia/Tokyo\nMAILTO=''\n@daily root c\n";
+    const r = C.parseSystemCrontab(s);
+    assert.deepStrictEqual(r.map(x => [x.command, x.env.CRON_TZ, x.env.MAILTO]),
+                           [["a", "UTC", undefined], ["b", "America/New_York", undefined], ["c", "America/New_York", ""]]);
+    assert.strictEqual(r[0].env.SHELL, "/bin/sh");
+    assert.notStrictEqual(r[0].env, r[1].env, "a copy for each job");
+    assert.deepStrictEqual(C.parseSystemCrontab("0 0 * * * root d\n")[0].env, {}, "every file starts without any");
 });
 
 

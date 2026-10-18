@@ -83,12 +83,14 @@
 
     const DOW_CRON = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
 
-    function cronPart(text, min) {
+    /* One field; systemd's "A/B" runs from A to the end of the field, which cron
+       writes "A-MAX/B" (cron has no step without a range). */
+    function cronPart(text, min, max) {
         if (text === "*") return "*";
         const out = [];
         for (const part of text.split(",")) {
             let m = /^(\d+)\/(\d+)$/.exec(part);
-            if (m) { out.push((+m[1] === min ? "*" : +m[1]) + "/" + +m[2]); continue; }
+            if (m) { out.push((+m[1] === min ? "*" : +m[1] + "-" + max) + "/" + +m[2]); continue; }
             m = /^(\d+)\.\.(\d+)(?:\/(\d+))?$/.exec(part);
             if (m) { out.push(+m[1] + "-" + +m[2] + (m[3] ? "/" + +m[3] : "")); continue; }
             if (/^\d+$/.test(part)) { out.push(String(+part)); continue; }
@@ -117,7 +119,7 @@
         if (!m) return null;
         const [, wd, y, mo, d, h, mi, s] = m;
         if (y !== "*" || !/^0+$/.test(s)) return null;
-        const fields = [cronPart(mi, 0), cronPart(h, 0), cronPart(d, 1), cronPart(mo, 1),
+        const fields = [cronPart(mi, 0, 59), cronPart(h, 0, 23), cronPart(d, 1, 31), cronPart(mo, 1, 12),
                         wd ? cronDow(wd) : "*"];
         if (fields.some(f => f === null)) return null;
         if (wd && fields[2] !== "*") return null;
