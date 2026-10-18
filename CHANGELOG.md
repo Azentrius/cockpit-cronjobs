@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Licenses in the archive:** `cockpit-cronjobs-VERSION.tar.gz` contains `LICENSE` and `NOTICE` (as
+  `cronjobs/LICENSE` and `cronjobs/NOTICE`, listed in `SHA256SUMS`), as the `.deb` and `.rpm` already do.
+
 ## 2.7.1 – 2026-10-18
 
 Fixes: conversions to one name at the same time, next runs when the clock changes, steps after a single

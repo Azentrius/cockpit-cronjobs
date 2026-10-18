@@ -54,10 +54,11 @@ dist:
 	@echo cockpit-cronjobs-$(VERSION)-source.tar.gz
 
 # Ready-to-install package: a directory "cronjobs" for /usr/share/cockpit or
-# /usr/local/share/cockpit, plus SHA256SUMS.
+# /usr/local/share/cockpit, with LICENSE and NOTICE, plus SHA256SUMS.
 package:
 	rm -rf build && mkdir -p build/cronjobs
 	cp -R src/. build/cronjobs/
+	cp LICENSE NOTICE build/cronjobs/
 	find build/cronjobs -type d -exec chmod 755 {} +
 	find build/cronjobs -type f -exec chmod 644 {} +
 	chmod 755 build/cronjobs/cockpit-cronjobs-run
