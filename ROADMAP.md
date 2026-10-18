@@ -103,7 +103,7 @@ Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHAN
 - ✅ **Packages:** `.deb` and `.rpm` (`cockpit-cronjobs`) built by the release workflow, next to the
   archive, reproducible, with a signed build provenance.
 - ✅ **Cockpit's Applications page:** AppStream data (`de.azentrius.cronjobs`) in the packages, and the
-  Azentrius package repository, packages.azentrius.de, whose catalog Cockpit reads: Cron Jobs is found
+  Azentrius package repository, packages.azentrius.com, whose catalog Cockpit reads: Cron Jobs is found
   and installed from Cockpit itself.
 - **More translations** through `src/i18n/` (texts are already separate from the code).
 - **BusyBox systems** (e.g. Alpine): `flock` without `-w`, `setsid` without `-w`, `crond` with

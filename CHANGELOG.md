@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.4 – 2026-10-18
+
+Azentrius moves to azentrius.com; the page itself works as before.
+
+- **Signature:** the word mark links to azentrius.com.
+- **Package repository:** README and release notes name packages.azentrius.com, the new address of the
+  Azentrius package repository; packages.azentrius.de keeps serving the same packages.
+- **Maintainer** of the `.deb` and `.rpm`: support@azentrius.com.
+
 ## 2.7.3 – 2026-10-18
 
 The page brings its own monospace font, so commands and paths no longer fall back to another font under
