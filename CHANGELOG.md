@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.7.1 – 2026-10-18
+
+Fixes: conversions to one name at the same time, next runs when the clock changes, steps after a single
+value, and `CRON_TZ` in `/etc/crontab` and `/etc/cron.d`.
+
+- **Conversions at the same time:** two conversions to the same name, from two browsers or tabs, could
+  both report success, the second overwriting the first one's units; if one of them failed afterwards,
+  taking back its units could remove those of the other, whose crontab line was already off. Now each
+  conversion owns the units it writes: they are only created when the name is free, and only the
+  conversion that wrote them starts their timer or takes them back, all under the crontab lock
+  (`/var/lib/cockpit-cronjobs/converting/` says which one while it is under way). Back to cron removes
+  units under the same lock.
+- **When the clock changes:** next runs and the timeline follow cron. When summer time ends, the repeated
+  hour runs only the jobs with `*` in the minute or hour field again (until now a job every minute went
+  missing for that hour), and jobs at a fixed time run once; when it starts, jobs at a fixed time of the
+  skipped hour run right after the change, the others do not catch up. With cronie, jobs with `CRON_TZ`
+  run as cronie runs them.
+- **Steps need `*` or a range:** a schedule like `5/10 * * * *` was accepted, but Debian's cron and cronie
+  both refuse it; the form now says so and names `*/10` and `5-59/10`. A timer described in words no
+  longer comes out as such a schedule.
+- **`CRON_TZ` in system crontabs:** with cronie, `CRON_TZ` in `/etc/crontab` and `/etc/cron.d` now counts
+  for the jobs below it in the same file: the timeline draws them at the right time, and they show their
+  zone with the schedule.
+- Tests: next runs are compared with a port of cron's main loop around every clock change of 2026 in four
+  zones; two conversions of one name at the same time, and one that fails after another finished, run
+  against the root steps with dash and bash.
+
 ## 2.7.0 – 2026-10-16
 
 The page follows the Azentrius design system more closely: states, controls, alerts and texts.
