@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 2.7.3 – 2026-10-18
+
+The page brings its own monospace font, so commands and paths no longer fall back to another font under
+Cockpit 314 (Ubuntu 24.04).
 
 - **Red Hat Mono comes with the page:** commands, paths and schedules are set in Red Hat Mono, as the
   design system asks, from the page's own `RedHatMono.woff2` (a Latin subset, SIL Open Font License 1.1,
