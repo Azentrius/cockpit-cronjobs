@@ -16,6 +16,10 @@ longer make it take the server's memory or send the page gigabytes.
   the disk use (`du` under `timeout`); a run's output is read as its user. A unit test, with dash and
   bash, swaps the file for a link to `/dev/zero` between the check and the read (under a memory limit)
   and lists a file of 32 MiB.
+- **Status for the Status Board:** 2.8.0 was not released on its own; its status comes with this
+  release. Failed jobs of the last 24 hours and jobs without recording are worked out as root every
+  15 minutes by `cockpit-cronjobs-status.timer`, which the `.deb` and `.rpm` turn on, and can be read
+  without administrative access. Details under 2.8.0 in the changelog.
 
 ## 2.8.0 – 2026-10-19
 
