@@ -401,9 +401,18 @@ for (const sh of SHELLS) {
             assert.ok(!("version" in contract(r.out)));
         });
 
+        t(name + "the languages Cockpit may ask for", () => {
+            const fx = fixture();
+            const { raw } = written(sh, awk, fx);
+            for (const [lang, file] of [["de-DE", "de"], ["de_AT", "de"], ["DE", "de"], ["fr", "en"], ["pt-BR", "en"],
+                                        ["zh_CN", "en"], ["dea", "en"]])
+                assert.deepStrictEqual(run(sh, awk, fx, ["status", "--lang", lang]), { rc: 0, out: raw[file], err: "" }, lang);
+        });
+
         t(name + "wrong calls", () => {
             const fx = fixture();
-            for (const args of [[], ["status", "--lang", "fr"], ["status", "--lang"], ["status", "de"],
+            for (const args of [[], ["status", "--lang"], ["status", "de"], ["status", "--lang", "d"],
+                                ["status", "--lang", "de-"], ["status", "--lang", "../x"], ["status", "--lang", "de\nx"],
                                 ["status", "--lang", "de", "x"], ["write", "now"], ["show"]]) {
                 const r = run(sh, awk, fx, args);
                 assert.strictEqual(r.rc, 64, JSON.stringify(args));

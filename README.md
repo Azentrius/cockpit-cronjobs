@@ -179,8 +179,8 @@ the helper:
 `cronjobs-status status --lang en|de` prints the status as JSON. It needs no administrative access:
 `cockpit-cronjobs-status.timer` works the status out as root every 15 minutes (and two minutes after a
 boot) and writes it to `/var/lib/cockpit-cronjobs/status.json` (English) and `status.de.json` (German),
-mode 644; `status` only reads the file of the language asked for. Without the file it reports `none` and
-why.
+mode 644; `status` only reads the file of the language asked for (German for `de` and its regions,
+English for any other language). Without the file it reports `none` and why.
 
 | Item | State |
 |---|---|

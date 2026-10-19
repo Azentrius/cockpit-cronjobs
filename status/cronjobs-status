@@ -5,7 +5,8 @@
 #
 # Usage:
 #   cronjobs-status status [--lang en|de]   print the status as JSON; reads only the status file
-#                                           of that language, so it needs no root
+#                                           of that language, so it needs no root (any other
+#                                           language Cockpit may use gets English)
 #   cronjobs-status write                   as root: work the status out and write it to
 #                                           /var/lib/cockpit-cronjobs/status.json (English) and
 #                                           status.de.json (German), mode 644
@@ -371,11 +372,13 @@ lang=en
 case ${1-} in
     status)
         shift
+        # Any language Cockpit may use: German for de and its regions (de-AT, de_CH), else English.
         if [ $# -gt 0 ]; then
             [ "$1" = --lang ] && [ $# -eq 2 ] || usage
+            case $2 in *[!A-Za-z0-9_-]*) usage ;; esac
+            printf '%s\n' "$2" | grep -Eqx '[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?' || usage
             case $2 in
-                en|de) lang=$2 ;;
-                *) usage ;;
+                [Dd][Ee]|[Dd][Ee][-_]*) lang=de ;;
             esac
         fi
         show
