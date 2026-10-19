@@ -479,9 +479,10 @@ function asOwner(user, argv) {
    directory in KB. A run marker whose process is gone is reported with ALIVE 0.
    Another user writes the directories of the user's jobs, so only what has the form
    of a job's runs is listed: directories named by an ID, no links, regular files read
-   under a time limit (a FIFO cannot hold up the page) and without the separator \036
-   (nothing in them can pass for the runs of another job). Users the system does not
-   know any more are left out. */
+   under a time limit (a FIFO cannot hold up the page), only their last bytes (a file
+   swapped for a link to /dev/zero after the check fills no memory, a huge one does not
+   reach the page) and without the separator \036 (nothing in them can pass for the
+   runs of another job). Users the system does not know any more are left out. */
 const RUNS_SCRIPT = `job() {
   id=\${1##*/}
   case $id in ''|*[!A-Za-z0-9_-]*) return ;; esac
@@ -490,7 +491,7 @@ const RUNS_SCRIPT = `job() {
   printf 'size %s\\n' "$(timeout 10 du -sk "$1" 2>/dev/null | cut -f1)"
   f=$1/runs.jsonl
   if [ -f "$f" ] && [ ! -L "$f" ]; then
-    timeout 5 tail -n ${KEEP_RUNS} "$f" 2>/dev/null | tr -d '\\036'
+    timeout 5 tail -c 65536 "$f" 2>/dev/null | tail -n ${KEEP_RUNS} | tr -d '\\036'
   fi
   for r in "$1"/*.running; do
     [ -f "$r" ] && [ ! -L "$r" ] || continue

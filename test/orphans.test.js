@@ -212,6 +212,55 @@ for (const sh of SHELLS) {
         assert.deepStrictEqual(byId["alice/fifo-0004"].runs, []);
         assert.deepStrictEqual(byId["alice/ln-0005"].runs, [], "a link to a file is not read");
     });
+
+    /* Only the last 64 KiB of a user's runs.jsonl are read: a file far larger than the recorder
+       writes does not reach the page, and one the user swaps for a link to /dev/zero after the
+       check (here: timeout does it right before the read) fills no memory. The memory limit keeps
+       a read without that bound from taking the machine down. */
+    t(sh + ": the list of runs reads only the last bytes of a user's runs", () => {
+        const root = setup({ jobs: ["root-0001"], root: "" });
+        const rec = start => '{"start":' + start + ',"end":' + (start + 1) + ',"rc":0,"trigger":"schedule","bytes":0,"truncated":false,"out":""}\n';
+        const runs = id => {
+            const d = path.join(root, "state", "users", "alice", "runs", id);
+            fs.mkdirSync(d, { recursive: true });
+            return path.join(d, "runs.jsonl");
+        };
+        const big = runs("big-0001");
+        fs.writeFileSync(big, "");
+        fs.truncateSync(big, 32 << 20);
+        fs.appendFileSync(big, "\n" + rec(100));
+        const swapped = runs("swap-0002");
+        fs.writeFileSync(swapped, rec(200));
+        fs.writeFileSync(runs("next-0003"), rec(300));
+        const real = spawnSync("sh", ["-c", "command -v timeout"]).stdout.toString().trim();
+        assert.ok(real, "timeout is there");
+        fs.writeFileSync(path.join(root, "bin", "timeout"),
+            "#!/bin/sh\n" +
+            "for a in \"$@\"; do\n" +
+            "  case $a in */swap-0002/runs.jsonl) rm -f \"$a\" && ln -s /dev/zero \"$a\" ;; esac\n" +
+            "done\n" +
+            "\"$REAL_TIMEOUT\" \"$@\"\n" +
+            "rc=$?\n" +
+            "echo \"$rc $*\" >> \"$FAKE_READS\"\n" +
+            "exit $rc\n", { mode: 0o755 });
+        const reads = path.join(root, "reads.log");
+        const r = spawnSync(sh, ["-c", "ulimit -v 524288 || exit 9\n" + listScript(root)], {
+            env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", REAL_TIMEOUT: real, FAKE_READS: reads },
+            timeout: 30000,
+            maxBuffer: 64 << 20,
+        });
+        assert.strictEqual(r.status, 0, r.stderr.toString());
+        assert.ok(fs.lstatSync(swapped).isSymbolicLink(), "swapped after the check");
+        const read = fs.readFileSync(reads, "utf8").split("\n").find(l => l.endsWith("/swap-0002/runs.jsonl"));
+        assert.ok(read && read.startsWith("0 "), "the read of /dev/zero ends by itself: " + read);
+        const out = r.stdout.toString("latin1");
+        out.split("\x1e").slice(1).forEach(s => assert.ok(s.length < 65536 + 256, s.slice(0, 40) + ": " + s.length + " bytes"));
+        const byId = R.parseRuns(out);
+        assert.deepStrictEqual(byId["alice/big-0001"].runs.map(x => x.start), [100], "the last record of a huge file");
+        assert.deepStrictEqual(byId["alice/swap-0002"].runs, []);
+        assert.deepStrictEqual(byId["alice/next-0003"].runs.map(x => x.start), [300], "the jobs after it as they are");
+        assert.deepStrictEqual(byId["root-0001"].runs.map(x => x.start), [1791770400]);
+    });
 }
 
 if (HAVE_PROC) {
