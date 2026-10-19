@@ -4,6 +4,9 @@
 PREFIX ?= /usr/local
 DESTDIR ?=
 PKGDIR = $(DESTDIR)$(PREFIX)/share/cockpit/cronjobs
+# The status for the Status Board: fixed paths (manifest.json names the helper), whatever PREFIX is.
+HELPERS = $(DESTDIR)/usr/lib/cockpit-cronjobs
+UNITS = $(DESTDIR)/usr/lib/systemd/system
 VERSION := $(shell sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
 # Reproducible archives: file times from the last commit.
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
@@ -22,9 +25,16 @@ install:
 	install -m 644 src/app/*.js $(PKGDIR)/app/
 	install -m 644 src/lib/*.js $(PKGDIR)/lib/
 	install -m 644 src/i18n/*.js $(PKGDIR)/i18n/
+	install -d $(HELPERS) $(UNITS)
+	install -m 755 status/cronjobs-status $(HELPERS)/
+	install -m 644 status/cockpit-cronjobs-status.service status/cockpit-cronjobs-status.timer $(UNITS)/
+	if [ -z "$(DESTDIR)" ]; then sh packaging/scripts/configure; fi
 
 uninstall:
-	rm -rf $(PKGDIR)
+	if [ -z "$(DESTDIR)" ]; then sh packaging/scripts/remove; fi
+	rm -rf $(PKGDIR) $(HELPERS)
+	rm -f $(UNITS)/cockpit-cronjobs-status.service $(UNITS)/cockpit-cronjobs-status.timer
+	if [ -z "$(DESTDIR)" ]; then sh packaging/scripts/removed; fi
 
 # Cockpit also loads packages from ~/.local/share/cockpit (for the logged-in user).
 devel-install:
@@ -45,6 +55,7 @@ check:
 	node test/backups.test.js
 	node test/i18n.test.js
 	node test/files.test.js
+	node test/status.test.js
 
 check-ui:
 	python3 test/ui_test.py
@@ -90,5 +101,5 @@ packages: stage
 # script itself, so "unused variable" (SC2034) is off for that file only.
 lint:
 	shellcheck --severity=warning --exclude=SC2034 src/cockpit-cronjobs-run
-	shellcheck --severity=warning tools/*.sh
+	shellcheck --severity=warning tools/*.sh status/cronjobs-status packaging/scripts/*
 	ruff check .

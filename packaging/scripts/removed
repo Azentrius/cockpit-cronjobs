@@ -1,0 +1,9 @@
+# shellcheck shell=sh
+# After cockpit-cronjobs was removed, not on upgrades (as root; also `make uninstall`).
+# SPDX-License-Identifier: Apache-2.0
+#
+# The status files go; backups, recorded runs and the run recorder stay (see README, Uninstall).
+rm -f /var/lib/cockpit-cronjobs/status.json /var/lib/cockpit-cronjobs/status.de.json
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi

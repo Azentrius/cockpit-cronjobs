@@ -47,18 +47,29 @@ jobs:
           (cd dist && sha256sum *.deb *.rpm) > first.sha256
           rm -rf dist && make packages > /dev/null
           (cd dist && sha256sum -c ../first.sha256)
-      - name: Install the .deb on Debian and the .rpm on Fedora
+      - name: Install the .deb on Debian and the .rpm on Fedora, and write the status there
         run: |
           docker run --rm -v "$PWD/dist:/dist:ro" debian:13 sh -ec '
             apt-get update -qq
             apt-get install -y -qq /dist/*.deb > /dev/null
             test -x /usr/share/cockpit/cronjobs/cockpit-cronjobs-run
             test -f /usr/share/metainfo/de.azentrius.cronjobs.metainfo.xml
-            dpkg -L cockpit-cronjobs | grep -q /usr/share/cockpit/cronjobs/manifest.json'
+            dpkg -L cockpit-cronjobs | grep -q /usr/share/cockpit/cronjobs/manifest.json
+            s=/usr/lib/cockpit-cronjobs/cronjobs-status
+            test -x $s
+            test -f /usr/lib/systemd/system/cockpit-cronjobs-status.service
+            test -f /usr/lib/systemd/system/cockpit-cronjobs-status.timer
+            $s status --lang en | grep -q "\"state\":\"none\""
+            $s write
+            test "$(stat -c %a /var/lib/cockpit-cronjobs/status.de.json)" = 644
+            $s status --lang de | grep -q "\"summary\":\"In den Crontabs von root und anderen Benutzern gibt es keine Jobs.\""'
           docker run --rm -v "$PWD/dist:/dist:ro" fedora:43 sh -ec '
             dnf install -y -q /dist/*.rpm
             rpm -V cockpit-cronjobs
-            test -f /usr/share/cockpit/cronjobs/manifest.json'
+            test -f /usr/share/cockpit/cronjobs/manifest.json
+            s=/usr/lib/cockpit-cronjobs/cronjobs-status
+            $s write
+            $s status --lang en | grep -q "\"state\":\"ok\""'
       - name: Check tools (pinned in test/requirements.txt) and the browser
         run: |
           pip install -r test/requirements.txt
@@ -95,6 +106,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends cron
           sudo systemctl start cron
           sudo ln -sfn "$GITHUB_WORKSPACE/src" /usr/share/cockpit/cronjobs
+          # The status for the Status Board as the package installs it; the test starts its unit.
+          sudo install -D -m 755 status/cronjobs-status /usr/lib/cockpit-cronjobs/cronjobs-status
+          sudo install -m 644 status/cockpit-cronjobs-status.service status/cockpit-cronjobs-status.timer /usr/lib/systemd/system/
+          sudo systemctl daemon-reload
           dpkg-query -W cockpit-ws cockpit-bridge cron
       - name: Check tools (pinned in test/requirements.txt) and the browser
         run: |
@@ -120,6 +135,7 @@ jobs:
         run: |
           cat "$RUNNER_TEMP/cockpit-ws.log" || true
           sudo journalctl -u cron --no-pager -n 50 || true
+          sudo journalctl -u cockpit-cronjobs-status --no-pager -n 30 || true
           sudo crontab -l -u root || true
           sudo ls -laR /var/lib/cockpit-cronjobs || true
       - name: Keep screenshots

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.8.0 – 2026-10-19
+
+A status for the Azentrius Status Board: failed jobs of the last 24 hours and jobs without recording,
+readable without administrative access.
+
+- **Status:** `/usr/lib/cockpit-cronjobs/cronjobs-status status --lang en|de` prints the state of Cron Jobs
+  in the status format all Azentrius Cockpit add-ons share (schema 1), and `manifest.json` names it under
+  `azentrius.status`. Two items: `failed`, the recorded jobs with a failed or aborted run in the last
+  24 hours (`danger`, with their IDs), and `unrecorded`, the jobs whose results are not known because they
+  do not record their runs (`none`). Only the crontabs of root and the other users count, read as the
+  page reads them.
+- **Timer:** `cockpit-cronjobs-status.timer` works the status out as root every 15 minutes and writes it
+  to `/var/lib/cockpit-cronjobs/status.json` and `status.de.json` (mode 644; numbers, states and job IDs,
+  no user names), so reading it needs no administrative access. The `.deb` and `.rpm` turn it on and,
+  when they are removed, off again; `make install` and `make uninstall` do the same. The archive of a
+  release holds only the page and brings no status.
+- **Tests:** a unit test checks the helper against the page's own crontab parser with dash and bash,
+  mawk and gawk; the packages write the status on Debian and Fedora; the end-to-end test runs the unit
+  and reads the status as a user without rights.
+
 ## 2.7.4 – 2026-10-18
 
 Azentrius moves to azentrius.com; the page itself works as before.
