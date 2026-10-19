@@ -64,8 +64,9 @@ function wrapped(id, command) {
 }
 
 function run(sh, awk, fx, args, extra) {
-    const env = Object.assign({ PATH: (awk.bin ? awk.bin + ":" : "") + "/usr/bin:/bin" }, extra || {});
+    const env = { PATH: (awk.bin ? awk.bin + ":" : "") + "/usr/bin:/bin" };
     if (fx) Object.assign(env, { CRONJOBS_STATE_DIR: fx.state, CRONJOBS_SPOOL_DIR: fx.spool, CRONJOBS_PAGE_DIR: SRC });
+    Object.assign(env, extra || {});
     const r = spawnSync(sh, [STATUS].concat(args), { env, encoding: "utf8" });
     return { rc: r.status, out: r.stdout, err: r.stderr };
 }
