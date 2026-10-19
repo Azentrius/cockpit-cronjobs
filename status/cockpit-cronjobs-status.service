@@ -1,0 +1,23 @@
+# Writes the status of Cron Jobs for the Azentrius Status Board (see cronjobs-status).
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Status of Cron Jobs for the Status Board
+Documentation=https://github.com/Azentrius/cockpit-cronjobs#status-for-the-status-board
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/cockpit-cronjobs/cronjobs-status write
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2min
+
+# Hardening: it reads the crontabs and the recorded runs, and writes only the status files in
+# /var/lib/cockpit-cronjobs. Root, because those are root's (or each user's) alone.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes

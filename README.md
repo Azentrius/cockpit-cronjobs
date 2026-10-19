@@ -45,6 +45,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
   on again exactly as before, the note is gone, and the timer is stopped and its units removed. The units
   name the crontab they come from, and back to cron removes only units converted from the crontab whose
   note it follows, so a note a user writes into their own crontab cannot reach anyone else's timer.
+- **A status for the Status Board.** Failed jobs of the last 24 hours and jobs without recording, in the
+  status format all Azentrius Cockpit add-ons share, readable without administrative access (see below).
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 
@@ -56,8 +58,9 @@ starts jobs on demand and turns cron jobs into systemd timers.
 
 - Cockpit (tested with 360 and 362)
 - cron: `cron` on Debian and Ubuntu, or `cronie` (Fedora, RHEL and its rebuilds, Arch, openSUSE)
-- coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`: present on any normal installation
-- systemd, optionally: for the timers, the timeline entries of timers and the conversion
+- coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`, `awk`: present on any normal installation
+- systemd, optionally: for the timers, the timeline entries of timers, the conversion and the status for
+  the Status Board
 
 With cronie, `CRON_TZ` is taken into account for next runs, the timeline and the conversion, in every
 crontab including `/etc/crontab` and `/etc/cron.d`. When the clock changes, next runs and the timeline
@@ -111,10 +114,12 @@ install the `.deb` on Debian 13 and the `.rpm` on Fedora 43; installing the pack
 RHEL or openSUSE is untested.
 
 On other systems the archive `cockpit-cronjobs-X.Y.Z.tar.gz` of a release holds the page:
-`sudo tar -xzf cockpit-cronjobs-X.Y.Z.tar.gz -C /usr/share/cockpit`.
+`sudo tar -xzf cockpit-cronjobs-X.Y.Z.tar.gz -C /usr/share/cockpit`. It brings no status for the Status
+Board (see below); the packages do.
 
-**From the source.** `git clone` this repository, then `sudo make install` (to
-`/usr/local/share/cockpit/cronjobs`).
+**From the source.** `git clone` this repository, then `sudo make install`: the page to
+`/usr/local/share/cockpit/cronjobs`, the status helper to `/usr/lib/cockpit-cronjobs` and its timer to
+`/usr/lib/systemd/system`, turned on.
 
 **From an earlier installation.** A page installed from the archive or the source is not part of the
 package, and one in `/usr/local` would hide it. Remove it first, then install the package:
@@ -161,6 +166,35 @@ and lists only what has the form of runs: nothing the user puts there reaches be
 - Jobs that record their runs need the script. Before you remove Cron Jobs, turn recording off, or leave
   the script in place.
 
+## Status for the Status Board
+
+Cron Jobs reports its state in the format that all Azentrius Cockpit add-ons share (schema 1), for the
+Azentrius Status Board, which shows every add-on of every host in one place. `src/manifest.json` names
+the helper:
+
+```json
+"azentrius": { "status": ["/usr/lib/cockpit-cronjobs/cronjobs-status", "status"] }
+```
+
+`cronjobs-status status --lang en|de` prints the status as JSON. It needs no administrative access:
+`cockpit-cronjobs-status.timer` works the status out as root every 15 minutes (and two minutes after a
+boot) and writes it to `/var/lib/cockpit-cronjobs/status.json` (English) and `status.de.json` (German),
+mode 644; `status` only reads the file of the language asked for. Without the file it reports `none` and
+why.
+
+| Item | State |
+|---|---|
+| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, with the number of those jobs and their IDs; `ok` when none did; `none` when no job records its runs |
+| `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known; `ok` when every job records them |
+
+Only the crontabs of root and the other users count: the jobs there are the ones the page can record,
+read as the page reads them. `/etc/crontab` and `/etc/cron.d` do not count. The files hold numbers,
+states and job IDs, no user names, commands or output. Each item is stale after an hour without a new
+status (`stale_after`), that is four runs of the timer missed.
+
+The packages and `make install` turn the timer on, and it stays on through upgrades. To turn it off for
+good: `sudo systemctl mask --now cockpit-cronjobs-status.timer`.
+
 ## Cron's environment
 
 Run now and a conversion to a systemd timer give a job the environment cron gives it on this server.
@@ -188,6 +222,9 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
 | `/var/lib/cockpit-cronjobs/runs/` | Recorded runs of root's jobs |
 | `/var/lib/cockpit-cronjobs/users/USER/runs/` | Recorded runs of the jobs of USER (owned by USER) |
 | `/usr/local/libexec/cockpit-cronjobs-run` | The run recorder |
+| `/usr/lib/cockpit-cronjobs/cronjobs-status` | The status for the Status Board |
+| `/usr/lib/systemd/system/cockpit-cronjobs-status.service`, `.timer` | Writes the status every 15 minutes |
+| `/var/lib/cockpit-cronjobs/status.json`, `status.de.json` | The status in English and German (mode 644) |
 | `/etc/systemd/system/NAME.service`, `NAME.timer` | Jobs converted to systemd timers |
 | `/var/lib/cockpit-cronjobs/converting/` | While a conversion is under way: which one wrote the units of a name (directory 700) |
 | `/var/lib/cockpit-cronjobs/.crontab.lock` | Lock while the crontab or the units of a conversion are written |
@@ -218,6 +255,8 @@ sudo rm -rf /var/lib/cockpit-cronjobs
 - Back to cron only removes units that Cron Jobs wrote under that name (plain files, with the first line
   and description it gives them), checked again as root right before; if the timer cannot be stopped,
   the crontab is put back.
+- The status timer only reads: it writes nothing but its two status files. In another user's directory it
+  reads only what has the form of runs, as the page does (no links, regular files, under a time limit).
 
 ## Translations
 
@@ -228,7 +267,7 @@ Cockpit uses that language. `node test/i18n.test.js` checks that every text exis
 ## Development
 
 ```sh
-make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs, back to cron and backups (dash, bash), differences (against GNU diff), texts
+make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs, back to cron and backups (dash, bash), differences (against GNU diff), texts, the status (dash, bash; mawk, gawk)
 make check-ui     # browser tests against a stand-in for Cockpit (needs Python Playwright with Chromium)
 ```
 

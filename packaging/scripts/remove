@@ -1,0 +1,9 @@
+# shellcheck shell=sh
+# Before cockpit-cronjobs is removed, not on upgrades (as root; also `make uninstall`).
+# SPDX-License-Identifier: Apache-2.0
+if [ -d /run/systemd/system ]; then
+    systemctl stop cockpit-cronjobs-status.timer cockpit-cronjobs-status.service > /dev/null 2>&1 || true
+fi
+if command -v systemctl > /dev/null 2>&1; then
+    systemctl disable cockpit-cronjobs-status.timer > /dev/null 2>&1 || true
+fi

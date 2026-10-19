@@ -130,6 +130,9 @@ Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHAN
 ## Open decisions
 
 1. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
+   Since 2.8.0 the status for the Status Board says which jobs failed in the last 24 hours, without
+   administrative access; a notifier shared by the Azentrius add-ons could read it instead of each
+   add-on sending its own messages.
 
 Decided: packages and the listing in Cockpit's Applications page (stage 5), through the Azentrius
 package repository shared with the other add-ons.
