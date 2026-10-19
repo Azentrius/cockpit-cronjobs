@@ -1,0 +1,13 @@
+# Writes the status of Cron Jobs for the Azentrius Status Board every 15 minutes, and soon after a
+# boot. The Status Board calls it stale after an hour without a new one.
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Status of Cron Jobs for the Status Board, every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+OnBootSec=2min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

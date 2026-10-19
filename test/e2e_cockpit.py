@@ -21,6 +21,8 @@ if os.environ.get("CRONJOBS_E2E_DESTRUCTIVE") != "1":
 URL = os.environ.get("COCKPIT_URL", "http://127.0.0.1:9091/cockpit/@localhost/cronjobs/index.html")
 WRAP = "/usr/local/libexec/cockpit-cronjobs-run"
 STATE = "/var/lib/cockpit-cronjobs"
+# Installed with its units as the package installs them (job e2e in .github/workflows/test.yml).
+STATUS = "/usr/lib/cockpit-cronjobs/cronjobs-status"
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")
 os.makedirs(SHOTS, exist_ok=True)
@@ -535,6 +537,39 @@ with sync_playwright() as p:
     check(page.text_content("#runs-body pre") == "failing from systemd", "its output: " + repr(page.text_content("#runs-body pre")))
     page.screenshot(path=os.path.join(SHOTS, "e2e-journal-runs.png"))
     page.click("#runs-close-btn")
+
+    # the status for the Status Board: none until the unit has written it, then, written by the
+    # unit as root and read by a user without any rights, the failing recorded job by its ID and no
+    # user names (only recorded cron jobs count, not the timer)
+    nobody = pwd.getpwnam("nobody")
+
+    def status_as_nobody(lang):
+        r = subprocess.run(["setpriv", f"--reuid={nobody.pw_uid}", f"--regid={nobody.pw_gid}", "--clear-groups",
+                            STATUS, "status", "--lang", lang], capture_output=True, text=True)
+        try:
+            return r.returncode, json.loads(r.stdout), r.stdout + r.stderr
+        except ValueError:
+            return r.returncode, {}, r.stdout + r.stderr
+
+    sh(f"rm -f {STATE}/status.json {STATE}/status.de.json")
+    rc, doc, out = status_as_nobody("en")
+    check(rc == 0 and doc.get("state") == "none" and doc.get("items") == [] and "No status yet" in doc.get("summary", ""),
+          "no status before the unit ran: " + out)
+    check(sh("systemctl show -p LoadState --value cockpit-cronjobs-status.timer").stdout.strip() == "loaded",
+          "the timer unit loads")
+    r = sh("systemctl start cockpit-cronjobs-status.service")
+    check(r.returncode == 0, "the status unit runs: " + r.stderr +
+          sh("journalctl -u cockpit-cronjobs-status.service --no-pager -n 20").stdout)
+    modes = [os.stat(f"{STATE}/{f}").st_mode & 0o777 if os.path.exists(f"{STATE}/{f}") else None
+             for f in ("status.json", "status.de.json")]
+    check(modes == [0o644, 0o644], "status files of mode 644: " + repr(modes))
+    for lang, summary in (("en", " failed in the last 24 hours."), ("de", " in den letzten 24 Stunden fehlgeschlagen.")):
+        rc, doc, out = status_as_nobody(lang)
+        failed = next((i for i in doc.get("items", []) if i.get("id") == "failed"), {})
+        check(rc == 0 and doc.get("schema") == 1 and doc.get("addon") == "cronjobs" and doc.get("state") == "danger" and
+              doc.get("summary", "").endswith(summary) and failed.get("state") == "danger" and
+              "sumfail-0001" in failed.get("detail", "").split(", ") and USER not in out,
+              f"the status ({lang}) as a user without rights: " + out)
     sh(f"systemctl stop {fail_timer}.timer; systemctl reset-failed {fail_timer}.service {fail_timer}.timer")
     sh("crontab -u root -", input=start)
     shutil.rmtree(f"{STATE}/runs/sumfail-0001", ignore_errors=True)

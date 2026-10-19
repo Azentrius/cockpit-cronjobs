@@ -1,0 +1,394 @@
+#!/bin/sh
+# cronjobs-status: the status of Cron Jobs for the Azentrius Status Board, in the status format
+# that every Azentrius Cockpit add-on shares (schema 1). Part of Cron Jobs, the Cockpit page
+# (https://github.com/Azentrius/cockpit-cronjobs).
+#
+# Usage:
+#   cronjobs-status status [--lang en|de]   print the status as JSON; reads only the status file
+#                                           of that language, so it needs no root (any other
+#                                           language Cockpit may use gets English)
+#   cronjobs-status write                   as root: work the status out and write it to
+#                                           /var/lib/cockpit-cronjobs/status.json (English) and
+#                                           status.de.json (German), mode 644
+#
+# cockpit-cronjobs-status.timer runs "write" every 15 minutes. It reads the crontabs of root and
+# of the other users and the recorded runs of their jobs (see cockpit-cronjobs-run), and writes
+# only numbers, states and job IDs: no user names, no commands, no output. A job counts as failed
+# when one of its recorded runs in the last 24 hours ended with an exit code other than 0 or was
+# aborted, as on the page. Jobs in /etc/crontab and /etc/cron.d are not counted: the page cannot
+# record them.
+#
+# Exit codes: 0 done (a failed job is a finding, not an error), 64 wrong call, 77 "write" without
+# root, 1 the status could not be written.
+#
+# SPDX-License-Identifier: Apache-2.0
+set -u
+LC_ALL=C
+export LC_ALL
+
+# CRONJOBS_STATE_DIR, CRONJOBS_SPOOL_DIR and CRONJOBS_PAGE_DIR are for the tests.
+state=${CRONJOBS_STATE_DIR:-/var/lib/cockpit-cronjobs}
+# Seconds after which the Status Board calls the status stale: four runs of the timer missed.
+stale=3600
+# Failed runs count for 24 hours.
+window=86400
+# The run recorder keeps the last 20 runs of a job; the page reads no more.
+keep=20
+# Failed jobs named in the detail; the rest is a number.
+named=5
+
+usage() {
+    echo "usage: cronjobs-status status [--lang en|de] | cronjobs-status write" >&2
+    exit 64
+}
+
+# say ENGLISH GERMAN: the text in the language asked for.
+say() {
+    if [ "$lang" = de ]; then printf '%s' "$2"; else printf '%s' "$1"; fi
+}
+
+# The version of the page, from its app.js (the only place it lives), or nothing.
+version() {
+    if [ -n "${CRONJOBS_PAGE_DIR-}" ]; then
+        set -- "$CRONJOBS_PAGE_DIR/app.js"
+    else
+        set -- /usr/share/cockpit/cronjobs/app.js /usr/local/share/cockpit/cronjobs/app.js
+    fi
+    for js in "$@"; do
+        [ -f "$js" ] || continue
+        v=$(sed -n 's/^ *const VERSION = "\([0-9][0-9A-Za-z.+~-]*\)";.*$/\1/p' "$js" | head -n 1)
+        if [ -n "$v" ] && [ ${#v} -le 32 ]; then
+            printf '%s' "$v"
+            return
+        fi
+    done
+}
+
+# The start of a status document, up to the items.
+head_json() {
+    printf '{"schema":1,"addon":"cronjobs","label":"Cron Jobs",'
+    v=$(version)
+    if [ -n "$v" ]; then printf '"version":"%s",' "$v"; fi
+    printf '"checked_at":"%s","state":"%s","summary":"%s","items":[' "$checked" "$1" "$2"
+}
+
+# item ID STATE TITLE VALUE DETAIL (VALUE may be empty)
+item() {
+    printf '{"id":"%s","state":"%s","title":"%s",' "$1" "$2" "$3"
+    if [ -n "$4" ]; then printf '"value":"%s",' "$4"; fi
+    printf '"detail":"%s","checked_at":"%s","stale_after":%s}' "$5" "$checked" "$stale"
+}
+
+# The jobs of a crontab (standard input), one line each: "J ID" for a job whose runs are recorded,
+# "U" for one that is not. A job is what the page takes for an enabled job (C.parseUserCrontab):
+# not a comment or a variable, a known @nickname or five valid schedule fields, then a command.
+# Recorded means wrapped as C.unwrapCommand reads it: /…/cockpit-cronjobs-run, an ID and the
+# command in single quotes ('…' and \' only), not blank.
+JOBS_AWK='
+function val(t, f,   n, i, a) {
+    if (t ~ /^[0-9]+$/) {
+        n = t + 0
+        return (n >= lo[f] && n <= hi[f]) ? n : -1
+    }
+    if ((f == 4 || f == 5) && t ~ /^[A-Za-z][A-Za-z][A-Za-z]$/) {
+        n = split(f == 4 ? "jan feb mar apr may jun jul aug sep oct nov dec" : "sun mon tue wed thu fri sat", a, " ")
+        for (i = 1; i <= n; i++) if (a[i] == tolower(t)) return f == 4 ? i : i - 1
+    }
+    return -1
+}
+function field(s, f,   items, n, i, k, base, step, r, x) {
+    n = split(s, items, ",")
+    for (i = 1; i <= n; i++) {
+        base = items[i]
+        k = index(base, "/")
+        if (k > 0) {
+            step = substr(base, k + 1)
+            base = substr(base, 1, k - 1)
+            if (step !~ /^[0-9]+$/ || step + 0 < 1) return 0
+        }
+        if (base == "*") continue
+        r = split(base, x, "-")
+        if (r < 1 || r > 2 || val(x[1], f) < 0) return 0
+        if (r == 2) {
+            if (val(x[2], f) < val(x[1], f)) return 0
+        } else if (k > 0) return 0
+    }
+    return n > 0
+}
+function unquoted(s,   out, i, j, c, n) {
+    out = ""
+    i = 1
+    n = length(s)
+    while (i <= n) {
+        c = substr(s, i, 1)
+        if (c == q) {
+            j = index(substr(s, i + 1), q)
+            if (j == 0) return 0
+            out = out substr(s, i + 1, j - 1)
+            i += j + 1
+        } else if (c == "\\" && substr(s, i + 1, 1) == q) {
+            out = out q
+            i += 2
+        } else return 0
+    }
+    return out ~ /[^[:space:]]/
+}
+function recorded(c,   s, w) {
+    if (!match(c, /^\/[^[:space:]]*\/cockpit-cronjobs-run[[:space:]]+/)) return 0
+    s = substr(c, RLENGTH + 1)
+    if (!match(s, /^[A-Za-z0-9_-]+[[:space:]]+/)) return 0
+    w = substr(s, 1, RLENGTH)
+    sub(/[[:space:]]+$/, "", w)
+    if (length(w) > 64 || !unquoted(substr(s, RLENGTH + 1))) return 0
+    id = w
+    return 1
+}
+BEGIN {
+    split("0 0 1 1 0", lo, " ")
+    split("59 23 31 12 7", hi, " ")
+}
+{
+    t = $0
+    sub(/^[[:space:]]+/, "", t)
+    if (t == "" || substr(t, 1, 1) == "#" || t ~ /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/) next
+    if (substr(t, 1, 1) == "@") {
+        if (!match(t, /^@[A-Za-z0-9_]+[[:space:]]+/)) next
+        nick = substr(t, 1, RLENGTH)
+        sub(/[[:space:]]+$/, "", nick)
+        if (nick !~ /^@(reboot|yearly|annually|monthly|weekly|daily|midnight|hourly)$/) next
+    } else {
+        if (!match(t, /^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/)) next
+        split(substr(t, 1, RLENGTH), fld, "[[:space:]]+")
+        for (i = 1; i <= 5; i++) if (!field(fld[i], i)) next
+    }
+    cmd = substr(t, RLENGTH + 1)
+    sub(/[[:space:]]+$/, "", cmd)
+    if (cmd == "") next
+    if (recorded(cmd)) print "J " id
+    else print "U"
+}
+'
+
+# Whether one of the records (standard input, lines of runs.jsonl) started at or after "since"
+# and did not end with exit code 0 (a failure, or aborted), as R.outcome sees it.
+FAILED_AWK='
+/^\{/ {
+    if (!match($0, /"start":[0-9]+/)) next
+    if (substr($0, RSTART + 8, RLENGTH - 8) + 0 < since + 0) next
+    if ($0 ~ /"aborted":true/ || $0 !~ /"rc":0[,}]/) found = 1
+}
+END { exit !found }
+'
+
+# failed USER ID: whether the job ID of USER failed since $since. Root's runs are in runs/ID,
+# another user's in users/USER/runs/ID, a directory that belongs to that user: only what has the
+# form of runs counts there (no links, regular files read under a time limit), as on the page, and
+# no more than 64 KiB of each file is held, whatever the user puts there in the meantime.
+failed() {
+    if [ "$1" = root ]; then
+        d=$state/runs/$2
+    else
+        [ ! -L "$state/users/$1" ] && [ ! -L "$state/users/$1/runs" ] || return 1
+        d=$state/users/$1/runs/$2
+    fi
+    [ -d "$d" ] && [ ! -L "$d" ] || return 1
+    f=$d/runs.jsonl
+    if [ -f "$f" ] && [ ! -L "$f" ] &&
+            timeout 5 tail -c 65536 "$f" 2> /dev/null | tail -n "$keep" | awk -v since="$since" "$FAILED_AWK"; then
+        return 0
+    fi
+    # A run whose recorder is gone without a record (killed, power loss) counts as aborted.
+    for r in "$d"/*.running; do
+        [ -f "$r" ] && [ ! -L "$r" ] || continue
+        line=$(timeout 5 head -c 4096 "$r" 2> /dev/null | head -n 1)
+        pid=$(printf '%s\n' "$line" | sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' | head -n 1)
+        if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] &&
+                tr '\000' ' ' < "/proc/$pid/cmdline" | grep -q cockpit-cronjobs-run; then
+            continue
+        fi
+        s=$(printf '%s\n' "$line" | sed -n 's/.*"start":\([0-9][0-9]*\).*/\1/p' | head -n 1)
+        if [ -n "$s" ] && [ ${#s} -le 12 ] && [ "$s" -ge "$since" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# The directory of the crontabs of root and the other users, as the page finds it.
+spool() {
+    if [ -n "${CRONJOBS_SPOOL_DIR-}" ]; then
+        printf '%s' "$CRONJOBS_SPOOL_DIR"
+        return
+    fi
+    for d in /var/spool/cron/crontabs /var/spool/cron/tabs /var/spool/cron; do
+        if [ -d "$d" ]; then
+            printf '%s' "$d"
+            return
+        fi
+    done
+}
+
+# Counts the jobs into total, recorded and bad, and writes the IDs of the failed ones to
+# $tmp/failed. Crontabs of users the system does not know are skipped, as cron skips them.
+count() {
+    total=0
+    recorded=0
+    bad=0
+    seen=' '
+    : > "$tmp/failed"
+    dir=$(spool)
+    [ -n "$dir" ] || return 0
+    for tab in "$dir"/*; do
+        [ -f "$tab" ] && [ ! -L "$tab" ] || continue
+        user=${tab##*/}
+        case $user in .*|*~|*.tmp|tmp.*) continue ;; esac
+        case $user in [!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) continue ;; esac
+        id -u "$user" > /dev/null 2>&1 || continue
+        if ! awk -v q="'" "$JOBS_AWK" < "$tab" > "$tmp/jobs"; then
+            echo "cronjobs-status: cannot read the crontab of $user" >&2
+            exit 1
+        fi
+        while read -r kind job; do
+            total=$((total + 1))
+            [ "$kind" = J ] || continue
+            recorded=$((recorded + 1))
+            # Copied lines share an ID, and its runs.
+            case $seen in *" $user/$job "*) continue ;; esac
+            seen="$seen$user/$job "
+            if failed "$user" "$job"; then
+                bad=$((bad + 1))
+                printf '%s\n' "$job" >> "$tmp/failed"
+            fi
+        done < "$tmp/jobs"
+    done
+}
+
+# The failed jobs by ID, the first few and how many more.
+failed_list() {
+    sort -u "$tmp/failed" > "$tmp/ids"
+    n=$(wc -l < "$tmp/ids" | tr -d ' ')
+    list=$(head -n "$named" "$tmp/ids" | paste -sd ',' - | sed 's/,/, /g')
+    if [ "$n" -gt "$named" ]; then
+        list="$list $(say "and $((n - named)) more" "und $((n - named)) weitere")"
+    fi
+    printf '%s' "$list"
+}
+
+# The status document in $lang, from what count found.
+document() {
+    if [ "$bad" -gt 0 ]; then
+        overall=danger
+        if [ "$bad" = 1 ]; then
+            summary=$(say "1 job failed in the last 24 hours." "1 Job ist in den letzten 24 Stunden fehlgeschlagen.")
+        else
+            summary=$(say "$bad jobs failed in the last 24 hours." "$bad Jobs sind in den letzten 24 Stunden fehlgeschlagen.")
+        fi
+    elif [ "$recorded" -gt 0 ]; then
+        overall=ok
+        summary=$(say "No recorded job failed in the last 24 hours." "Kein aufgezeichneter Job ist in den letzten 24 Stunden fehlgeschlagen.")
+    elif [ "$total" -gt 0 ]; then
+        overall=none
+        summary=$(say "No job records its runs, so their results are not known." "Kein Job zeichnet seine Läufe auf, daher sind die Ergebnisse nicht bekannt.")
+    else
+        overall=ok
+        summary=$(say "There are no jobs in the crontabs of root and other users." "In den Crontabs von root und anderen Benutzern gibt es keine Jobs.")
+    fi
+    head_json "$overall" "$summary"
+
+    title=$(say "Failed jobs (last 24 hours)" "Fehlgeschlagene Jobs (letzte 24 Stunden)")
+    if [ "$recorded" = 0 ]; then
+        item failed none "$title" "" "$(say "No job records its runs." "Kein Job zeichnet seine Läufe auf.")"
+    elif [ "$bad" -gt 0 ]; then
+        item failed danger "$title" "$bad" "$(failed_list)"
+    else
+        item failed ok "$title" 0 "$(say "Recorded jobs: $recorded, none failed." "Aufgezeichnete Jobs: $recorded, keiner fehlgeschlagen.")"
+    fi
+    printf ','
+
+    title=$(say "Jobs without recording" "Jobs ohne Aufzeichnung")
+    plain=$((total - recorded))
+    if [ "$plain" -gt 0 ]; then
+        item unrecorded none "$title" "$plain" "$(say "$plain of $total jobs in the crontabs of root and other users; their results are not known." "$plain von $total Jobs in den Crontabs von root und anderen Benutzern; ihre Ergebnisse sind nicht bekannt.")"
+    elif [ "$total" -gt 0 ]; then
+        item unrecorded ok "$title" 0 "$(say "Every job in the crontabs of root and other users records its runs." "Jeder Job in den Crontabs von root und anderen Benutzern zeichnet seine Läufe auf.")"
+    else
+        item unrecorded ok "$title" 0 "$(say "There are no jobs in the crontabs of root and other users." "In den Crontabs von root und anderen Benutzern gibt es keine Jobs.")"
+    fi
+    printf ']}\n'
+}
+
+write() {
+    if [ -z "${CRONJOBS_STATE_DIR-}" ] && [ "$(id -u)" != 0 ]; then
+        echo "cronjobs-status: write needs root" >&2
+        exit 77
+    fi
+    if ! command -v awk > /dev/null 2>&1; then
+        echo "cronjobs-status: write needs awk" >&2
+        exit 1
+    fi
+    umask 022
+    tmp=$(mktemp -d) || exit 1
+    out=
+    trap 'rm -rf "$tmp"; if [ -n "$out" ]; then rm -f "$out"; fi' EXIT
+    now=$(date +%s)
+    since=$((now - window))
+    checked=$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)
+    count
+    # 711 as the page sets it: others reach the status files by name but list nothing.
+    install -d -m 711 "$state" && chmod 711 "$state" || exit 1
+    for lang in en de; do
+        name=status.json
+        if [ "$lang" = de ]; then name=status.de.json; fi
+        out=$(mktemp "$state/.status.XXXXXX") || exit 1
+        document > "$out" && chmod 644 "$out" && mv -f "$out" "$state/$name" || exit 1
+        out=
+    done
+}
+
+# Prints the status file of $lang; without one, a status "none" that says why.
+show() {
+    f=$state/status.json
+    if [ "$lang" = de ]; then f=$state/status.de.json; fi
+    if [ -f "$f" ] && [ -r "$f" ]; then
+        body=$(head -c 65536 "$f" 2> /dev/null)
+        case $body in
+            '{"schema":1,'*'}')
+                printf '%s\n' "$body"
+                return
+                ;;
+        esac
+        reason=$(say "The status file cannot be read." "Die Statusdatei lässt sich nicht lesen.")
+    elif [ -e "$f" ] || { [ -d "$state" ] && [ ! -x "$state" ]; }; then
+        reason=$(say "The status file cannot be read." "Die Statusdatei lässt sich nicht lesen.")
+    else
+        reason=$(say "No status yet: cockpit-cronjobs-status.timer writes it every 15 minutes." "Noch kein Status: cockpit-cronjobs-status.timer schreibt ihn alle 15 Minuten.")
+    fi
+    checked=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    head_json none "$reason"
+    printf ']}\n'
+}
+
+lang=en
+case ${1-} in
+    status)
+        shift
+        # Any language Cockpit may use: German for de and its regions (de-AT, de_CH), else English.
+        if [ $# -gt 0 ]; then
+            [ "$1" = --lang ] && [ $# -eq 2 ] || usage
+            case $2 in *[!A-Za-z0-9_-]*) usage ;; esac
+            printf '%s\n' "$2" | grep -Eqx '[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})?' || usage
+            case $2 in
+                [Dd][Ee]|[Dd][Ee][-_]*) lang=de ;;
+            esac
+        fi
+        show
+        ;;
+    write)
+        [ $# -eq 1 ] || usage
+        write
+        ;;
+    *)
+        usage
+        ;;
+esac
+exit 0

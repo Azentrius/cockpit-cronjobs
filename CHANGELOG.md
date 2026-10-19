@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.7.5 – 2026-10-19
+## 2.8.1 – 2026-10-19
 
 The list of recorded runs reads at most the last 64 KiB of each `runs.jsonl`, so another user can no
 longer make it take the server's memory or send the page gigabytes.
@@ -11,10 +11,31 @@ longer make it take the server's memory or send the page gigabytes.
   what it reads until it has seen 20 line ends. A user who swapped the file for a link to `/dev/zero`
   right after the check had root's `tail` take memory without limit for five seconds, and a file of
   gigabytes without line ends went to the page whole. Now the last 64 KiB are taken first
-  (`tail -c 65536 | tail -n 20`); 20 records are a few KiB. The other reads as root in these directories
-  had a bound already: the run markers (`head -c 4096`) and the disk use (`du` under `timeout`); a run's
-  output is read as its user. A unit test, with dash and bash, swaps the file for a link to `/dev/zero`
-  between the check and the read (under a memory limit) and lists a file of 32 MiB.
+  (`tail -c 65536 | tail -n 20`), as the status helper of 2.8.0 does; 20 records are a few KiB. The
+  other reads as root in these directories had a bound already: the run markers (`head -c 4096`) and
+  the disk use (`du` under `timeout`); a run's output is read as its user. A unit test, with dash and
+  bash, swaps the file for a link to `/dev/zero` between the check and the read (under a memory limit)
+  and lists a file of 32 MiB.
+
+## 2.8.0 – 2026-10-19
+
+A status for the Azentrius Status Board: failed jobs of the last 24 hours and jobs without recording,
+readable without administrative access.
+
+- **Status:** `/usr/lib/cockpit-cronjobs/cronjobs-status status --lang en|de` prints the state of Cron Jobs
+  in the status format all Azentrius Cockpit add-ons share (schema 1), and `manifest.json` names it under
+  `azentrius.status`. Two items: `failed`, the recorded jobs with a failed or aborted run in the last
+  24 hours (`danger`, with their IDs), and `unrecorded`, the jobs whose results are not known because they
+  do not record their runs (`none`). Only the crontabs of root and the other users count, read as the
+  page reads them.
+- **Timer:** `cockpit-cronjobs-status.timer` works the status out as root every 15 minutes and writes it
+  to `/var/lib/cockpit-cronjobs/status.json` and `status.de.json` (mode 644; numbers, states and job IDs,
+  no user names), so reading it needs no administrative access. The `.deb` and `.rpm` turn it on and,
+  when they are removed, off again; `make install` and `make uninstall` do the same. The archive of a
+  release holds only the page and brings no status.
+- **Tests:** a unit test checks the helper against the page's own crontab parser with dash and bash,
+  mawk and gawk; the packages write the status on Debian and Fedora; the end-to-end test runs the unit
+  and reads the status as a user without rights.
 
 ## 2.7.4 – 2026-10-18
 
