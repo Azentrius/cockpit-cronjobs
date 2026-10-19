@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.8.1 – 2026-10-19
+
+The list of recorded runs reads at most the last 64 KiB of each `runs.jsonl`, so another user can no
+longer make it take the server's memory or send the page gigabytes.
+
+- **Runs of other users' jobs:** the list is read as root, and the runs of another user's jobs lie in
+  `/var/lib/cockpit-cronjobs/users/USER/runs/ID`, which that user owns. The page checked that
+  `runs.jsonl` is a regular file and no link, then took its last 20 lines with `tail -n 20`, which keeps
+  what it reads until it has seen 20 line ends. A user who swapped the file for a link to `/dev/zero`
+  right after the check had root's `tail` take memory without limit for five seconds, and a file of
+  gigabytes without line ends went to the page whole. Now the last 64 KiB are taken first
+  (`tail -c 65536 | tail -n 20`), as the status helper of 2.8.0 does; 20 records are a few KiB. The
+  other reads as root in these directories had a bound already: the run markers (`head -c 4096`) and
+  the disk use (`du` under `timeout`); a run's output is read as its user. A unit test, with dash and
+  bash, swaps the file for a link to `/dev/zero` between the check and the read (under a memory limit)
+  and lists a file of 32 MiB.
+
 ## 2.8.0 – 2026-10-19
 
 A status for the Azentrius Status Board: failed jobs of the last 24 hours and jobs without recording,
