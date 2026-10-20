@@ -392,7 +392,7 @@ with sync_playwright() as p:
     check("Fünf Felder" in page.inner_text("#f-schedule-help"), "empty schedule help")
     check(page.is_checked("#f-capture"), "new jobs record their runs by default")
     check(page.locator("#edit-dlg .az-switch, #edit-dlg [role=switch]").count() == 0 and
-          page.locator("#edit-dlg .cron-checkbox input[type=checkbox]").count() == 2, "a form with Save has checkboxes, not switches")
+          page.locator("#edit-dlg .cron-checkbox input[type=checkbox]").count() == 3, "a form with Save has checkboxes, not switches")
     page.keyboard.press("Escape")
     check(page.locator("#edit-dlg").is_hidden(), "escape closes")
     check(page.evaluate("() => document.activeElement.id") == "add", "focus returns to add")
@@ -406,7 +406,8 @@ with sync_playwright() as p:
     check(page.is_disabled("#f-capture") and "nicht erfassen" in page.inner_text("#f-capture-help"), "no recording with %")
     page.fill("#f-command", "date +\\%F > /tmp/heute")
     check(page.locator("#f-command-warn").is_hidden() and page.is_enabled("#f-capture"), "escaped percent ok")
-    page.locator("#edit-dlg .cron-checkbox").nth(1).click()
+    check(not page.is_checked("#f-no-overlap"), "a new job overlaps as with cron unless set")
+    page.uncheck("#f-active")
     page.click("#edit-save")
     wait_js(page, "document.querySelector('#edit-dlg').hidden")
     wait_idle(page)
