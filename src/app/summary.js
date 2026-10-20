@@ -46,7 +46,9 @@ function results() {
         if (!failed) {
             const p = C.parseSchedule(e.schedule);
             const tz = jobTz(tab.entries, i);
-            const due = R.missed(job.runs, ms => cronNext(p, ms, tz), now, MISSED_GRACE);
+            /* A start the run recorder skipped (a run went on) is one cron made. */
+            const started = job.runs.concat(job.skipped || []).sort((a, b) => b.start - a.start);
+            const due = R.missed(started, ms => cronNext(p, ms, tz), now, MISSED_GRACE);
             if (due !== null) {
                 out.push(Object.assign(item, { state: "missed", label: Object.assign({ text: T.statusMissed }, MISSED),
                                                when: due, due, dur: null, title: T.missedTitle(fmtShort(due)) }));

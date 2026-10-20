@@ -48,21 +48,30 @@
         try { return JSON.parse(text); } catch (_) { return null; }
     }
 
-    /* Script output -> { KEY: { runs: [newest first], running: [{ start, pid, trigger }], kb } }.
+    /* Script output -> { KEY: { runs: [newest first], running: [{ start, pid, trigger }],
+       skipped: [{ start, trigger }, newest first], noOverlap, kb } }.
        Sections start with "\x1eKEY" (ID, or USER/ID for another user's job); lines are records ("{…}"), "size KB" (disk use of
-       the directory, kb null when missing) or "running ALIVE {…}" for a run marker
-       (ALIVE 0: the run died without finishing). */
+       the directory, kb null when missing), "running ALIVE {…}" for a run marker
+       (ALIVE 0: the run died without finishing), "skipped {…}" for a start the run recorder
+       skipped since a run went on, and "option no-overlap" when the job is set not to overlap. */
     function parseRuns(text) {
         const out = {};
         String(text || "").split("\x1e").slice(1).forEach(chunk => {
             const lines = chunk.split("\n");
             const id = lines.shift().trim();
             if (!KEY_RE.test(id)) return;
-            const job = { runs: [], running: [], kb: null };
+            const job = { runs: [], running: [], skipped: [], noOverlap: false, kb: null };
             lines.forEach(line => {
                 if (line.charAt(0) === "{") {
                     const r = record(parseJson(line));
                     if (r) job.runs.push(r);
+                    return;
+                }
+                if (/^option no-overlap\s*$/.test(line)) { job.noOverlap = true; return; }
+                const k = /^skipped (\{.*\})\s*$/.exec(line);
+                if (k) {
+                    const r = record(parseJson(k[1]));
+                    if (r) job.skipped.push({ start: r.start, trigger: r.trigger });
                     return;
                 }
                 const s = /^size (\d+)\s*$/.exec(line);
@@ -76,6 +85,7 @@
                 else job.runs.push(Object.assign(r, { aborted: true, end: null, rc: null, out: "" }));
             });
             job.runs.sort((a, b) => b.start - a.start);
+            job.skipped.sort((a, b) => b.start - a.start);
             out[id] = job;
         });
         return out;
@@ -91,8 +101,8 @@
        the last one cron started, when it lies more than graceMs before nowMs. Runs started by
        hand do not count; when all kept runs were, the next run after the oldest. Nothing
        without a run, since it is not known when recording began.
-       runs: recorded runs, newest first (parseRuns); next(ms): the job's next run after ms as
-       cron starts it (C.nextRun), or null. */
+       runs: recorded runs and the starts the recorder skipped, newest first (parseRuns);
+       next(ms): the job's next run after ms as cron starts it (C.nextRun), or null. */
     function missed(runs, next, nowMs, graceMs) {
         if (!runs || !runs.length) return null;
         const last = runs.find(r => r.trigger !== "manual") || runs[runs.length - 1];

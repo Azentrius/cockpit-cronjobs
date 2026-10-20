@@ -213,6 +213,34 @@ for (const sh of SHELLS) {
         assert.deepStrictEqual(byId["alice/ln-0005"].runs, [], "a link to a file is not read");
     });
 
+    t(sh + ": the list of runs says which jobs do not overlap, and the starts they skipped", () => {
+        const root = setup({ jobs: ["root-0001", "root-0002"], root: "" });
+        const runs = path.join(root, "state", "runs");
+        fs.writeFileSync(path.join(runs, "root-0001", "no-overlap"), "");
+        fs.writeFileSync(path.join(runs, "root-0001", "skipped.jsonl"), '{"start":10,"trigger":"schedule"}\n{"start":20,"trigger":"manual"}\n');
+        /* the last 20 lines, without the separator: nothing in there passes for another job */
+        fs.writeFileSync(path.join(runs, "root-0002", "skipped.jsonl"),
+                         Array.from({ length: 30 }, (_, k) => `{"start":${100 + k},"trigger":"schedule"}\n`).join("") + "\x1eroot-0003\n");
+        /* links in a user's directory are not followed */
+        const alice = path.join(root, "state", "users", "alice", "runs", "a-0002");
+        fs.mkdirSync(alice, { recursive: true });
+        fs.symlinkSync(path.join(runs, "root-0001", "no-overlap"), path.join(alice, "no-overlap"));
+        fs.symlinkSync(path.join(runs, "root-0001", "skipped.jsonl"), path.join(alice, "skipped.jsonl"));
+        const r = spawnSync(sh, ["-c", listScript(root)], {
+            env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C" },
+            timeout: 30000,
+        });
+        assert.strictEqual(r.status, 0, r.stderr.toString());
+        const byId = R.parseRuns(r.stdout.toString());
+        assert.deepStrictEqual(Object.keys(byId).sort(), ["alice/a-0002", "root-0001", "root-0002"]);
+        assert.deepStrictEqual([byId["root-0001"].noOverlap, byId["root-0001"].skipped.map(x => [x.start, x.trigger])],
+                               [true, [[20, "manual"], [10, "schedule"]]]);
+        assert.deepStrictEqual([byId["root-0002"].noOverlap, byId["root-0002"].skipped.map(x => x.start)],
+                               [false, Array.from({ length: 19 }, (_, k) => 129 - k)]);
+        assert.deepStrictEqual([byId["alice/a-0002"].noOverlap, byId["alice/a-0002"].skipped], [false, []]);
+        assert.strictEqual(byId["root-0001"].runs.length, 1, "skipped starts are no runs");
+    });
+
     /* Only the last 64 KiB of a user's runs.jsonl are read: a file far larger than the recorder
        writes does not reach the page, and one the user swaps for a link to /dev/zero after the
        check (here: timeout does it right before the read) fills no memory. The memory limit keeps

@@ -7,12 +7,12 @@
 import {
     $, backupDirOf, C, cronNext, fill, fmtLocal, fmtWhen, h, icon, keyOf, rich, setBusyButton, state, T,
 } from "./core.js";
-import { ensureUserRuns, errText, installWrapper, removeRunsIfUnused, wrapperCurrent } from "./system.js";
+import { ensureUserRuns, errText, installWrapper, removeRunsIfUnused, setNoOverlap, wrapperCurrent } from "./system.js";
 import {
-    commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, setCapture, setCaptureAll, takenIds,
+    commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, runsOf, setCapture, setCaptureAll, takenIds,
     unrecorded,
 } from "./crontab.js";
-import { alertEl, closeMenu, describe, restoreFocus } from "./page.js";
+import { alertEl, closeMenu, describe, restoreFocus, showAlert } from "./page.js";
 
 /* ---------- dialogs ---------- */
 
@@ -73,6 +73,7 @@ export const form = {
     command: () => $("f-command"),
     active: () => $("f-active"),
     capture: () => $("f-capture"),
+    noOverlap: () => $("f-no-overlap"),
     touched: { schedule: false, command: false },
 };
 
@@ -135,6 +136,9 @@ export function updateForm(showAll) {
     const blocked = cmd.ok && cmd.percent;
     capture.disabled = blocked;
     fill($("f-capture-help"), rich(blocked ? T.cannotCapture : T.captureHelp(C.WRAPPER_PATH)));
+    /* Only the run recorder can keep a job from overlapping its previous run. */
+    form.noOverlap().disabled = !(capture.checked && !blocked);
+    fill($("f-no-overlap-help"), rich(form.noOverlap().disabled ? T.noOverlapNeedsCapture : T.noOverlapHelp));
     return { sched, cmd };
 }
 
@@ -152,6 +156,9 @@ export function openEdit(user, index, openerKey) {
     form.command().value = e ? info.command : "";
     form.active().checked = e ? e.enabled : true;
     form.capture().checked = e ? !!info.capture : true;
+    const runs = info && info.capture ? runsOf(user, info.capture.id) : null;
+    const noOverlap = !!(runs && runs.noOverlap);
+    form.noOverlap().checked = noOverlap;
     form.touched.schedule = false;
     form.touched.command = false;
     dialogError("edit-alert", null);
@@ -159,7 +166,7 @@ export function openEdit(user, index, openerKey) {
     updateForm(false);
     const tz = jobTz(base.entries, index === null ? base.entries.length : index);
     openDialog($("edit-dlg"), openerKey, { kind: "edit", index, base, line: e ? e.line : null,
-                                            capture: info ? info.capture : null, tz }, form.schedule());
+                                            capture: info ? info.capture : null, noOverlap, tz }, form.schedule());
     updateForm(false);
 }
 
@@ -199,10 +206,9 @@ export async function submitEdit(ev) {
         done();
         return;
     }
-    const command = capture
-        ? C.wrapCommand(d.capture ? d.capture.id : C.makeJobId(cmd.text, takenIds(d.base.entries)), cmd.text,
-                        d.capture ? d.capture.path : undefined)
-        : cmd.text;
+    const id = capture ? (d.capture ? d.capture.id : C.makeJobId(cmd.text, takenIds(d.base.entries))) : null;
+    const noOverlap = capture && form.noOverlap().checked;
+    const command = capture ? C.wrapCommand(id, cmd.text, d.capture ? d.capture.path : undefined) : cmd.text;
     const check = C.splitJob(sched.text + " " + command, false);
     if (!check || check.command !== command) {
         done();
@@ -223,6 +229,15 @@ export async function submitEdit(ev) {
     }, index === null ? T.okAdded : T.okEdited);
     done();
     if (res.ok && d.capture && !capture) await removeRunsIfUnused(user, d.capture.id);
+    /* After the crontab, since the ID is only used once the line is written; a job that is
+       saved but not set as asked says so. */
+    if (res.ok && capture && noOverlap !== (!!d.capture && d.noOverlap)) {
+        try {
+            await setNoOverlap(user, id, noOverlap);
+        } catch (ex) {
+            showAlert("danger", T.noOverlapFailed, errText(ex));
+        }
+    }
     if (res.ok || res.conflict) {
         let key = d.openerKey;
         if (res.ok && index === null) {

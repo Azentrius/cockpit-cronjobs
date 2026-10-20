@@ -171,6 +171,16 @@ and lists only what has the form of runs: nothing the user puts there reaches be
 - Jobs that record their runs need the script. Before you remove Cron Jobs, turn recording off, or leave
   the script in place.
 
+**Not starting while a run goes on.** Cron starts a job on time, even when its previous run is still
+going on: a backup that takes longer than its interval then runs twice at once. For a job that records
+its runs, “Do not start while a run goes on” in its dialog keeps that from happening: the page puts the
+file `no-overlap` into the job's directory of runs (as its owner), and the run recorder (version 3 and
+later) then checks every start against the runs of that job that go on. A start that finds one does not
+run the command: it is noted in `skipped.jsonl` there (the last 20, shown in the runs dialog) and ends
+with exit code 75; only a start by hand (run now) says so on its output. The line in the crontab stays
+as it is, so older versions of the page read it as before; without the file the job overlaps as with
+cron.
+
 ## Status for the Status Board
 
 Cron Jobs reports its state in the format that all Azentrius Cockpit add-ons share (schema 1), for the
@@ -244,6 +254,7 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
 | `/var/lib/cockpit-cronjobs/backups/users/USER/` | The last 10 versions of the crontab of USER |
 | `/var/lib/cockpit-cronjobs/runs/` | Recorded runs of root's jobs |
 | `/var/lib/cockpit-cronjobs/users/USER/runs/` | Recorded runs of the jobs of USER (owned by USER) |
+| `…/runs/ID/no-overlap`, `skipped.jsonl` | A job that does not start while a run goes on, and the starts it skipped |
 | `/usr/local/libexec/cockpit-cronjobs-run` | The run recorder |
 | `/usr/lib/cockpit-cronjobs/cronjobs-status` | The status for the Status Board |
 | `/usr/lib/systemd/system/cockpit-cronjobs-status.service`, `.timer` | Writes the status every 15 minutes |

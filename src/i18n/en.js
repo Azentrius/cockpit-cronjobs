@@ -190,6 +190,11 @@
         fCapture: "Record result and output",
         captureHelp: path => `The job then runs through \`${path}\`, which keeps its result, duration and output. ` +
                              "Its line in the crontab changes accordingly.",
+        fNoOverlap: "Do not start while a run goes on",
+        noOverlapHelp: "A start that finds the previous run still going on is skipped and noted with the runs. " +
+                       "Without it the job starts on time, even beside the run before, as cron does.",
+        noOverlapNeedsCapture: "Only for jobs that record their runs: `cockpit-cronjobs-run` keeps the job from starting twice.",
+        noOverlapFailed: "The job was saved, but whether it may start while a run goes on could not be set",
         save: "Save",
         saving: "Saving …",
         scheduleHelp: "Five fields: minute, hour, day, month, weekday – for example `30 2 * * 1`. " +
@@ -299,6 +304,9 @@
         runsEmpty: "No runs recorded yet.",
         runsNote: (n, path) => `The last ${n} runs are kept, with up to 64 KiB of output each, in \`${path}\`.`,
         runsJournalNote: unit => `Runs of \`${unit}\` come from the journal; how far back it goes depends on its settings.`,
+        noOverlapNote: "The job does not start while a run of it goes on.",
+        skippedNote: (n, when) => `${n === 1 ? "1 start was" : n + " starts were"} skipped because a run was still going on, ` +
+                                  `the last ${when}.`,
         journalFailed: "The journal could not be read",
         journalFix: "Close this dialog and open the runs again. If the error stays, check the systemd-journald service.",
 

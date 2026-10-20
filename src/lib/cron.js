@@ -548,7 +548,7 @@
     /* ---------- run capture (cockpit-cronjobs-run) ---------- */
 
     const WRAPPER_PATH = "/usr/local/libexec/cockpit-cronjobs-run";
-    const WRAPPER_VERSION = 2;   /* CRONJOBS_RUN_VERSION in src/cockpit-cronjobs-run */
+    const WRAPPER_VERSION = 3;   /* CRONJOBS_RUN_VERSION in src/cockpit-cronjobs-run */
     const JOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
     const CAPTURE_RE = /^(\/\S*\/cockpit-cronjobs-run)\s+([A-Za-z0-9_-]{1,64})\s+(\S.*)$/;
 
