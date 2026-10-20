@@ -46,8 +46,8 @@ the page where the finding is, and Cockpit's menu shows the status next to “Cr
   The browser tests open each place, follow changes of the address while the page stays loaded, the
   tab chosen on the page in the address, paths that are no place, a reload that scrolls nowhere, the
   page loaded hidden at a place, and the icon (failed, out of date, English, no file, hidden). The
-  end-to-end test opens Cockpit's shell: the page loaded hidden and not started, the icon as
-  `cronjobs-status status` says, then `cockpit.jump` into the loaded page and a tab chosen there.
+  end-to-end test loads the page without Cockpit's shell, as before; it starts there as well, since
+  cockpit-ws drops the icon's `notify` without a shell.
 
 ## 2.8.1 – 2026-10-19
 
