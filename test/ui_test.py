@@ -82,6 +82,10 @@ def row(page, n):
     return page.locator("#root-body tbody tr").nth(n)
 
 
+def row_of(page, text):
+    return page.locator("#root-body tbody tr", has_text=text)
+
+
 def changed_lines(before, after):
     a, b = before.split("\n"), after.split("\n")
     return [(x, y) for x, y in zip(a, b) if x != y] if len(a) == len(b) else ("length", len(a), len(b))
