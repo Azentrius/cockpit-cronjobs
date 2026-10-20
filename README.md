@@ -39,6 +39,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
   the current version, so a restore can be undone the same way.
 - **The result of every run.** Turn on recording for a job and it keeps exit code, duration and output of
   its last 20 runs. Handy on servers without a mail program, where cron's output is otherwise lost.
+  **Record all** on a crontab's card does it for every job there that does not record yet: it lists them
+  first, says which cannot (a `%` in the command), and writes the crontab once.
 - **Run now.** Starts a job right away with the environment cron gives it on this server (see below) and
   input after `%`, shows the output live and can stop it.
 - **Convert to a systemd timer.** Creates `NAME.service` and `NAME.timer` with the same schedule (checked

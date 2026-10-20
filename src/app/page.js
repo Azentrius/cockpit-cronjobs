@@ -12,10 +12,11 @@ import {
 import { errText, installWrapper } from "./system.js";
 import {
     convertedTimer, convertedTo, crontabOf, jobInfo, jobsOf, jobTz, loading, noteFor, requestLoad, runsOf, setCapture, toggle,
+    unrecorded,
 } from "./crontab.js";
 import { renderTimeline } from "./timeline.js";
 import { renderSummary } from "./summary.js";
-import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
+import { openCaptureAll, openCaptureOff, openDelete, openEdit } from "./dialogs.js";
 import { openRun, openRuns, openTimerRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
 import { convertBlocker, openBack, openConvert } from "./convert.js";
 import { openBackups } from "./backups.js";
@@ -201,7 +202,8 @@ function lastCell(user, e, i, editable, frozen) {
 
 /* The crontabs: root's card (in index.html), then one card for each other user. */
 export function renderCrontabs() {
-    renderCrontab(state.root, { body: $("root-body"), alerts: $("root-alerts"), add: $("add"), backups: $("backups") });
+    renderCrontab(state.root, { body: $("root-body"), alerts: $("root-alerts"), add: $("add"), backups: $("backups"),
+                                recordAll: $("record-all") });
     renderUserCards();
 }
 
@@ -221,6 +223,7 @@ function renderUserCards() {
             alerts: h("div", { class: "cron-alerts", id: id + "-alerts" }),
             add: button("add", "plus", T.add, () => openEdit(user, null, keyOf(user, "add"))),
             backups: button("backups", "history", T.backups, () => openBackups(user, keyOf(user, "backups"))),
+            recordAll: button("record-all", "history", T.recordAll, () => openCaptureAll(user, keyOf(user, "record-all"))),
         };
         renderCrontab(state.users[user], els);
         return [els.alerts, h("section", { class: "az-card", "aria-labelledby": id + "-title", "data-user": user },
@@ -228,14 +231,14 @@ function renderUserCards() {
                 h("div", null,
                     h("h2", { class: "az-card__title", id: id + "-title" }, T.userTitle(user)),
                     h("p", { class: "az-card__desc" }, rich(T.userDesc(user)))),
-                h("div", { class: "az-card__actions" }, els.backups, els.add)),
+                h("div", { class: "az-card__actions" }, els.backups, els.recordAll, els.add)),
             els.body)];
     }));
 }
 
-/* One crontab r into els.body, with its buttons els.add and els.backups and its
-   alerts in els.alerts (above the card). Every job can be switched, edited, deleted
-   and run now; root's can also be recorded and converted. */
+/* One crontab r into els.body, with its buttons els.add, els.backups and els.recordAll
+   and its alerts in els.alerts (above the card). Every job can be switched, edited,
+   deleted, run now, recorded and converted. */
 function renderCrontab(r, els) {
     const user = r.user;
     const body = els.body;
@@ -246,6 +249,8 @@ function renderCrontab(r, els) {
     els.add.disabled = frozen;
     els.backups.hidden = r.status !== "ok";
     els.backups.disabled = frozen;
+    els.recordAll.hidden = !(editable && unrecorded(r).jobs.length > 0);
+    els.recordAll.disabled = frozen;
     fill(els.alerts);
 
     if (r.status === "loading") {

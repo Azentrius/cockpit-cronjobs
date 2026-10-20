@@ -40,6 +40,12 @@ results show a recorded job whose scheduled run cron did not start.
   down at the time, leaves behind; cron does not catch such runs up. The next run is cron's, clock
   changes and `CRON_TZ` included (`C.nextRun`); runs started by hand do not stand in for a scheduled
   one. A job with no recorded run yet is not judged: it is not known when recording began.
+- **Record all:** each crontab's card offers “Record all” while one of its enabled jobs does not record
+  its runs. The dialog lists those jobs with their schedules and says how many cannot be recorded (a
+  `%` in the command); confirmed, the run recorder (and for another user the directory for their runs)
+  comes first, then one write of the crontab through the locked step with its backup, each job wrapped
+  with an ID of its own (`C.captureJobs`). Every other line stays byte for byte; when a line changed
+  meanwhile, nothing is written. What the status counts as `unrecorded` is then one click away.
 - **Tests:** the unit test checks the status helper against the page's journal parser with the sample
   of systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
   lines of the job that look like systemd's), units that are not a conversion's, other users' timers
@@ -47,7 +53,9 @@ results show a recorded job whose scheduled run cron did not start.
   `test/journal-sample.js`. The end-to-end test converts a failing job, finds its timer in the status,
   stops cron for real and finds that in the status and on the page. A unit test for `R.missed` (within
   and past the five minutes, a run that came, runs by hand, no run, no next run, the day summer time
-  ends) and a browser test (the order, the title, the runs it opens).
+  ends) and a browser test (the order, the title, the runs it opens). For record all a unit test of
+  `C.captureJobs` (no ID given twice, a `%`, recorded jobs and other lines as they were) and a browser
+  test (the dialog, cancelling, one write with its backup, another user's crontab).
 - **Tests for the links and the menu:** `test/menu.test.js` (new, Node): the icon for every state, an
   item worse than the whole, an item out of date (in German and English, with the time), what the
   board ignores, the file of the page's language, the start once shown, and every link of the helper

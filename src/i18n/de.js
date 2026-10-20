@@ -90,6 +90,7 @@
         userDesc: user => `Änderungen laufen über \`crontab -u ${user}\`; ihre Jobs laufen als ${user}. Vor jeder ` +
                           "Änderung wird ein Backup geschrieben.",
         add: "Job hinzufügen",
+        recordAll: "Alle erfassen",
         colActive: "Aktiv",
         colSchedule: "Zeitplan",
         colNext: "Nächster Lauf",
@@ -230,6 +231,7 @@
         okDisabled: "Job ausgeschaltet",
         okCaptureOn: "Der Job erfasst jetzt seine Läufe",
         okCaptureOff: "Der Job erfasst seine Läufe nicht mehr",
+        okCaptureAll: n => n === 1 ? "1 Job erfasst jetzt seine Läufe" : `${n} Jobs erfassen jetzt ihre Läufe`,
         backupAt: path => `Backup der vorherigen Fassung unter \`${path}\``,
         noBackup: user => `Vorher gab es keine ${crontabName(user)}, daher kein Backup.`,
         conflictTitle: "Die Crontab wurde inzwischen geändert",
@@ -247,6 +249,15 @@
         /* Erfassung ausschalten */
         captureOffTitle: "Erfassung ausschalten?",
         captureOffBody: "Der Job läuft dann wieder direkt, wie vorher. Seine erfassten Läufe werden gelöscht.",
+
+        /* Alle erfassen */
+        recordAllTitle: "Läufe dieser Jobs erfassen?",
+        recordAllBody: (n, path) => `${n === 1 ? "Dieser Job läuft" : "Diese " + n + " Jobs laufen"} dann über \`${path}\`, ` +
+                                    "das Ergebnis, Dauer und Ausgabe jedes Laufs festhält. Die Crontab wird einmal geschrieben, " +
+                                    "nach einem Backup.",
+        recordAllBlocked: n => `${n === 1 ? "1 Job lässt" : n + " Jobs lassen"} sich nicht erfassen: Der Befehl enthält ein % ` +
+                               "(den Rest gibt cron als Eingabe weiter).",
+        recordAllOk: n => n === 1 ? "1 Job erfassen" : `${n} Jobs erfassen`,
 
         /* Jetzt ausführen */
         runTitle: "Jetzt ausführen",

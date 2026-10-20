@@ -76,6 +76,7 @@
         </div>
         <div class="az-card__actions">
           <button class="az-btn az-btn--secondary az-btn--sm" type="button" id="backups" data-key="backups" hidden><span data-icon="history"></span><span data-t="backups">Backups</span></button>
+          <button class="az-btn az-btn--secondary az-btn--sm" type="button" id="record-all" data-key="record-all" hidden><span data-icon="history"></span><span data-t="recordAll">Record all</span></button>
           <button class="az-btn az-btn--secondary az-btn--sm" type="button" id="add" data-key="add" hidden><span data-icon="plus"></span><span data-t="add">Add job</span></button>
         </div>
       </div>
@@ -212,7 +213,7 @@
   </div>
 </div>
 
-<!-- Confirm (turn recording off) -->
+<!-- Confirm (turn recording off, record all) -->
 <div class="az-backdrop" id="confirm-dlg" hidden>
   <div class="az-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
     <div class="az-modal__header">
@@ -221,6 +222,7 @@
     </div>
     <div class="az-modal__body">
       <p id="confirm-body"></p>
+      <ul class="cron-confirm-list" id="confirm-list" hidden></ul>
     </div>
     <div class="az-modal__footer">
       <button class="az-btn az-btn--primary" type="button" id="confirm-ok"></button>

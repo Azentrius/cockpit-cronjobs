@@ -92,6 +92,7 @@
         userDesc: user => `Changes go through \`crontab -u ${user}\`; its jobs run as ${user}. A backup is written ` +
                           "before every change.",
         add: "Add job",
+        recordAll: "Record all",
         colActive: "Active",
         colSchedule: "Schedule",
         colNext: "Next run",
@@ -231,6 +232,7 @@
         okDisabled: "Job turned off",
         okCaptureOn: "The job now records its runs",
         okCaptureOff: "The job no longer records its runs",
+        okCaptureAll: n => n === 1 ? "1 job now records its runs" : `${n} jobs now record their runs`,
         backupAt: path => `Backup of the previous version at \`${path}\``,
         noBackup: user => `There was no ${crontabName(user)} before, so no backup was needed.`,
         conflictTitle: "The crontab has changed in the meantime",
@@ -248,6 +250,15 @@
         /* recording off */
         captureOffTitle: "Stop recording?",
         captureOffBody: "The job then runs directly again, as before. Its recorded runs are deleted.",
+
+        /* record all */
+        recordAllTitle: "Record the runs of these jobs?",
+        recordAllBody: (n, path) => `${n === 1 ? "This job then runs" : "These " + n + " jobs then run"} through \`${path}\`, ` +
+                                    "which keeps the result, duration and output of each run. The crontab is written once, " +
+                                    "after a backup.",
+        recordAllBlocked: n => `${n === 1 ? "1 job cannot" : n + " jobs cannot"} be recorded: the command contains a % ` +
+                               "(cron passes the rest as input).",
+        recordAllOk: n => n === 1 ? "Record 1 job" : `Record ${n} jobs`,
 
         /* run now */
         runTitle: "Run now",

@@ -613,6 +613,26 @@
         throw new Error("no free job id");
     }
 
+    /* The entries with the jobs at indexes recorded, in one change ("record all"): each
+       wrapped with an ID of its own that no job of the crontab has. A job that records
+       already or cannot be recorded, and anything that is no job, stays as it is. */
+    function captureJobs(entries, indexes, random) {
+        const taken = new Set();
+        entries.forEach(e => {
+            const c = e.kind === "job" ? unwrapCommand(e.command) : null;
+            if (c) taken.add(c.id);
+        });
+        const out = entries.slice();
+        indexes.forEach(i => {
+            const e = out[i];
+            if (!e || e.kind !== "job" || unwrapCommand(e.command) || !canCapture(e.command)) return;
+            const id = makeJobId(e.command, taken, random);
+            taken.add(id);
+            out[i] = setJob(e, e.schedule, wrapCommand(id, e.command), e.enabled);
+        });
+        return out;
+    }
+
     /* POSIX cksum (CRC-32, MSB first, length appended) of the UTF-8 bytes:
        "CRC SIZE", exactly what `cksum < file` prints. Used to make sure the
        crontab on disk is still the one shown before it is replaced. */
@@ -988,7 +1008,7 @@
         setEnabled, setJob, newJob, rawLine, entryLine,
         parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
         parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
-        shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, jobName, slug,
+        shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, captureJobs, jobName, slug,
         cksum,
         validTimeZone, wallParts, isWildcard, nextRun, runsBetween,
         describe,

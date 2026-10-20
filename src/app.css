@@ -204,6 +204,16 @@ html { background: var(--bg-page); }
 .cron-modal-wide { inline-size: min(100%, 760px); }
 .cron-modal-heading { min-width: 0; }
 .az-modal__body p.cron-modal-sub, .cron-modal-sub { margin: 4px 0 0; font-size: 13px; color: var(--text-subtle); overflow-wrap: anywhere; }
+.cron-confirm-list {
+  display: grid;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+  max-block-size: 40vh;
+  overflow: auto;
+}
+.cron-confirm-list li { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .cron-codebox {
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--line);

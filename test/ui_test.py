@@ -537,6 +537,53 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (menu): " + repr(page.problems))
     page.context.close()
 
+    # ---------- record all ----------
+    page = open_page(browser)
+    reload_with_root(page, root_text(page) + "0 5 * * * date +%F\n")
+    check(page.locator("#record-all").is_visible() and page.inner_text("#record-all").strip() == "Alle erfassen", "record all offered")
+    before = root_text(page)
+    saved = len(mock(page, "backups"))
+    # shown first: the jobs it records, how many it cannot; cancelled, nothing written
+    page.click("#record-all")
+    items = [i.replace("\n", " ") for i in page.locator("#confirm-list li").all_inner_texts()]
+    body = page.inner_text("#confirm-body")
+    check(page.inner_text("#confirm-title") == "Läufe dieser Jobs erfassen?" and len(items) == 3 and
+          "/usr/sbin/fstrim -a" in items[0] and "Sonntags um 01:30" in items[0] and "<b>not bold</b>" in items[1] and
+          "warmup.sh" in items[2] and body.startswith("Diese 3 Jobs laufen dann über " + WRAP) and
+          body.endswith("1 Job lässt sich nicht erfassen: Der Befehl enthält ein % (den Rest gibt cron als Eingabe weiter).") and
+          page.inner_text("#confirm-ok") == "3 Jobs erfassen", "the dialog shows what it does: " + body + " " + repr(items))
+    shot(page, "de-light-record-all", full=False)
+    page.keyboard.press("Escape")
+    check(root_text(page) == before and focused_key(page) == "record-all", "cancelled: nothing written, focus back")
+    # confirmed: one write, the three lines wrapped with IDs of their own, every other line as it was
+    page.click("#record-all")
+    page.click("#confirm-ok")
+    wait_idle(page)
+    ch = changed_lines(before, root_text(page))
+    wrapped = [re.fullmatch(r"(.*?) " + re.escape(WRAP) + r" ([a-z0-9_-]+-[0-9a-f]{4}) (.*)", new) for _, new in ch]
+    check(len(ch) == 3 and all(wrapped) and [w.group(1) for w in wrapped] == ["30 1 * * 0", "*/10 * * * *", "@reboot"] and
+          len({w.group(2) for w in wrapped}) == 3 and wrapped[0].group(3) == "'/usr/sbin/fstrim -a'" and
+          wrapped[1].group(3) == "'test -x /opt/x && echo '\\''<b>not bold</b>'\\'' > /dev/null'" and
+          len(mock(page, "backups")) == saved + 1, "the three jobs wrapped in one write: " + repr(ch))
+    check("3 Jobs erfassen jetzt ihre Läufe" in page.inner_text("#alerts") and page.locator("#record-all").is_hidden() and
+          focused_key(page) == "add", "said so; nothing left to record (the % job cannot), focus on Add job")
+    check(not page.problems, "no console problems (record all): " + repr(page.problems))
+    page.context.close()
+    # another user's crontab: the directory for its runs first, as for one job
+    page = open_page(browser)
+    card = page.locator("#user-crontabs section[data-user='www-data']")
+    card.locator("[data-key='record-all:www-data']").click()
+    check(page.inner_text("#confirm-body").startswith("Dieser Job läuft dann über") and page.inner_text("#confirm-ok") == "1 Job erfassen",
+          "one job of www-data: " + page.inner_text("#confirm-body"))
+    page.click("#confirm-ok")
+    wait_idle(page)
+    check(re.fullmatch(r"\*/5 \* \* \* \* " + re.escape(WRAP) + r" cron-[0-9a-f]{4} 'php -f /var/www/nextcloud/cron\.php'\n",
+                       mock(page, "sys.users['www-data']")) is not None and mock(page, "userRunsMade") == ["www-data"] and
+          card.locator("[data-key='record-all:www-data']").is_hidden(),
+          "www-data's job recorded, its directory made: " + repr(mock(page, "sys.users['www-data']")))
+    check(not page.problems, "no console problems (record all, other user): " + repr(page.problems))
+    page.context.close()
+
     # ---------- leftover runs ----------
     page = open_page(browser)
     check(page.locator("#orphans").is_visible() and "Die erfassten Läufe von 1 Job " in page.inner_text("#orphans"),
