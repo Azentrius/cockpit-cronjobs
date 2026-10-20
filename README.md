@@ -273,7 +273,8 @@ make check-ui     # browser tests against a stand-in for Cockpit (needs Python P
 
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
 crontab, so only use it on a throwaway machine or container (see the top of the file). CI runs it on
-every push and pull request, on the runner's throwaway VM (job `e2e`).
+every push and pull request, on the runner's throwaway VM, twice: with the Cockpit of Ubuntu 24.04 and
+with the one from its backports (check `e2e`).
 
 What comes next is in [ROADMAP.md](ROADMAP.md).
 
