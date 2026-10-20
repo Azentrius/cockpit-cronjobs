@@ -42,7 +42,10 @@ function load({ language = "de", cookie = "", hidden = false, files = {} } = {})
     window.window = window;
     window.self = window;
     window.document = { cookie };
-    window.Date = Date;
+    /* The script's clock is NOW, as the documents below are: with the real clock they would turn
+       out of date an hour after NOW. */
+    window.Date = class extends Date {};
+    window.Date.now = () => NOW;
     const ctx = vm.createContext(window);
     vm.runInContext(I18N, ctx);
     vm.runInContext(MENU, ctx);
