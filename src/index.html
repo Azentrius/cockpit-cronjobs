@@ -17,6 +17,9 @@
 <script src="lib/systemd.js"></script>
 <script src="lib/runs.js"></script>
 <script src="lib/backups.js"></script>
+<!-- The status icon in Cockpit's menu: Cockpit loads the page hidden after the login for it
+     (manifest.json, "preload"); app.js starts once the page is shown. -->
+<script src="menu-status.js"></script>
 </head>
 <body>
 <div class="az-page" id="page">
@@ -65,7 +68,7 @@
     </section>
 
     <div class="cron-alerts" id="root-alerts"></div>
-    <section class="az-card" aria-labelledby="root-title">
+    <section class="az-card" id="root-card" aria-labelledby="root-title">
       <div class="az-card__header">
         <div>
           <h2 class="az-card__title" id="root-title" data-t="rootTitle">root crontab</h2>

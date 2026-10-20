@@ -142,4 +142,8 @@ function init() {
     watchSuperuser().then(() => requestLoad());
 }
 
-init();
+/* Cockpit loads this page hidden right after the login, for the status icon in its menu
+   (menu-status.js). Everything starts only once the page is shown. */
+const menu = window.CronJobsMenuStatus;
+if (menu) menu.shown.then(init);
+else init();

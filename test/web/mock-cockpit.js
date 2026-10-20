@@ -87,6 +87,32 @@
     };
 
     const wrapperParam = params.get("wrapper");
+    /* What `cronjobs-status write` leaves for the menu icon, one line of JSON per language: ok, one
+       failed job, out of date (written two hours ago, stale after one), or no files at all. */
+    function statusFiles(kind) {
+        if (kind === "missing") return {};
+        const at = new Date(Date.now() - (kind === "stale" ? 2 * 3600e3 : 60e3)).toISOString().replace(/\.\d+Z$/, "Z");
+        const bad = kind === "failed";
+        const doc = de => {
+            const say = (en, d) => de ? d : en;
+            const item = (id, state, title, value, detail, link) =>
+                ({ id, state, title, value, detail, link, checked_at: at, stale_after: 3600 });
+            return JSON.stringify({
+                schema: 1, addon: "cronjobs", label: "Cron Jobs", checked_at: at, state: bad ? "danger" : "ok",
+                summary: bad ? say("1 job failed in the last 24 hours.", "1 Job ist in den letzten 24 Stunden fehlgeschlagen.")
+                    : say("No recorded job failed in the last 24 hours.", "Kein aufgezeichneter Job ist in den letzten 24 Stunden fehlgeschlagen."),
+                items: [
+                    item("failed", bad ? "danger" : "ok", say("Failed jobs (last 24 hours)", "Fehlgeschlagene Jobs (letzte 24 Stunden)"),
+                         bad ? "1" : "0", bad ? "update-geoip-1a2b" : say("Recorded jobs: 1, none failed.", "Aufgezeichnete Jobs: 1, keiner fehlgeschlagen."),
+                         "#/overview/results"),
+                    item("cron", "ok", say("Cron service", "Cron-Dienst"), say("running", "läuft"),
+                         say("cron is running.", "cron läuft."), "#/overview/notices"),
+                ],
+            }) + "\n";
+        };
+        return { "/var/lib/cockpit-cronjobs/status.json": doc(false), "/var/lib/cockpit-cronjobs/status.de.json": doc(true) };
+    }
+
     const M = window.__mock = {
         superuser: params.get("su") || "sudo",
         root: params.get("root") === "none" ? null : ROOT_DEFAULT,
@@ -114,6 +140,11 @@
         userConflictNext: null,
         calls: [],
         jumps: [],
+        /* cockpit.file: the status files the menu icon reads (status=ok|failed|stale|missing), what
+           was read, and what the page sent the shell (transport.control). */
+        files: statusFiles(params.get("status") || "ok"),
+        fileReads: [],
+        notes: [],
         writes: 0,
         delay: +(params.get("delay") || 40),
         failWrite: null,
@@ -695,10 +726,35 @@
         throw new Error("unexpected D-Bus call " + method);
     }
 
+    /* Events of cockpit.js: visibilitychange when the shell's hint changes cockpit.hidden
+       (M.hint), locationchanged on the frame's hashchange, as cockpit.js sends them. */
+    const handlers = { visibilitychange: [], locationchanged: [] };
+    const fire = type => handlers[type].slice().forEach(f => f());
+    window.addEventListener("hashchange", () => fire("locationchanged"));
+    M.hint = hidden => { window.cockpit.hidden = hidden; fire("visibilitychange"); };
+
     window.cockpit = {
         language: "en",
-        transport: { host: "localhost" },
-        hidden: false,
+        transport: {
+            host: "localhost",
+            wait(cb) { setTimeout(cb, 0); },
+            control(command, options) { M.notes.push([command, JSON.parse(JSON.stringify(options))]); },
+        },
+        /* ?hidden=1: loaded hidden, as Cockpit preloads the page after the login. */
+        hidden: params.get("hidden") === "1",
+        /* The frame's address: #/a/b is the path ["a", "b"]; go() changes it as cockpit.js does. */
+        get location() {
+            const path = window.location.hash.replace(/^#/, "").split("?")[0].split("/").filter(Boolean);
+            return { path, go: p => { window.location.hash = "#/" + p.join("/"); } };
+        },
+        file(path) {
+            return {
+                read() {
+                    M.fileReads.push(path);
+                    return new Promise(resolve => setTimeout(() => resolve(M.files[path] === undefined ? null : M.files[path]), 5));
+                },
+            };
+        },
         spawn,
         dbus: (name, opts) => {
             if (name === null) return { proxy: () => su };
@@ -709,6 +765,9 @@
             throw new Error("unexpected bus " + name);
         },
         jump: (path, host) => M.jumps.push([path, host]),
-        addEventListener: () => {},
+        addEventListener: (type, f) => { if (handlers[type]) handlers[type].push(f); },
+        removeEventListener: (type, f) => {
+            if (handlers[type]) handlers[type] = handlers[type].filter(x => x !== f);
+        },
     };
 }());

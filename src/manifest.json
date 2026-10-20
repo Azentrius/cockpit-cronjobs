@@ -11,6 +11,7 @@
             ]
         }
     },
+    "preload": ["index"],
     "azentrius": {
         "status": ["/usr/lib/cockpit-cronjobs/cronjobs-status", "status"]
     }
