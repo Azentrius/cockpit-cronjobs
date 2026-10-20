@@ -2,7 +2,8 @@
 /* Tests for the status of Cron Jobs (status/cronjobs-status) with dash and bash, and with each awk
  * there is (mawk on Debian and Ubuntu, gawk on Fedora): the documents follow the shared status
  * format (schema 1), jobs are read as the page reads them (lib/cron.js is the oracle), failed runs
- * as lib/runs.js sees them. Run with: node test/status.test.js */
+ * as lib/runs.js sees them, recorded or from the journal of a converted job, and the cron service
+ * as the page asks for it. Run with: node test/status.test.js */
 "use strict";
 const assert = require("assert");
 const fs = require("fs");
@@ -10,6 +11,9 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const C = require("../src/lib/cron.js");
+const R = require("../src/lib/runs.js");
+const SD = require("../src/lib/systemd.js");
+const SAMPLE = require("./journal-sample.js");
 
 const STATUS = path.join(__dirname, "..", "status", "cronjobs-status");
 const SRC = path.join(__dirname, "..", "src");
@@ -33,11 +37,49 @@ if (!AWKS.length) AWKS.push({ name: "awk", bin: null });
 /* A user the system knows, other than root, for another user's crontab. */
 const OTHER = ["daemon", "nobody", "bin"].find(u => spawnSync("id", ["-u", u]).status === 0);
 
+/* Stand-ins for systemctl, pgrep and journalctl, first in PATH, answering as the real ones do for
+   what the helper asks: the cron service FAKE_CRON ("UNIT STATE", or empty for none), the processes
+   FAKE_PGREP (names), and the journal of NAME.service from FAKE_JOURNAL/NAME.service.json, from
+   --since on as journalctl takes it. Each call of journalctl is logged to FAKE_JOURNAL/calls. */
+const FAKES = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-fakes-"));
+fs.writeFileSync(path.join(FAKES, "systemctl"), `#!/bin/sh
+for last; do :; done
+set -f
+set -- "$1" $FAKE_CRON
+case $1 in
+    show) if [ "\${2-}" = "$last" ]; then echo loaded; else echo not-found; fi ;;
+    is-active) if [ "\${2-}" = "$last" ]; then echo "$3"; [ "$3" = active ]; else echo inactive; exit 3; fi ;;
+    *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+fs.writeFileSync(path.join(FAKES, "pgrep"), `#!/bin/sh
+[ "$1" = -x ] || exit 2
+case " $FAKE_PGREP " in *" $2 "*) exit 0 ;; esac
+exit 1
+`, { mode: 0o755 });
+fs.writeFileSync(path.join(FAKES, "journalctl"), `#!/bin/sh
+unit= since=0
+while [ $# -gt 0 ]; do
+    case $1 in
+        -u) unit=$2; shift ;;
+        --since) since=\${2#@}; shift ;;
+    esac
+    shift
+done
+echo "$unit $since" >> "$FAKE_JOURNAL/calls"
+f=$FAKE_JOURNAL/$unit.json
+if [ ! -f "$f" ]; then echo "-- No entries --"; exit 0; fi
+awk -v since="$since" '{
+    if (match($0, /"__REALTIME_TIMESTAMP":"[0-9]+"/) && substr($0, RSTART + 24, RLENGTH - 25) + 0 < since * 1000000) next
+    print
+}' "$f"
+`, { mode: 0o755 });
+
 function fixture() {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-status-"));
-    const fx = { base, state: path.join(base, "state"), spool: path.join(base, "spool") };
-    fs.mkdirSync(fx.state);
-    fs.mkdirSync(fx.spool);
+    const fx = { base, state: path.join(base, "state"), spool: path.join(base, "spool"), units: path.join(base, "units"),
+                 journal: path.join(base, "journal"), cron: "", pgrep: "", systemd: "yes" };
+    for (const d of [fx.state, fx.spool, fx.units, fx.journal]) fs.mkdirSync(d);
     return fx;
 }
 function crontab(fx, user, text) {
@@ -64,8 +106,10 @@ function wrapped(id, command) {
 }
 
 function run(sh, awk, fx, args, extra) {
-    const env = { PATH: (awk.bin ? awk.bin + ":" : "") + "/usr/bin:/bin" };
+    const env = { PATH: FAKES + ":" + (awk.bin ? awk.bin + ":" : "") + "/usr/bin:/bin" };
     if (fx) Object.assign(env, { CRONJOBS_STATE_DIR: fx.state, CRONJOBS_SPOOL_DIR: fx.spool, CRONJOBS_PAGE_DIR: SRC });
+    if (fx && fx.units) Object.assign(env, { CRONJOBS_UNIT_DIR: fx.units, CRONJOBS_SYSTEMD: fx.systemd, FAKE_JOURNAL: fx.journal,
+                                             FAKE_CRON: fx.cron, FAKE_PGREP: fx.pgrep });
     Object.assign(env, extra || {});
     const r = spawnSync(sh, [STATUS].concat(args), { env, encoding: "utf8" });
     return { rc: r.status, out: r.stdout, err: r.stderr };
@@ -116,7 +160,7 @@ function contract(text) {
         assert.ok(ISO_RE.test(i.checked_at));
         assert.strictEqual(i.stale_after, 3600);
     });
-    assert.deepStrictEqual(d.items.map(i => i.id), d.items.length ? ["failed", "unrecorded"] : []);
+    assert.deepStrictEqual(d.items.map(i => i.id), d.items.length ? ["failed", "unrecorded", "cron"] : []);
     assert.strictEqual(d.state, overall(d.items));
     return d;
 }
@@ -180,6 +224,62 @@ t("the oracle sees jobs and recordings in the lines", () => {
     const e = expected(LINES.join("\n") + "\n");
     assert.ok(e.total > 20 && e.recorded >= 6 && e.recorded < e.total, JSON.stringify(e));
 });
+
+/* ---------- jobs converted to systemd timers ---------- */
+
+/* NAME.service and NAME.timer as a conversion from the crontab of user writes them (lib/systemd.js). */
+function convertedUnits(fx, name, user) {
+    const command = "/usr/local/bin/" + name;
+    fs.writeFileSync(path.join(fx.units, name + ".service"),
+                     SD.serviceUnit({ name, user, line: "0 5 * * * " + command, shell: "/bin/sh", command, env: {} }));
+    fs.writeFileSync(path.join(fx.units, name + ".timer"), SD.timerUnit({ name, user, specs: ["*-*-* 05:00:00"], persistent: false }));
+}
+
+/* The messages systemd logs about a run (see JOURNAL_MSG in lib/runs.js). */
+const MSG = { starting: "7d4958e842da4a758f6c1cdc7b36dcc5", jobDone: "39f53479d3a045ac8e11786248231fbf",
+              jobFailed: "be02cf6855d2428ba40df7e9d022f03d", succeeded: "7ad2d189f7e94e70a38c781354912448",
+              failed: "d9b373ed55a64feb8242e02dbe79a49c", exited: "98e322203f7a4ed290d09fe03c09fe15" };
+const usec = s => String(Math.round(s * 1e6));
+let invocations = 0;
+
+/* The journal of one run of a service, as journal-sample.js has them from systemd 259: started at t
+   (seconds), ended by end: "ok", an exit code, "killed", or null for no end (running, or lost). */
+function journalRun(t, end) {
+    const id = (++invocations).toString(16).padStart(32, "0");
+    const own = (s, fields) => JSON.stringify(Object.assign({ __REALTIME_TIMESTAMP: usec(s), _PID: "1", INVOCATION_ID: id }, fields));
+    const lines = [own(t, { MESSAGE_ID: MSG.starting, MESSAGE: "Starting job.service..." }),
+                   JSON.stringify({ __REALTIME_TIMESTAMP: usec(t + 0.1), _PID: "4242", _SYSTEMD_INVOCATION_ID: id, MESSAGE: "working" })];
+    if (end === "ok") {
+        lines.push(own(t + 0.2, { MESSAGE_ID: MSG.succeeded, MESSAGE: "job.service: Deactivated successfully." }),
+                   own(t + 0.3, { MESSAGE_ID: MSG.jobDone, JOB_RESULT: "done", MESSAGE: "Finished job.service." }));
+    } else if (end !== null) {
+        const killed = end === "killed";
+        lines.push(own(t + 0.2, { MESSAGE_ID: MSG.exited, EXIT_CODE: killed ? "killed" : "exited", EXIT_STATUS: killed ? "9" : String(end),
+                                  MESSAGE: "job.service: Main process exited" }),
+                   own(t + 0.3, { MESSAGE_ID: MSG.failed, UNIT_RESULT: killed ? "signal" : "exit-code",
+                                  MESSAGE: "job.service: Failed with result." }),
+                   own(t + 0.4, { MESSAGE_ID: MSG.jobFailed, JOB_RESULT: "failed", MESSAGE: "Failed to start job.service." }));
+    }
+    return lines;
+}
+function journal(fx, name, lines) {
+    fs.writeFileSync(path.join(fx.journal, name + ".service.json"), lines.join("\n") + "\n");
+}
+/* The sample of systemd 259, moved so that it ends ago seconds before now. */
+function sample(ago) {
+    const stamps = SAMPLE.map(l => Number(JSON.parse(l).__REALTIME_TIMESTAMP));
+    const shift = (NOW - ago) * 1e6 - Math.max(...stamps);
+    return SAMPLE.map((l, k) => Object.assign(JSON.parse(l), { __REALTIME_TIMESTAMP: String(stamps[k] + shift) }))
+        .map(o => JSON.stringify(o));
+}
+/* Whether a run of the last 24 hours in the journal failed or lost its end, as the page sees it. */
+function pageSaysFailed(lines) {
+    return R.parseJournal(lines.join("\n") + "\n", 20, 0).some(r => r.start >= NOW - 86400 && !r.running && R.outcome(r) !== "ok");
+}
+function journalCalls(fx) {
+    const f = path.join(fx.journal, "calls");
+    return fs.existsSync(f) ? fs.readFileSync(f, "utf8").trim().split("\n") : [];
+}
 
 for (const sh of SHELLS) {
     for (const awk of AWKS) {
@@ -370,6 +470,181 @@ for (const sh of SHELLS) {
             assert.strictEqual(de.summary, "Kein Job zeichnet seine Läufe auf, daher sind die Ergebnisse nicht bekannt.");
             assert.deepStrictEqual([item(en, "failed").state, item(en, "failed").detail], ["none", "No job records its runs."]);
             assert.deepStrictEqual([item(en, "unrecorded").state, item(en, "unrecorded").value], ["none", "2"]);
+        });
+
+        t(name + "a converted job whose service failed counts, by the name of its timer", () => {
+            const fx = fixture();
+            crontab(fx, "root", `MAILTO=""\n# Converted to systemd timer nightly.timer by Cockpit Cron Jobs on 2026-10-20; ` +
+                                `the line below is no longer used.\n#[cronjobs:off] 0 5 * * * /usr/local/bin/nightly\n` +
+                                `*/5 * * * * ${wrapped("backup-1a2b", "backup.sh")}\n`);
+            runs(fx, "root", "backup-1a2b", [rec(NOW - 60, 1)]);
+            convertedUnits(fx, "nightly", "root");
+            journal(fx, "nightly", journalRun(NOW - 7200, "ok").concat(journalRun(NOW - 600, 3)));
+            const { en, de } = written(sh, awk, fx);
+            assert.deepStrictEqual([en.state, item(en, "failed").value, item(en, "failed").detail], ["danger", "2", "backup-1a2b, nightly.timer"]);
+            assert.strictEqual(item(de, "failed").detail, "backup-1a2b, nightly.timer");
+            assert.strictEqual(en.summary, "2 jobs failed in the last 24 hours.");
+            assert.deepStrictEqual([item(en, "unrecorded").state, item(en, "unrecorded").value], ["ok", "0"], "the line that is off is no job");
+            /* the journal of that service only, from 24 hours ago */
+            const calls = journalCalls(fx);
+            assert.strictEqual(calls.length, 1, calls.join("; "));
+            const [unit, since] = calls[0].split(" ");
+            assert.strictEqual(unit, "nightly.service");
+            assert.ok(Math.abs(Number(since) - (NOW - 86400)) < 600, since);
+        });
+
+        t(name + "converted jobs that ran fine, or have not run yet", () => {
+            const fx = fixture();
+            convertedUnits(fx, "fine-1", "root");
+            convertedUnits(fx, "fine-2", "root");
+            journal(fx, "fine-1", journalRun(NOW - 3600, "ok").concat(journalRun(NOW - 120, null)));
+            const { en, de } = written(sh, awk, fx);
+            const f = item(en, "failed");
+            assert.deepStrictEqual([en.state, f.state, f.value, f.detail],
+                                   ["ok", "ok", "0", "Recorded jobs: 0, timers converted from cron: 2; none failed."]);
+            assert.strictEqual(item(de, "failed").detail, "Aufgezeichnete Jobs: 0, aus cron umgewandelte Timer: 2; keiner fehlgeschlagen.");
+            assert.strictEqual(en.summary, "No recorded job and no converted timer failed in the last 24 hours.");
+            assert.strictEqual(de.summary, "Kein aufgezeichneter Job und kein umgewandelter Timer ist in den letzten 24 Stunden fehlgeschlagen.");
+            assert.strictEqual(journalCalls(fx).length, 2);
+        });
+
+        t(name + "the runs of a converted job, read from the journal as the page reads them", () => {
+            const ok = journalRun(NOW - 300, "ok");
+            const id = JSON.parse(ok[0]).INVOCATION_ID;
+            /* lines the job writes itself, made to look like systemd's: they carry its own _PID */
+            const forged = [
+                JSON.stringify({ __REALTIME_TIMESTAMP: usec(NOW - 299), _PID: "4242", _SYSTEMD_INVOCATION_ID: id, INVOCATION_ID: id,
+                                 MESSAGE_ID: MSG.failed, UNIT_RESULT: "exit-code", MESSAGE: "job.service: Failed with result." }),
+                JSON.stringify({ MESSAGE: `x","_PID":"1","INVOCATION_ID":"${id}","MESSAGE_ID":"${MSG.failed}","y":"`,
+                                 __REALTIME_TIMESTAMP: usec(NOW - 298), _PID: "4242", _SYSTEMD_INVOCATION_ID: id }),
+            ];
+            const twenty = k => journalRun(NOW - 3000 + k * 60, "ok");
+            const cases = [
+                ["the sample of systemd 259: failed, failed, killed", sample(300), true],
+                ["its first run alone, a success", sample(300).slice(0, 5), false],
+                ["a run going on", sample(300).slice(0, 3), false],
+                ["a run that lost its end", sample(300).slice(0, 3).concat(journalRun(NOW - 60, "ok")), true],
+                ["killed", journalRun(NOW - 300, "killed"), true],
+                ["failed more than a day ago", journalRun(NOW - 90000, 2).concat(journalRun(NOW - 60, "ok")), false],
+                ["a failure before the last 20 runs", journalRun(NOW - 4000, 1).concat(...Array.from({ length: 20 }, (_, k) => twenty(k))), false],
+                ["a failure among the last 20 runs", journalRun(NOW - 4000, 1).concat(...Array.from({ length: 19 }, (_, k) => twenty(k))), true],
+                ["lines of the job that look like systemd's", ok.concat(forged), false],
+                ["no entries", [], false],
+            ];
+            for (const [what, lines, failed] of cases) {
+                assert.strictEqual(pageSaysFailed(lines), failed, "the page: " + what);
+                const fx = fixture();
+                convertedUnits(fx, "job", "root");
+                if (lines.length) journal(fx, "job", lines);
+                assert.strictEqual(item(written(sh, awk, fx).en, "failed").state, failed ? "danger" : "ok", what);
+            }
+        });
+
+        t(name + "units that are not a conversion's do not count", () => {
+            const fx = fixture();
+            const failing = unit => journal(fx, unit, journalRun(NOW - 300, 1));
+            /* written by hand */
+            fs.writeFileSync(path.join(fx.units, "hand.service"), "[Unit]\nDescription=hand\n\n[Service]\nExecStart=/bin/false\n");
+            fs.writeFileSync(path.join(fx.units, "hand.timer"), "[Timer]\nOnCalendar=daily\n");
+            failing("hand");
+            /* a conversion's service through a link */
+            const elsewhere = { units: path.join(fx.base, "elsewhere") };
+            fs.mkdirSync(elsewhere.units);
+            convertedUnits(elsewhere, "linked", "root");
+            fs.symlinkSync(path.join(elsewhere.units, "linked.service"), path.join(fx.units, "linked.service"));
+            fs.copyFileSync(path.join(elsewhere.units, "linked.timer"), path.join(fx.units, "linked.timer"));
+            failing("linked");
+            /* a service without its timer */
+            convertedUnits(fx, "alone", "root");
+            fs.unlinkSync(path.join(fx.units, "alone.timer"));
+            failing("alone");
+            /* the description of another name */
+            convertedUnits(fx, "renamed", "root");
+            fs.writeFileSync(path.join(fx.units, "renamed.timer"), SD.timerUnit({ name: "other", specs: ["daily"], persistent: false }));
+            failing("renamed");
+            /* from another user's crontab, but running as root */
+            if (OTHER) {
+                convertedUnits(fx, "mixed", OTHER);
+                const s = path.join(fx.units, "mixed.service");
+                fs.writeFileSync(s, fs.readFileSync(s, "utf8").replace(`User=${OTHER}\n`, "User=root\n"));
+                failing("mixed");
+            }
+            /* a timer of systemd-run: in the journal only */
+            failing("transient");
+            const { en } = written(sh, awk, fx);
+            assert.deepStrictEqual([item(en, "failed").state, item(en, "failed").detail], ["none", "No job records its runs."]);
+            assert.deepStrictEqual(journalCalls(fx), [], "no journal read");
+        });
+
+        if (OTHER) t(name + "converted jobs of other users count, their names stay out", () => {
+            const fx = fixture();
+            convertedUnits(fx, `${OTHER}-report`, OTHER);
+            journal(fx, `${OTHER}-report`, journalRun(NOW - 300, 4));
+            let d = written(sh, awk, fx);
+            assert.deepStrictEqual([item(d.en, "failed").value, item(d.en, "failed").detail], ["1", "1 timer converted from the crontab of another user"]);
+            assert.strictEqual(item(d.de, "failed").detail, "1 aus der Crontab eines anderen Benutzers umgewandelter Timer");
+            convertedUnits(fx, `${OTHER}-backup`, OTHER);
+            journal(fx, `${OTHER}-backup`, journalRun(NOW - 200, "killed"));
+            d = written(sh, awk, fx);
+            assert.deepStrictEqual([item(d.en, "failed").value, item(d.en, "failed").detail], ["2", "2 timers converted from the crontabs of other users"]);
+            assert.strictEqual(item(d.de, "failed").detail, "2 aus Crontabs anderer Benutzer umgewandelte Timer");
+            convertedUnits(fx, "nightly", "root");
+            journal(fx, "nightly", journalRun(NOW - 100, 1));
+            d = written(sh, awk, fx);
+            assert.deepStrictEqual([item(d.en, "failed").value, item(d.en, "failed").detail], ["3", "nightly.timer and 2 more"]);
+            assert.strictEqual(item(d.de, "failed").detail, "nightly.timer und 2 weitere");
+            assert.ok(!d.raw.en.includes(OTHER) && !d.raw.de.includes(OTHER), "no user name");
+        });
+
+        t(name + "without systemd, no converted job is read", () => {
+            const fx = fixture();
+            fx.systemd = "no";
+            convertedUnits(fx, "nightly", "root");
+            journal(fx, "nightly", journalRun(NOW - 300, 1));
+            const { en } = written(sh, awk, fx);
+            assert.strictEqual(item(en, "failed").state, "none");
+            assert.deepStrictEqual(journalCalls(fx), []);
+        });
+
+        t(name + "the cron service, as the page asks for it", () => {
+            const cron = (setup, jobs) => {
+                const fx = fixture();
+                Object.assign(fx, setup);
+                if (jobs) crontab(fx, "root", jobs);
+                const d = written(sh, awk, fx);
+                return { en: d.en, de: d.de, c: item(d.en, "cron"), cde: item(d.de, "cron") };
+            };
+            let r = cron({});
+            assert.deepStrictEqual([r.c.state, "value" in r.c, r.c.detail, r.cde.detail],
+                                   ["none", false, "No cron service was found.", "Es wurde kein cron-Dienst gefunden."]);
+            assert.deepStrictEqual([r.c.title, r.cde.title], ["Cron service", "Cron-Dienst"]);
+            r = cron({ cron: "cron.service active" }, "* * * * * /bin/true\n");
+            assert.deepStrictEqual([r.c.state, r.c.value, r.c.detail, r.cde.value, r.cde.detail],
+                                   ["ok", "running", "cron.service is running.", "läuft", "cron.service läuft."]);
+            assert.strictEqual(r.en.state, "ok", "known to run: ok, though no job records its runs");
+            r = cron({ cron: "cronie.service active" });
+            assert.strictEqual(r.c.detail, "cronie.service is running.");
+            r = cron({ systemd: "no", pgrep: "crond" });
+            assert.deepStrictEqual([r.c.state, r.c.detail, r.cde.detail], ["ok", "cron is running.", "cron läuft."]);
+            /* stopped: a danger when the crontabs have jobs, else a warning */
+            r = cron({ cron: "cron.service inactive" }, "* * * * * /bin/true\n");
+            assert.deepStrictEqual([r.en.state, r.c.state, r.c.value, r.c.detail, r.cde.value, r.cde.detail],
+                                   ["danger", "danger", "stopped", "cron.service is not running, so no cron job starts.", "gestoppt",
+                                    "cron.service läuft nicht, daher startet kein cron-Job."]);
+            assert.strictEqual(r.en.summary, "The cron service is not running, so no cron job starts.");
+            assert.strictEqual(r.de.summary, "Der cron-Dienst läuft nicht, daher startet kein cron-Job.");
+            r = cron({ cron: "crond.service failed" });
+            assert.deepStrictEqual([r.en.state, r.c.state, r.c.detail], ["warning", "warning", "crond.service is not running, so no cron job starts."]);
+            r = cron({ systemd: "no", pgrep: "" });
+            assert.deepStrictEqual([r.c.state, r.c.detail], ["warning", "cron is not running, so no cron job starts."]);
+            /* and a failed job besides */
+            const fx = fixture();
+            fx.cron = "cron.service inactive";
+            crontab(fx, "root", `* * * * * ${wrapped("late-0001", "x")}\n`);
+            runs(fx, "root", "late-0001", [rec(NOW - 60, 1)]);
+            const d = written(sh, awk, fx);
+            assert.strictEqual(d.en.summary, "The cron service is not running, so no cron job starts. 1 job failed in the last 24 hours.");
+            assert.strictEqual(d.de.summary, "Der cron-Dienst läuft nicht, daher startet kein cron-Job. 1 Job ist in den letzten 24 Stunden fehlgeschlagen.");
         });
 
         t(name + "status without a status file: none, and why", () => {

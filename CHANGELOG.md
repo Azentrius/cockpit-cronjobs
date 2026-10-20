@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+The status for the Status Board keeps watching a job after it was converted to a systemd timer, and
+says when the cron service is not running.
+
+- **Converted jobs:** a run of a job converted to a systemd timer that failed in the last 24 hours, or
+  lost its end, counts in `failed`, read from the journal of its service as the page reads it
+  (`R.parseJournal`): systemd's own messages only, the last 20 runs. Before, a converted job left the
+  status, since its line in the crontab is switched off. Only units the conversion wrote count, checked
+  as back to cron checks them. Timers from root's crontab are named (`nightly.timer`); those from
+  another user's crontab are only counted, since the name a conversion suggests for them begins with
+  the user's.
+- **Cron service:** a new item `cron`, read as the page reads it: `ok` while the service runs; when it
+  does not, `danger` if the crontabs have jobs, else `warning`. The summary then says so first.
+- **Tests:** the unit test checks the helper against the page's journal parser with the sample of
+  systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
+  lines of the job that look like systemd's), units that are not a conversion's, other users' timers
+  and the cron service, with dash and bash, mawk and gawk; the sample moved to
+  `test/journal-sample.js`. The end-to-end test converts a failing job, finds its timer in the status,
+  stops cron for real and finds that in the status and on the page.
+
 ## 2.8.1 – 2026-10-19
 
 The list of recorded runs reads at most the last 64 KiB of each `runs.jsonl`, so another user can no

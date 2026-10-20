@@ -184,13 +184,18 @@ English for any other language). Without the file it reports `none` and why.
 
 | Item | State |
 |---|---|
-| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, with the number of those jobs and their IDs; `ok` when none did; `none` when no job records its runs |
+| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, with the number of those jobs, their IDs and the names of the timers; `ok` when none did; `none` when no job records its runs and none was converted |
 | `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known; `ok` when every job records them |
+| `cron` | `ok` when the cron service runs; when it does not, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask |
 
 Only the crontabs of root and the other users count: the jobs there are the ones the page can record,
-read as the page reads them. `/etc/crontab` and `/etc/cron.d` do not count. The files hold numbers,
-states and job IDs, no user names, commands or output. Each item is stale after an hour without a new
-status (`stale_after`), that is four runs of the timer missed.
+read as the page reads them, and the jobs converted from them, whose runs come from the journal of
+their service as on the page. A converted job counts only while both units are the ones the
+conversion wrote, checked as back to cron checks them. `/etc/crontab` and `/etc/cron.d` do not count.
+The files hold numbers, states, job IDs and the names of timers converted from root's crontab; no user
+names, commands or output. Timers converted from another user's crontab are only counted, since the
+name a conversion suggests for them begins with the user's. Each item is stale after an hour without a
+new status (`stale_after`), that is four runs of the timer missed.
 
 The packages and `make install` turn the timer on, and it stays on through upgrades. To turn it off for
 good: `sudo systemctl mask --now cockpit-cronjobs-status.timer`.
