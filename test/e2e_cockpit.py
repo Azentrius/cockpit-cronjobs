@@ -649,7 +649,8 @@ with sync_playwright() as p:
     check(own is not None and page_status() in shown and own.evaluate("() => document.getElementById('sig-version').textContent") == "Cron Jobs"
           and not shell.locator('iframe[name$="/cronjobs"]').is_visible(),
           f"shell: the page loaded hidden, not started, the menu icon as the status ({doc.get('state')}): {page_status()!r}; "
-          f"address {shell.url}, frames {[f.name for f in shell.frames]}, "
+          f"address {shell.url}, frames {[(f.name, f.url) for f in shell.frames]}, iframes "
+          f"{shell.evaluate('() => [...document.querySelectorAll(`iframe`)].map(f => [f.name, f.getAttribute(`src`), f.hidden, getComputedStyle(f).display])')}, "
           f"stored {shell.evaluate('() => sessionStorage.getItem(`cockpit:page_status`)')!r}")
     shell.screenshot(path=os.path.join(SHOTS, "e2e-shell.png"), full_page=True)
     if own:
