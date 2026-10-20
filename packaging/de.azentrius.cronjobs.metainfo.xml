@@ -11,14 +11,25 @@
   <description>
     <p>
       A Cockpit page for cron. It shows everything that is scheduled on the server, with a timeline
-      of the next 24 hours, changes the root crontab safely and keeps backups of it, records the
-      result of every run, starts jobs on demand and turns cron jobs into systemd timers and back.
+      of the next 24 hours, changes the root crontab and those of other users safely and keeps
+      backups of them, records the result of every run, starts jobs on demand and turns cron jobs
+      into systemd timers and back.
     </p>
     <p xml:lang="de">
       Eine Cockpit-Seite für cron. Sie zeigt alles, was auf dem Server geplant ist, mit einer
-      Zeitleiste der nächsten 24 Stunden, ändert die Root-Crontab sicher und sichert sie, hält das
-      Ergebnis jedes Laufs fest, startet Jobs auf Knopfdruck und macht aus Cron-Jobs systemd-Timer
-      und wieder zurück.
+      Zeitleiste der nächsten 24 Stunden, ändert die Crontab von root und die anderer Benutzer sicher
+      und sichert sie, hält das Ergebnis jedes Laufs fest, startet Jobs auf Knopfdruck und macht aus
+      Cron-Jobs systemd-Timer und wieder zurück.
+    </p>
+    <p>
+      Failed and missed runs show at a glance, starts of jobs that do not record come from cron's
+      own log, and a status for the Azentrius Status Board and Cockpit's menu says when something
+      failed or cron is not running.
+    </p>
+    <p xml:lang="de">
+      Fehlgeschlagene und ausgefallene Läufe sind auf einen Blick zu sehen, Starts von Jobs ohne
+      Erfassung kommen aus dem Log von cron, und ein Status für das Azentrius Status Board und
+      Cockpits Menü meldet, wenn etwas fehlschlug oder cron nicht läuft.
     </p>
   </description>
   <extends>org.cockpit_project.cockpit</extends>

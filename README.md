@@ -45,7 +45,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - **The result of every run.** Turn on recording for a job and it keeps exit code, duration and output of
   its last 20 runs. Handy on servers without a mail program, where cron's output is otherwise lost.
   **Record all** on a crontab's card does it for every job there that does not record yet: it lists them
-  first, says which cannot (a `%` in the command), and writes the crontab once.
+  first, says which cannot (a `%` in the command), and writes the crontab once. A recorded job can also
+  be kept from starting while its previous run goes on (see [Recording runs](#recording-runs)).
 - **Run now.** Starts a job right away with the environment cron gives it on this server (see below) and
   input after `%`, shows the output live and can stop it.
 - **Convert to a systemd timer.** Creates `NAME.service` and `NAME.timer` with the same schedule (checked
@@ -54,9 +55,10 @@ starts jobs on demand and turns cron jobs into systemd timers.
   on again exactly as before, the note is gone, and the timer is stopped and its units removed. The units
   name the crontab they come from, and back to cron removes only units converted from the crontab whose
   note it follows, so a note a user writes into their own crontab cannot reach anyone else's timer.
-- **A status for the Status Board.** Failed jobs of the last 24 hours and jobs without recording, in the
-  status format all Azentrius Cockpit add-ons share, readable without administrative access, with a
-  link to the place on the page; the same state as an icon in Cockpit's menu (see below).
+- **A status for the Status Board.** Failed jobs of the last 24 hours (recorded ones and those converted
+  to systemd timers), jobs without recording and whether the cron service runs, in the status format all
+  Azentrius Cockpit add-ons share, readable without administrative access, each with a link to its place
+  on the page; the same state as an icon in Cockpit's menu (see below).
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 
@@ -296,6 +298,10 @@ sudo rm -rf /var/lib/cockpit-cronjobs
   the crontab is put back.
 - The status timer only reads: it writes nothing but its two status files. In another user's directory it
   reads only what has the form of runs, as the page does (no links, regular files, under a time limit).
+- Starts from cron's log count only when journald says cron logged them itself (`_UID` 0, `_COMM` cron
+  or crond); a line someone else logs as `CRON` is left out.
+- A job set not to overlap is checked and marked under the run recorder's lock, so of two starts at once
+  only one runs; the setting lies in the job's directory of runs and is written there as its owner.
 
 ## Translations
 
@@ -306,7 +312,7 @@ Cockpit uses that language. `node test/i18n.test.js` checks that every text exis
 ## Development
 
 ```sh
-make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs, back to cron and backups (dash, bash), differences (against GNU diff), texts, the status (dash, bash; mawk, gawk)
+make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs, the list of runs, cron's log, back to cron and backups (dash, bash), differences (against GNU diff), texts, the status (dash, bash; mawk, gawk), the menu icon
 make check-ui     # browser tests against a stand-in for Cockpit (needs Python Playwright with Chromium)
 ```
 
@@ -329,7 +335,8 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
    shows that it was built by this workflow from this repository (the archive since 2.1.1, the
    packages since 2.6.0).
 4. packages.azentrius.com takes the packages from the release within an hour
-   ([Azentrius/packages](https://github.com/Azentrius/packages)).
+   ([Azentrius/packages](https://github.com/Azentrius/packages)). The `.deb` there is the release's byte
+   for byte; the `.rpm` gets the repository's own signature, so only its signature header differs.
 
 ## License
 
