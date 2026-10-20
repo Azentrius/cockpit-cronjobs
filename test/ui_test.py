@@ -558,6 +558,8 @@ with sync_playwright() as p:
     # confirmed: one write, the three lines wrapped with IDs of their own, every other line as it was
     page.click("#record-all")
     page.click("#confirm-ok")
+    # the run recorder comes first, before the write makes the page busy: wait for the result
+    wait_js(page, "document.querySelector('#alerts').innerText.includes('erfassen jetzt ihre Läufe')")
     wait_idle(page)
     ch = changed_lines(before, root_text(page))
     wrapped = [re.fullmatch(r"(.*?) " + re.escape(WRAP) + r" ([a-z0-9_-]+-[0-9a-f]{4}) (.*)", new) for _, new in ch]
@@ -576,11 +578,12 @@ with sync_playwright() as p:
     check(page.inner_text("#confirm-body").startswith("Dieser Job läuft dann über") and page.inner_text("#confirm-ok") == "1 Job erfassen",
           "one job of www-data: " + page.inner_text("#confirm-body"))
     page.click("#confirm-ok")
+    wait_js(page, "document.querySelector('#alerts').innerText.includes('erfasst jetzt seine Läufe')")
     wait_idle(page)
     check(re.fullmatch(r"\*/5 \* \* \* \* " + re.escape(WRAP) + r" cron-[0-9a-f]{4} 'php -f /var/www/nextcloud/cron\.php'\n",
-                       mock(page, "sys.users['www-data']")) is not None and mock(page, "userRunsMade") == ["www-data"] and
-          card.locator("[data-key='record-all:www-data']").is_hidden(),
-          "www-data's job recorded, its directory made: " + repr(mock(page, "sys.users['www-data']")))
+                       mock(page, "sys.users['www-data']")) is not None, "www-data's job recorded: " + repr(mock(page, "sys.users['www-data']")))
+    check(mock(page, "userRunsMade") == ["www-data"], "its directory for runs made first: " + repr(mock(page, "userRunsMade")))
+    check(card.locator("[data-key='record-all:www-data']").is_hidden(), "nothing left to record on its card")
     check(not page.problems, "no console problems (record all, other user): " + repr(page.problems))
     page.context.close()
 
