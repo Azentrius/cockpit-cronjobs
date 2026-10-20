@@ -365,4 +365,26 @@ t("journal runs: running, lost ends, cut output, lines that are no runs", () => 
     assert.deepStrictEqual(R.parseJournal("-- No entries --\n{broken\n{\"_PID\":\"1\",\"INVOCATION_ID\":\"x\",\"__REALTIME_TIMESTAMP\":\"1\"}\n", 20, 0), []);
 });
 
+t("missed runs: the next run after the last one cron started, once its time is past", () => {
+    const at = iso => Date.parse(iso);
+    const run = (iso, trigger) => ({ start: at(iso) / 1000 + 0.4, trigger: trigger || "schedule" });
+    const every10 = ms => C.nextRun("*/10 * * * *", ms, "UTC");
+    const grace = 5 * 60 * 1000;
+    const runs = [run("2026-10-20T10:20:00Z")];
+    assert.strictEqual(R.missed(runs, every10, at("2026-10-20T10:34:59Z"), grace), null, "10:30 within the grace");
+    assert.strictEqual(R.missed(runs, every10, at("2026-10-20T10:35:00Z"), grace), at("2026-10-20T10:30:00Z"), "10:30 missed");
+    assert.strictEqual(R.missed([run("2026-10-20T10:30:00Z")].concat(runs), every10, at("2026-10-20T10:35:00Z"), grace), null, "10:30 ran");
+    assert.strictEqual(R.missed([run("2026-10-20T10:33:00Z", "manual")].concat(runs), every10, at("2026-10-20T10:40:00Z"), grace),
+                       at("2026-10-20T10:30:00Z"), "a run by hand does not stand in for it");
+    assert.strictEqual(R.missed([run("2026-10-20T10:33:00Z", "manual"), run("2026-10-20T10:31:00Z", "manual")], every10,
+                                at("2026-10-20T10:46:00Z"), grace), at("2026-10-20T10:40:00Z"), "only runs by hand: after the oldest");
+    assert.strictEqual(R.missed([], every10, at("2026-10-20T12:00:00Z"), grace), null, "no run: not known when recording began");
+    assert.strictEqual(R.missed(runs, () => null, at("2027-01-01T00:00:00Z"), grace), null, "no next run");
+    /* cron's rules for the clock: a job daily at 02:30 runs once on the day summer time ends */
+    const daily = ms => C.nextRun("30 2 * * *", ms, "Europe/Berlin");
+    assert.strictEqual(R.missed([run("2026-10-24T00:30:00Z")], daily, at("2026-10-25T01:00:00Z"), grace), at("2026-10-25T00:30:00Z"));
+    assert.strictEqual(R.missed([run("2026-10-25T00:30:00Z")], daily, at("2026-10-25T01:40:00Z"), grace), null,
+                       "not again in the repeated hour");
+});
+
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);

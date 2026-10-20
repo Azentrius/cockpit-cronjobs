@@ -1041,6 +1041,30 @@ with sync_playwright() as p:
     shot(page, "de-light-summary", full=False)
     check(not page.problems, "no console problems (latest results): " + repr(page.problems))
     page.context.close()
+    # a recorded job whose last scheduled run cron did not start: missed, after the failed ones; a run
+    # started by hand does not stand in for it; one just due is not missed yet
+    page = open_page(browser)
+    page.evaluate("""() => {
+        const now = Math.floor(Date.now() / 1000);
+        const run = (start, trigger) => ({ start, end: start + 2, rc: 0, trigger, bytes: 0, truncated: false, out: '' });
+        window.__mock.runs['hourly-0001'] = { runs: [run(now - 3 * 3600, 'schedule'), run(now - 600, 'manual')], running: [], kb: 4 };
+        window.__mock.runs['minute-0001'] = { runs: [run(now - 60, 'schedule')], running: [], kb: 4 };
+    }""")
+    reload_with_root(page, mock(page, "root") + f"0 * * * * {WRAP} hourly-0001 'hourly.sh'\n* * * * * {WRAP} minute-0001 'minute.sh'\n")
+    rows = [r.replace("\t", " ").replace("\n", " ") for r in page.locator("#sum-body tbody tr").all_inner_texts()]
+    missed = [r for r in rows if "Ausgefallen" in r]
+    check(page.inner_text("#sum-desc").startswith("2 fehlgeschlagen · 1 ausgefallen · 1 läuft gerade") and
+          len(missed) == 1 and "hourly.sh" in missed[0] and "fällig " in missed[0] and rows.index(missed[0]) == 2 and
+          not any("minute.sh" in r for r in rows),
+          "the missed run after the failed ones, before the running: " + page.inner_text("#sum-desc") + " " + repr(rows))
+    button = page.locator("#sum-body tbody tr", has_text="hourly.sh").locator("button")
+    title = button.get_attribute("title") or ""
+    check(title.startswith("cron hat den Lauf um ") and title.endswith(" nicht gestartet. Läufe anzeigen"), "its title names the time: " + title)
+    button.click()
+    check(page.locator("#runs-dlg").is_visible() and "hourly.sh" in page.inner_text("#runs-dlg"), "a missed one opens its runs")
+    page.click("#runs-close-btn")
+    check(not page.problems, "no console problems (missed runs): " + repr(page.problems))
+    page.context.close()
     # ---------- runs from the journal ----------
     page = open_page(browser)
     # a timer's runs, from the latest results and from the timers tab

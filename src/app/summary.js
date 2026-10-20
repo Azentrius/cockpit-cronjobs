@@ -1,25 +1,31 @@
 /* Cron Jobs: the latest results at a glance: the last run of every recorded job (in
- * every crontab the page shows) and of every active systemd timer, failures first.
+ * every crontab the page shows) and of every active systemd timer, failures first, then
+ * the recorded jobs whose last scheduled run cron did not start.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { $, fill, fmtDuration, fmtShort, h, icon, keyOf, R, SD, state, T } from "./core.js";
-import { jobInfo, jobsOf, runsOf } from "./crontab.js";
+import { $, C, cronNext, fill, fmtDuration, fmtShort, h, icon, keyOf, R, SD, state, T } from "./core.js";
+import { jobInfo, jobsOf, jobTz, runsOf } from "./crontab.js";
 import { labelEl, runLabel, timerDuration, timerRunLabel } from "./page.js";
 import { openRuns, openTimerRuns } from "./runs.js";
 
-/* Whether the successful ones are listed too; failed and running ones always are. */
+/* Whether the successful ones are listed too; failed, missed and running ones always are. */
 let showOk = false;
 
-const ORDER = { failed: 0, running: 1, ok: 2 };
+const ORDER = { failed: 0, missed: 1, running: 2, ok: 3 };
 const RUNNING = { kind: "success", icon: "check-circle" };
+const MISSED = { kind: "warning", icon: "clock" };
+/* How long after its time a run may start before it counts as missed: cron starts a job
+   within the minute, a busy server a little later, and the browser's clock may be off. */
+const MISSED_GRACE = 5 * 60 * 1000;
 
-/* Everything with a last result: { state: "failed" | "running" | "ok", label, when (ms),
-   dur (s or null), name, source, key, title, open }. A run that was aborted counts as
-   failed: it needs a look as much. */
+/* Everything with a last result: { state: "failed" | "missed" | "running" | "ok", label,
+   when (ms), due (ms, the run that was missed), dur (s or null), name, source, key,
+   title, open }. A run that was aborted counts as failed: it needs a look as much. */
 function results() {
     const out = [];
+    const now = Date.now();
     const tabs = [["root", state.root]].concat(Object.keys(state.users).sort().map(u => [u, state.users[u]]));
     tabs.forEach(([user, tab]) => jobsOf(tab).forEach(({ e, i }) => {
         const info = jobInfo(e);
@@ -36,7 +42,18 @@ function results() {
         }
         const last = job.runs[0];
         if (!last) return;
-        out.push(Object.assign(item, { state: R.outcome(last) === "ok" ? "ok" : "failed", label: runLabel(last),
+        const failed = R.outcome(last) !== "ok";
+        if (!failed) {
+            const p = C.parseSchedule(e.schedule);
+            const tz = jobTz(tab.entries, i);
+            const due = R.missed(job.runs, ms => cronNext(p, ms, tz), now, MISSED_GRACE);
+            if (due !== null) {
+                out.push(Object.assign(item, { state: "missed", label: Object.assign({ text: T.statusMissed }, MISSED),
+                                               when: due, due, dur: null, title: T.missedTitle(fmtShort(due)) }));
+                return;
+            }
+        }
+        out.push(Object.assign(item, { state: failed ? "failed" : "ok", label: runLabel(last),
                                        when: last.start * 1000, dur: R.duration(last) }));
     }));
     if (state.timers.status === "ok") state.timers.list.forEach(t => {
@@ -63,10 +80,11 @@ export function renderSummary() {
     if (card.hidden) return;
     const count = s => all.filter(x => x.state === s).length;
     const failed = count("failed");
+    const missed = count("missed");
     const running = count("running");
     const ok = count("ok");
-    $("sum-desc").textContent = [failed ? T.sumFailed(failed) : T.sumNoFailures, running ? T.sumRunning(running) : null,
-                                 ok ? T.sumOk(ok) : null].filter(Boolean).join(" · ");
+    $("sum-desc").textContent = [failed ? T.sumFailed(failed) : T.sumNoFailures, missed ? T.sumMissed(missed) : null,
+                                 running ? T.sumRunning(running) : null, ok ? T.sumOk(ok) : null].filter(Boolean).join(" · ");
     const rows = all.filter(x => x.state !== "ok" || showOk).map(x => h("tr", null,
         h("td", { class: "az-nowrap", "data-label": T.colResult },
             labelEl(x.label.kind, x.label.icon, x.label.text, { "data-key": x.key, title: x.title, onclick: x.open })),
@@ -75,7 +93,8 @@ export function renderSummary() {
                 h("span", { class: "az-mono" }, x.name),
                 h("span", { class: "az-cell-sub" }, x.source))),
         h("td", { class: "az-nowrap", "data-label": T.colLast },
-            x.when ? fmtShort(x.when) + (x.dur !== null ? " · " + fmtDuration(x.dur) : "") : "—")));
+            x.state === "missed" ? T.missedDue(fmtShort(x.due))
+                : x.when ? fmtShort(x.when) + (x.dur !== null ? " · " + fmtDuration(x.dur) : "") : "—")));
     const toggle = ok ? h("button", {
         class: "az-btn az-btn--link az-btn--sm cron-disclosure", type: "button", "data-key": "sum-toggle",
         "aria-expanded": showOk ? "true" : "false",

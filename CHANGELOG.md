@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+The latest results show a recorded job whose scheduled run cron did not start.
+
+- **Missed runs:** when the last run of a recorded job succeeded but the next one its schedule names
+  left no record five minutes after its time, the job is listed as missed, with the time it was due,
+  after the failed ones and before the running ones. That is what a stopped cron, or a server that was
+  down at the time, leaves behind; cron does not catch such runs up. The next run is cron's, clock
+  changes and `CRON_TZ` included (`C.nextRun`); runs started by hand do not stand in for a scheduled
+  one. A job with no recorded run yet is not judged: it is not known when recording began.
+- **Tests:** a unit test for `R.missed` (within and past the five minutes, a run that came, runs by
+  hand, no run, no next run, the day summer time ends) and a browser test (the order, the title, the
+  runs it opens).
+
 ## 2.8.1 – 2026-10-19
 
 The list of recorded runs reads at most the last 64 KiB of each `runs.jsonl`, so another user can no
