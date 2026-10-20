@@ -222,5 +222,6 @@ export const state = {
               cronEnv: null, managerEnv: {} },
     runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setCrontab */
     timers: { status: "none", list: [] },   /* none | ok | error */
+    cronLog: null,   /* when cron last started each command (C.parseCronLog), null when not read */
     suAtLoad: undefined,
 };

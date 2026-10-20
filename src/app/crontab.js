@@ -7,7 +7,7 @@
 
 import { C, codeSafe, keyOf, R, rich, SD, state, T, USER_RE } from "./core.js";
 import {
-    ensureUserRuns, ensureWrapper, errText, isDenied, readBasics, readCrontab, readHomes, readRuns, readSystem,
+    ensureUserRuns, ensureWrapper, errText, isDenied, readBasics, readCronLog, readCrontab, readHomes, readRuns, readSystem,
     readTimerRuns, readTimers, removeRunsIfUnused, saveCrontab,
 } from "./system.js";
 import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns, updateTimerRuns } from "./page.js";
@@ -159,12 +159,14 @@ async function load() {
         state.tz = basics.tz || "UTC";
         state.basics = basics;
     }
-    const [root, sys, runs, timers] = await Promise.allSettled([
+    const [root, sys, runs, timers, cronLog] = await Promise.allSettled([
         state.basics.crontab ? readCrontab("root") : Promise.reject({ problem: "not-found" }),
         readSystem(state.basics.flavor),
         readRuns(),
         state.basics.systemd ? readTimers() : Promise.resolve(null),
+        readCronLog(),
     ]);
+    state.cronLog = cronLog.status === "fulfilled" ? cronLog.value : null;
     if (root.status === "fulfilled") setCrontab("root", root.value);
     else if (isDenied(root.reason)) state.root = { status: "denied", user: "root" };
     else if (root.reason && root.reason.problem === "not-found") state.root = { status: "missing", user: "root" };

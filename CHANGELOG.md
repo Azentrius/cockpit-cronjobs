@@ -5,8 +5,9 @@
 The status for the Status Board keeps watching a job after it was converted to a systemd timer, and
 says when the cron service is not running. A click on a tile of the Status Board opens the place on
 the page where the finding is, and Cockpit's menu shows the status next to “Cron Jobs”. The latest
-results show a recorded job whose scheduled run cron did not start, and a recorded job can be kept from
-starting while its previous run goes on.
+results show a recorded job whose scheduled run cron did not start, a recorded job can be kept from
+starting while its previous run goes on, and cron's log tells when it last started the jobs that do
+not record their runs.
 
 - **Links for the Status Board:** every item of the status carries a `link` to its place on the page:
   `failed` `#/overview/results` (the latest results, failures first), `unrecorded`
@@ -55,6 +56,13 @@ starting while its previous run goes on.
   last 20) and the recorder ends with 75; a start by hand says so on its output. The runs dialog says
   that the job does not overlap and how many starts were skipped; a skipped start counts as one cron
   made for missed runs. Without the option nothing changes: the job overlaps as with cron.
+- **Starts from cron's log:** for a job that does not record its runs ("Not recorded · started …") and
+  in a new column “Last start” of `/etc/crontab`, `/etc/cron.d` and the crontabs the page only shows.
+  Cron logs each start as `(USER) CMD (COMMAND)`; the page reads those of the last 35 days from the
+  journal once per load, only cron's own (`_UID=0`, `_COMM=cron` or `crond`, which journald sets, so no
+  one else can log a start), the newest of each, and matches them by user and by the command as cron
+  logs it (`C.loggedCommand`: before the first unescaped `%`, bytes escaped as cron's `mkprint` does).
+  How a run ended is not in the log, and the page says so. Without the journal it shows dashes.
 - **Tests:** the unit test checks the status helper against the page's journal parser with the sample
   of systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
   lines of the job that look like systemd's), units that are not a conversion's, other users' timers
@@ -68,7 +76,11 @@ starting while its previous run goes on.
   while a run goes on, the recorder with dash and bash (skipped silently or with a word by hand, the
   last 20 skips, beside its own slow run, not held back by another job, a dead marker or without the
   option), `R.parseRuns`, and a browser test (only with recording, set and cleared as root and as
-  another user, the runs dialog, a failure to set it).
+  another user, the runs dialog, a failure to set it). For cron's log, unit tests of `C.mkprints`,
+  `C.loggedCommand` and `C.parseCronLog`, the script with dash and bash against a stand-in for
+  journalctl (the newest of each, other messages left out, the fields it filters on), a browser test
+  (an unrecorded job, a `%` job, bytes beyond ASCII, another user's start, no log), and the end-to-end
+  test finds the start of a job Debian's cron ran.
 - **Tests for the links and the menu:** `test/menu.test.js` (new, Node): the icon for every state, an
   item worse than the whole, an item out of date (in German and English, with the time), what the
   board ignores, the file of the page's language, the start once shown, and every link of the helper

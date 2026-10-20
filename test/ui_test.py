@@ -82,6 +82,10 @@ def row(page, n):
     return page.locator("#root-body tbody tr").nth(n)
 
 
+def row_of(page, text):
+    return page.locator("#root-body tbody tr", has_text=text)
+
+
 def changed_lines(before, after):
     a, b = before.split("\n"), after.split("\n")
     return [(x, y) for x, y in zip(a, b) if x != y] if len(a) == len(b) else ("length", len(a), len(b))
@@ -647,6 +651,47 @@ with sync_playwright() as p:
     check("Permission denied" in page.inner_text("#alerts") and page.locator("#edit-dlg").is_hidden(),
           "saved, not set, said so: " + page.inner_text("#alerts"))
     check(not page.problems, "no console problems (not overlapping): " + repr(page.problems))
+    page.context.close()
+
+    # ---------- cron's log: when cron last started a job ----------
+    page = open_page(browser)
+    # cron logs the command as it runs it: before the first %, \% as %, other bytes escaped (mkprint)
+    page.evaluate("""() => {
+        window.__mock.cronLog.push([300, 'root', "test -x /opt/x && echo '<b>not bold</b>' > /dev/null"],
+                                   [600, 'root', 'echo a%b'], [900, 'root', 'echo caf\\\\303\\\\251'], [60, 'nobody', '/usr/bin/true']);
+        window.__mock.sys.crond['log-utf8'] = '0 1 * * * root echo café\\n';
+        window.__mock.sys.crond['log-user'] = '0 1 * * * root /usr/bin/true\\n';
+    }""")
+    reload_with_root(page, root_text(page) + "0 5 * * * echo a\\%b%input\n")
+    check(mock(page, "cronLogReads") >= 2, "read with each load: " + repr(mock(page, "cronLogReads")))
+    tests = row_of(page, "not bold").locator("td[data-last]")
+    check("Nicht erfasst" in tests.inner_text() and "gestartet " in tests.inner_text() and
+          (tests.locator(".az-cell-sub").get_attribute("title") or "").startswith("Aus dem Log von cron"),
+          "an unrecorded job: when cron last started it: " + tests.inner_text())
+    check("gestartet " in row_of(page, "echo a").locator("td[data-last]").inner_text(), "a % job: the command before the %")
+    check("gestartet" not in row_of(page, "fstrim").locator("td[data-last]").inner_text(), "not in the log: nothing said")
+    show_tab(page, "system")
+    etc = {r.split("\t")[-1]: r for r in page.locator("#etc-body tbody tr").all_inner_texts()}
+    hourly = next((v for k, v in etc.items() if "cron.hourly" in k), "")
+    others = [v for k, v in etc.items() if "cron.hourly" not in k]
+    check(hourly and "Nicht im Log" not in hourly and "—" not in hourly.split("\t")[2] and
+          others and all("Nicht im Log von cron" in v for v in others) and
+          page.locator("#etc-body th", has_text="Letzter Start").count() == 1, "/etc/crontab: the last start of each: " + repr(etc))
+    crond = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
+        tr.querySelector('.az-mono').textContent, tr.innerText]))""")
+    check("Nicht im Log" not in crond["log-utf8"] and "Nicht im Log von cron" in crond["log-user"],
+          "cron.d: bytes as cron logs them; a start of another user is not root's: " + repr(crond))
+    page.context.close()
+    # the log cannot be read: dashes, and nothing about starts
+    page = open_page(browser)
+    page.evaluate("() => { window.__mock.cronLog = null; }")
+    page.click("#reload")
+    wait_idle(page)
+    check("gestartet" not in page.inner_text("#root-body") and not page.problems, "no log: nothing said on the crontab")
+    show_tab(page, "system")
+    check(page.inner_text("#etc-body").count("—") >= 4 and "Nicht im Log" not in page.inner_text("#etc-body"),
+          "no log: dashes: " + page.inner_text("#etc-body"))
+    check(not page.problems, "no console problems (cron's log): " + repr(page.problems))
     page.context.close()
 
     # ---------- leftover runs ----------
@@ -1721,7 +1766,7 @@ with sync_playwright() as p:
             else:
                 check(row_info is not None and row_info["label"] and row_info["why"] and WHY[reason] in row_info["why"]
                       and f not in tl, f"{flavor}: {f} skipped ({reason}): {row_info!r}")
-        check(got["link-broken"]["cells"].count("—") == 3, f"{flavor}: a file without jobs shows dashes: {got['link-broken']!r}")
+        check(got["link-broken"]["cells"].count("—") == 4, f"{flavor}: a file without jobs shows dashes: {got['link-broken']!r}")
         if flavor == "debian":
             show_tab(page, "system")
             page.locator("#crond-card").scroll_into_view_if_needed()

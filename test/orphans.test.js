@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /* Tests for the root scripts that remove leftover runs (REMOVE_ORPHANS_SCRIPT in
- * src/app/system.js) and list the runs (RUNS_SCRIPT), with dash and bash, against a fake
- * state directory and fake crontabs. Run with: node test/orphans.test.js */
+ * src/app/system.js), list the runs (RUNS_SCRIPT) and read cron's log (CRON_LOG_SCRIPT),
+ * with dash and bash, against a fake state directory, fake crontabs and a fake journal.
+ * Run with: node test/orphans.test.js */
 "use strict";
 const assert = require("assert");
 const fs = require("fs");
@@ -326,6 +327,42 @@ t("locked", () => {
     } finally {
         holder.kill();
     }
+});
+
+/* CRON_LOG_SCRIPT: when cron last started each command, from a stand-in for journalctl that
+   prints what journalctl -o short-unix prints and notes how it was called. */
+const C = require("../src/lib/cron.js");
+const LOG_SCRIPT = constant(/const CRON_LOG_SCRIPT = `([\s\S]*?)`;/.exec(APP), "CRON_LOG_SCRIPT");
+for (const sh of SHELLS) t(sh + ": cron's log: the newest start of each command, nothing else", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-log-"));
+    fs.mkdirSync(path.join(root, "bin"));
+    fs.writeFileSync(path.join(root, "bin", "journalctl"),
+        "#!/bin/sh\n" +
+        "printf '%s\\n' \"$*\" > \"$FAKE_ARGS\"\n" +
+        "cat <<'EOF'\n" +
+        "1792500000.123456 host CRON[100]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)\n" +
+        "1792500060.5 host CRON[101]: pam_unix(cron:session): session opened for user root(uid=0) by root(uid=0)\n" +
+        "1792503600.000001 host CRON[102]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)\n" +
+        "1792503000.2 host CROND[103]: (www-data) CMD (php -f /var/www/cron.php)\n" +
+        "1792503100.3 host CRON[104]: (root) MAIL (mailed 10 bytes of output)\n" +
+        "1792503200.4 host CRON[105]: (root) CMD (echo \": (x) CMD (y)\")\n" +
+        "-- Boot 1234 --\n" +
+        "EOF\n", { mode: 0o755 });
+    const r = spawnSync(sh, ["-c", LOG_SCRIPT], {
+        env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", FAKE_ARGS: path.join(root, "args") },
+        timeout: 30000,
+    });
+    assert.strictEqual(r.status, 0, r.stderr.toString());
+    assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), [
+        "1792503000 (www-data) CMD (php -f /var/www/cron.php)",
+        "1792503200 (root) CMD (echo \": (x) CMD (y)\")",
+        "1792503600 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+    ]);
+    const log = C.parseCronLog(r.stdout.toString());
+    assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792503600000);
+    /* only cron's own messages, by the fields journald sets: _UID 0 and _COMM cron or crond */
+    assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => a.startsWith("_") || a.startsWith("-")),
+                           ["--no-pager", "-q", "-o", "--since", "-35d", "_UID=0", "_COMM=cron", "_COMM=crond"]);
 });
 
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
