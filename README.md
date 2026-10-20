@@ -56,7 +56,7 @@ starts jobs on demand and turns cron jobs into systemd timers.
 
 ## Requirements
 
-- Cockpit (tested with 360 and 362)
+- Cockpit 314 or newer (tested with 314, the one of Ubuntu 24.04, and 362 from its backports)
 - cron: `cron` on Debian and Ubuntu, or `cronie` (Fedora, RHEL and its rebuilds, Arch, openSUSE)
 - coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`, `awk`: present on any normal installation
 - systemd, optionally: for the timers, the timeline entries of timers, the conversion and the status for
