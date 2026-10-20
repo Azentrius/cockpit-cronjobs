@@ -87,6 +87,19 @@
         return r.rc === 0 ? "ok" : "failed";
     }
 
+    /* The run cron should have started and left no record (ms), or null: the next run after
+       the last one cron started, when it lies more than graceMs before nowMs. Runs started by
+       hand do not count; when all kept runs were, the next run after the oldest. Nothing
+       without a run, since it is not known when recording began.
+       runs: recorded runs, newest first (parseRuns); next(ms): the job's next run after ms as
+       cron starts it (C.nextRun), or null. */
+    function missed(runs, next, nowMs, graceMs) {
+        if (!runs || !runs.length) return null;
+        const last = runs.find(r => r.trigger !== "manual") || runs[runs.length - 1];
+        const due = next(last.start * 1000);
+        return due !== null && due <= nowMs - graceMs ? due : null;
+    }
+
     /* ---------- runs from the journal ---------- */
 
     /* The structured messages systemd logs about a unit (MESSAGE_ID, see systemd's catalog). */
@@ -187,5 +200,5 @@
             .sort((a, b) => (b.last ? b.last.start : 0) - (a.last ? a.last.start : 0) || a.key.localeCompare(b.key));
     }
 
-    return { ID_RE, OUT_RE, KEY_RE, keyOf, parseRuns, parseJournal, outcome, duration, mentioned, orphans };
+    return { ID_RE, OUT_RE, KEY_RE, keyOf, parseRuns, parseJournal, outcome, missed, duration, mentioned, orphans };
 }));

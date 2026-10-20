@@ -4,7 +4,8 @@
 
 The status for the Status Board keeps watching a job after it was converted to a systemd timer, and
 says when the cron service is not running. A click on a tile of the Status Board opens the place on
-the page where the finding is, and Cockpit's menu shows the status next to “Cron Jobs”.
+the page where the finding is, and Cockpit's menu shows the status next to “Cron Jobs”. The latest
+results show a recorded job whose scheduled run cron did not start.
 
 - **Links for the Status Board:** every item of the status carries a `link` to its place on the page:
   `failed` `#/overview/results` (the latest results, failures first), `unrecorded`
@@ -33,12 +34,20 @@ the page where the finding is, and Cockpit's menu shows the status next to “Cr
   the user's.
 - **Cron service:** a new item `cron`, read as the page reads it: `ok` while the service runs; when it
   does not, `danger` if the crontabs have jobs, else `warning`. The summary then says so first.
-- **Tests:** the unit test checks the helper against the page's journal parser with the sample of
-  systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
+- **Missed runs:** when the last run of a recorded job succeeded but the next one its schedule names
+  left no record five minutes after its time, the job is listed as missed, with the time it was due,
+  after the failed ones and before the running ones. That is what a stopped cron, or a server that was
+  down at the time, leaves behind; cron does not catch such runs up. The next run is cron's, clock
+  changes and `CRON_TZ` included (`C.nextRun`); runs started by hand do not stand in for a scheduled
+  one. A job with no recorded run yet is not judged: it is not known when recording began.
+- **Tests:** the unit test checks the status helper against the page's journal parser with the sample
+  of systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
   lines of the job that look like systemd's), units that are not a conversion's, other users' timers
   and the cron service, with dash and bash, mawk and gawk; the sample moved to
   `test/journal-sample.js`. The end-to-end test converts a failing job, finds its timer in the status,
-  stops cron for real and finds that in the status and on the page.
+  stops cron for real and finds that in the status and on the page. A unit test for `R.missed` (within
+  and past the five minutes, a run that came, runs by hand, no run, no next run, the day summer time
+  ends) and a browser test (the order, the title, the runs it opens).
 - **Tests for the links and the menu:** `test/menu.test.js` (new, Node): the icon for every state, an
   item worse than the whole, an item out of date (in German and English, with the time), what the
   board ignores, the file of the page's language, the start once shown, and every link of the helper

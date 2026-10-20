@@ -18,7 +18,9 @@ starts jobs on demand and turns cron jobs into systemd timers.
   visible in every tab; switching tabs loads nothing.
 - **The latest results.** The last run of every recorded job and every systemd timer in one list,
   failures first, successful ones folded away. Runs and timers are read again every half minute, so a
-  failure shows within a minute without reloading.
+  failure shows within a minute without reloading. A recorded job whose scheduled run cron did not
+  start (cron stopped, the server down at the time) shows as missed, with the time it was due, once that
+  is five minutes past; runs started by hand do not stand in for it.
 - **Runs from the journal.** Every systemd timer gets the same runs dialog as a recorded job, from the
   journal of its service: start, duration, result and output. A job converted to a timer keeps its
   history there: the runs recorded before the conversion and those of its service since.
