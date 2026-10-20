@@ -2,17 +2,33 @@
 
 ## Unreleased
 
-The latest results show a recorded job whose scheduled run cron did not start.
+The status for the Status Board keeps watching a job after it was converted to a systemd timer and
+says when the cron service is not running; the latest results show a recorded job whose scheduled run
+cron did not start.
 
+- **Converted jobs:** a run of a job converted to a systemd timer that failed in the last 24 hours, or
+  lost its end, counts in `failed`, read from the journal of its service as the page reads it
+  (`R.parseJournal`): systemd's own messages only, the last 20 runs. Before, a converted job left the
+  status, since its line in the crontab is switched off. Only units the conversion wrote count, checked
+  as back to cron checks them. Timers from root's crontab are named (`nightly.timer`); those from
+  another user's crontab are only counted, since the name a conversion suggests for them begins with
+  the user's.
+- **Cron service:** a new item `cron`, read as the page reads it: `ok` while the service runs; when it
+  does not, `danger` if the crontabs have jobs, else `warning`. The summary then says so first.
 - **Missed runs:** when the last run of a recorded job succeeded but the next one its schedule names
   left no record five minutes after its time, the job is listed as missed, with the time it was due,
   after the failed ones and before the running ones. That is what a stopped cron, or a server that was
   down at the time, leaves behind; cron does not catch such runs up. The next run is cron's, clock
   changes and `CRON_TZ` included (`C.nextRun`); runs started by hand do not stand in for a scheduled
   one. A job with no recorded run yet is not judged: it is not known when recording began.
-- **Tests:** a unit test for `R.missed` (within and past the five minutes, a run that came, runs by
-  hand, no run, no next run, the day summer time ends) and a browser test (the order, the title, the
-  runs it opens).
+- **Tests:** the unit test checks the status helper against the page's journal parser with the sample
+  of systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
+  lines of the job that look like systemd's), units that are not a conversion's, other users' timers
+  and the cron service, with dash and bash, mawk and gawk; the sample moved to
+  `test/journal-sample.js`. The end-to-end test converts a failing job, finds its timer in the status,
+  stops cron for real and finds that in the status and on the page. A unit test for `R.missed` (within
+  and past the five minutes, a run that came, runs by hand, no run, no next run, the day summer time
+  ends) and a browser test (the order, the title, the runs it opens).
 
 ## 2.8.1 – 2026-10-19
 

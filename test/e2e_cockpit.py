@@ -539,14 +539,31 @@ with sync_playwright() as p:
     page.screenshot(path=os.path.join(SHOTS, "e2e-journal-runs.png"))
     page.click("#runs-close-btn")
 
+    # a job converted to a systemd timer whose service fails, for the status below
+    conv_fail = "cj-e2e-convfail"
+    sh("crontab -u root -", input=crontab() + "0 5 1 1 * echo convert-fail; exit 4\n")
+    page.click("#reload")
+    wait_idle(page)
+    row_of(page, "convert-fail").locator("[data-key^='more:']").click()
+    page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    page.fill("#conv-name", conv_fail)
+    wait_js(page, "!document.querySelector('#conv-ok').disabled")
+    page.click("#conv-ok")
+    wait_js(page, "document.querySelector('#conv-dlg').hidden")
+    wait_idle(page)
+    r = sh(f"systemctl start {conv_fail}.service")
+    check(os.path.exists(f"/etc/systemd/system/{conv_fail}.timer") and r.returncode != 0,
+          "a converted job whose service fails: " + r.stderr)
+
     # the status for the Status Board: none until the unit has written it, then, written by the
-    # unit as root and read by a user without any rights, the failing recorded job by its ID and no
-    # user names (only recorded cron jobs count, not the timer)
+    # unit as root and read by a user without any rights, the failing recorded job by its ID, the
+    # failing converted job by its timer's name, not the timer of systemd-run, the cron service
+    # running, and no user names
     nobody = pwd.getpwnam("nobody")
 
     def status_as_nobody(lang):
         r = subprocess.run(["setpriv", f"--reuid={nobody.pw_uid}", f"--regid={nobody.pw_gid}", "--clear-groups",
-                            STATUS, "status", "--lang", lang], capture_output=True, text=True)
+                            STATUS, "status", "--lang", lang], capture_output=True, encoding="utf-8")
         try:
             return r.returncode, json.loads(r.stdout), r.stdout + r.stderr
         except ValueError:
@@ -564,19 +581,48 @@ with sync_playwright() as p:
     modes = [os.stat(f"{STATE}/{f}").st_mode & 0o777 if os.path.exists(f"{STATE}/{f}") else None
              for f in ("status.json", "status.de.json")]
     check(modes == [0o644, 0o644], "status files of mode 644: " + repr(modes))
-    for lang, summary in (("en", " failed in the last 24 hours."), ("de", " in den letzten 24 Stunden fehlgeschlagen.")):
+    def status_item(doc, name):
+        return next((i for i in doc.get("items", []) if i.get("id") == name), {})
+
+    for lang, summary, running in (("en", " failed in the last 24 hours.", "running"),
+                                   ("de", " in den letzten 24 Stunden fehlgeschlagen.", "läuft")):
         rc, doc, out = status_as_nobody(lang)
-        failed = next((i for i in doc.get("items", []) if i.get("id") == "failed"), {})
+        failed = status_item(doc, "failed")
+        named = failed.get("detail", "").split(", ")
         check(rc == 0 and doc.get("schema") == 1 and doc.get("addon") == "cronjobs" and doc.get("state") == "danger" and
               doc.get("summary", "").endswith(summary) and failed.get("state") == "danger" and
-              "sumfail-0001" in failed.get("detail", "").split(", ") and USER not in out,
+              "sumfail-0001" in named and f"{conv_fail}.timer" in named and fail_timer not in out and
+              status_item(doc, "cron").get("state") == "ok" and status_item(doc, "cron").get("value") == running and
+              USER not in out,
               f"the status ({lang}) as a user without rights: " + out)
+
+    # cron stopped: the status says so, as a danger since the crontabs have jobs, and so does the page
+    sh("systemctl stop cron")
+    sh("systemctl start cockpit-cronjobs-status.service")
+    rc, doc, out = status_as_nobody("en")
+    cron_item = status_item(doc, "cron")
+    check(doc.get("state") == "danger" and cron_item.get("state") == "danger" and cron_item.get("value") == "stopped" and
+          cron_item.get("detail") == "cron.service is not running, so no cron job starts." and
+          doc.get("summary", "").startswith("The cron service is not running, so no cron job starts."),
+          "the status with cron stopped: " + out)
+    page.click("#reload")
+    wait_idle(page)
+    check("Der cron-Dienst läuft nicht" in page.inner_text("#notices"), "the page with cron stopped: " + page.inner_text("#notices"))
+    sh("systemctl start cron")
+    sh("systemctl start cockpit-cronjobs-status.service")
+    rc, doc, out = status_as_nobody("en")
+    check(sh("systemctl is-active cron").stdout.strip() == "active" and status_item(doc, "cron").get("state") == "ok",
+          "cron running again: " + out)
+
     sh(f"systemctl stop {fail_timer}.timer; systemctl reset-failed {fail_timer}.service {fail_timer}.timer")
+    sh(f"systemctl disable --now {conv_fail}.timer; rm -f /etc/systemd/system/{conv_fail}.service /etc/systemd/system/{conv_fail}.timer; "
+       f"systemctl daemon-reload; systemctl reset-failed {conv_fail}.service")
     sh("crontab -u root -", input=start)
     shutil.rmtree(f"{STATE}/runs/sumfail-0001", ignore_errors=True)
     page.click("#reload")
     wait_idle(page)
-    check(crontab() == start and fail_timer not in page.inner_text("#sum-body"), "back as before")
+    check(crontab() == start and fail_timer not in page.inner_text("#sum-body") and conv_fail not in page.inner_text("#sum-body") and
+          "Der cron-Dienst läuft nicht" not in page.inner_text("#notices"), "back as before")
 
     # another user's crontab: a card of its own, written as that user's crontab with backups of its own,
     # and cron runs the jobs as that user

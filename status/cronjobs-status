@@ -12,11 +12,13 @@
 #                                           status.de.json (German), mode 644
 #
 # cockpit-cronjobs-status.timer runs "write" every 15 minutes. It reads the crontabs of root and
-# of the other users and the recorded runs of their jobs (see cockpit-cronjobs-run), and writes
-# only numbers, states and job IDs: no user names, no commands, no output. A job counts as failed
-# when one of its recorded runs in the last 24 hours ended with an exit code other than 0 or was
-# aborted, as on the page. Jobs in /etc/crontab and /etc/cron.d are not counted: the page cannot
-# record them.
+# of the other users and the recorded runs of their jobs (see cockpit-cronjobs-run), the runs of
+# the jobs converted from them to systemd timers (from the journal), and whether the cron service
+# runs, and writes only numbers, states, job IDs and unit names: no user names, no commands, no
+# output. A job counts as failed when one of its recorded runs in the last 24 hours ended with an
+# exit code other than 0 or was aborted, as on the page; a converted job when systemd says a run of
+# its service in the last 24 hours failed, or the run lost its end. Jobs in /etc/crontab and
+# /etc/cron.d are not counted: the page cannot record them.
 #
 # Exit codes: 0 done (a failed job is a finding, not an error), 64 wrong call, 77 "write" without
 # root, 1 the status could not be written.
@@ -26,8 +28,10 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-# CRONJOBS_STATE_DIR, CRONJOBS_SPOOL_DIR and CRONJOBS_PAGE_DIR are for the tests.
+# CRONJOBS_STATE_DIR, CRONJOBS_SPOOL_DIR, CRONJOBS_PAGE_DIR, CRONJOBS_UNIT_DIR and CRONJOBS_SYSTEMD
+# are for the tests.
 state=${CRONJOBS_STATE_DIR:-/var/lib/cockpit-cronjobs}
+units=${CRONJOBS_UNIT_DIR:-/etc/systemd/system}
 # Seconds after which the Status Board calls the status stale: four runs of the timer missed.
 stale=3600
 # Failed runs count for 24 hours.
@@ -180,6 +184,43 @@ FAILED_AWK='
 END { exit !found }
 '
 
+# Whether one of the last "keep" runs of a service (standard input: journalctl -o json, oldest
+# first) started at or after "since" and did not succeed, as R.parseJournal and R.outcome see it.
+# systemd's own messages (_PID 1) carry the run in INVOCATION_ID, the lines the job wrote in
+# _SYSTEMD_INVOCATION_ID; only systemd's say how a run ended, so a job cannot forge them. A run
+# failed when systemd says so; one without an end lost it, unless it is the newest (running).
+TIMER_AWK='
+function field(name) {
+    if (!match($0, "\"" name "\":\"[^\"]*\"")) return ""
+    return substr($0, RSTART + length(name) + 4, RLENGTH - length(name) - 5)
+}
+/^\{/ {
+    own = field("_PID") == "1"
+    id = own ? field("INVOCATION_ID") : field("_SYSTEMD_INVOCATION_ID")
+    if (id !~ /^[0-9a-f]+$/ || length(id) != 32) next
+    ts = field("__REALTIME_TIMESTAMP")
+    if (ts !~ /^[0-9]+$/ || ts + 0 <= 0) next
+    if (!(id in start)) {
+        n++
+        ids[n] = id
+        start[id] = ts + 0
+    } else if (ts + 0 < start[id]) start[id] = ts + 0
+    if (!own) next
+    m = field("MESSAGE_ID")
+    if (m == "d9b373ed55a64feb8242e02dbe79a49c" || m == "be02cf6855d2428ba40df7e9d022f03d") failed[id] = 1
+    else if (m == "7ad2d189f7e94e70a38c781354912448" || (m == "39f53479d3a045ac8e11786248231fbf" && field("JOB_RESULT") == "done")) done[id] = 1
+}
+END {
+    for (k = n - keep + 1; k <= n; k++) {
+        if (k < 1) continue
+        id = ids[k]
+        if (start[id] < since * 1000000) continue
+        if (failed[id] || (!done[id] && k < n)) found = 1
+    }
+    exit !found
+}
+'
+
 # failed USER ID: whether the job ID of USER failed since $since. Root's runs are in runs/ID,
 # another user's in users/USER/runs/ID, a directory that belongs to that user: only what has the
 # form of runs counts there (no links, regular files read under a time limit), as on the page, and
@@ -228,6 +269,89 @@ spool() {
     done
 }
 
+# Whether systemd runs this system, as the page asks it (CRONJOBS_SYSTEMD=yes or no for the tests).
+has_systemd() {
+    case ${CRONJOBS_SYSTEMD-} in
+        no) return 1 ;;
+        yes) ;;
+        *) [ -d /run/systemd/system ] || return 1 ;;
+    esac
+    command -v systemctl > /dev/null 2>&1
+}
+
+# The cron service as the page reads it (BASICS_SCRIPT): "UNIT STATE" with systemd, "- active" or
+# "- inactive" without, nothing when there is none to ask.
+cron_service() {
+    if has_systemd; then
+        for u in cron.service crond.service cronie.service; do
+            if [ "$(systemctl show -p LoadState --value "$u" 2> /dev/null)" = loaded ]; then
+                echo "$u $(systemctl is-active "$u" 2> /dev/null)"
+                return
+            fi
+        done
+    elif command -v pgrep > /dev/null 2>&1; then
+        if pgrep -x cron > /dev/null || pgrep -x crond > /dev/null; then echo "- active"; else echo "- inactive"; fi
+    fi
+}
+
+# The jobs converted to systemd timers, one line each: "NAME USER". Only units Cron Jobs wrote
+# under that name from that user's crontab count, checked as back to cron checks them (UNITS_SCRIPT
+# in the page): both are files, no links, the service begins with the header of a conversion from
+# that crontab and runs as its user, and both have the description of such a conversion.
+UNIT_START='# Created by Cockpit Cron Jobs from this line of the '
+converted_units() {
+    for s in "$units"/*.service; do
+        [ -f "$s" ] && [ ! -L "$s" ] || continue
+        n=${s##*/}
+        n=${n%.service}
+        case $n in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) continue ;; esac
+        t=$units/$n.timer
+        [ -f "$t" ] && [ ! -L "$t" ] || continue
+        first=$(head -n 1 "$s")
+        case $first in
+            "${UNIT_START}root crontab:") u=root ;;
+            "${UNIT_START}crontab of "*:) u=${first#"${UNIT_START}crontab of "}; u=${u%:} ;;
+            *) continue ;;
+        esac
+        case $u in ''|[!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) continue ;; esac
+        if [ "$u" = root ]; then from='root crontab'; else from="crontab of $u"; fi
+        grep -qxF "User=$u" "$s" && grep -qxF "Description=$n (from the $from)" "$s" &&
+            grep -qxF "Description=$n (from the $from)" "$t" || continue
+        printf '%s %s\n' "$n" "$u"
+    done
+}
+
+# timer_failed NAME: whether a run of NAME.service failed since $since (see TIMER_AWK), from the
+# journal as the page reads it (readJournal: the last 5000 entries, only the fields it needs where
+# journalctl can leave the others out).
+timer_failed() {
+    f=MESSAGE_ID,INVOCATION_ID,_SYSTEMD_INVOCATION_ID,JOB_RESULT,_PID
+    {
+        journalctl -u "$1.service" --since "@$since" -o json --no-pager -n 5000 --output-fields="$f" 2> /dev/null ||
+            journalctl -u "$1.service" --since "@$since" -o json --no-pager -n 5000 2> /dev/null
+    } < /dev/null | awk -v since="$since" -v keep="$keep" "$TIMER_AWK"
+}
+
+# Counts the converted jobs into converted and bad, and writes the names of the failed timers of
+# root's crontab to $tmp/failed. Those of other users' crontabs only count in hidden: the name a
+# conversion suggests for them begins with the user's.
+count_timers() {
+    converted=0
+    hidden=0
+    has_systemd && command -v journalctl > /dev/null 2>&1 || return 0
+    converted_units > "$tmp/units"
+    while read -r name owner; do
+        converted=$((converted + 1))
+        timer_failed "$name" || continue
+        bad=$((bad + 1))
+        if [ "$owner" = root ]; then
+            printf '%s.timer\n' "$name" >> "$tmp/failed"
+        else
+            hidden=$((hidden + 1))
+        fi
+    done < "$tmp/units"
+}
+
 # Counts the jobs into total, recorded and bad, and writes the IDs of the failed ones to
 # $tmp/failed. Crontabs of users the system does not know are skipped, as cron skips them.
 count() {
@@ -263,57 +387,124 @@ count() {
     done
 }
 
-# The failed jobs by ID, the first few and how many more.
+# The failed jobs by ID and the failed timers of root's crontab by name, the first few and how many
+# more; the timers of other users' crontabs only in that number.
 failed_list() {
     sort -u "$tmp/failed" > "$tmp/ids"
     n=$(wc -l < "$tmp/ids" | tr -d ' ')
+    if [ "$n" = 0 ]; then
+        if [ "$hidden" = 1 ]; then
+            say "1 timer converted from the crontab of another user" "1 aus der Crontab eines anderen Benutzers umgewandelter Timer"
+        else
+            say "$hidden timers converted from the crontabs of other users" "$hidden aus Crontabs anderer Benutzer umgewandelte Timer"
+        fi
+        return
+    fi
+    more=$((hidden))
+    if [ "$n" -gt "$named" ]; then more=$((more + n - named)); fi
     list=$(head -n "$named" "$tmp/ids" | paste -sd ',' - | sed 's/,/, /g')
-    if [ "$n" -gt "$named" ]; then
-        list="$list $(say "and $((n - named)) more" "und $((n - named)) weitere")"
+    if [ "$more" -gt 0 ]; then
+        list="$list $(say "and $more more" "und $more weitere")"
     fi
     printf '%s' "$list"
 }
 
-# The status document in $lang, from what count found.
+# The worst of the states given, as the status format takes it for the whole: danger, warning or
+# info; else ok when one is ok; else none.
+worst() {
+    for s in danger warning info ok; do
+        case " $* " in *" $s "*) printf '%s' "$s"; return ;; esac
+    done
+    printf none
+}
+
+# The status document in $lang, from what count, count_timers and cron_service found.
 document() {
-    if [ "$bad" -gt 0 ]; then
-        overall=danger
+    known=$((recorded + converted))
+
+    f_title=$(say "Failed jobs (last 24 hours)" "Fehlgeschlagene Jobs (letzte 24 Stunden)")
+    f_value=
+    if [ "$known" = 0 ]; then
+        f_state=none
+        f_detail=$(say "No job records its runs." "Kein Job zeichnet seine Läufe auf.")
+    elif [ "$bad" -gt 0 ]; then
+        f_state=danger
+        f_value=$bad
+        f_detail=$(failed_list)
+    else
+        f_state=ok
+        f_value=0
+        if [ "$converted" -gt 0 ]; then
+            f_detail=$(say "Recorded jobs: $recorded, timers converted from cron: $converted; none failed." "Aufgezeichnete Jobs: $recorded, aus cron umgewandelte Timer: $converted; keiner fehlgeschlagen.")
+        else
+            f_detail=$(say "Recorded jobs: $recorded, none failed." "Aufgezeichnete Jobs: $recorded, keiner fehlgeschlagen.")
+        fi
+    fi
+
+    u_title=$(say "Jobs without recording" "Jobs ohne Aufzeichnung")
+    plain=$((total - recorded))
+    if [ "$plain" -gt 0 ]; then
+        u_state=none
+        u_value=$plain
+        u_detail=$(say "$plain of $total jobs in the crontabs of root and other users; their results are not known." "$plain von $total Jobs in den Crontabs von root und anderen Benutzern; ihre Ergebnisse sind nicht bekannt.")
+    elif [ "$total" -gt 0 ]; then
+        u_state=ok
+        u_value=0
+        u_detail=$(say "Every job in the crontabs of root and other users records its runs." "Jeder Job in den Crontabs von root und anderen Benutzern zeichnet seine Läufe auf.")
+    else
+        u_state=ok
+        u_value=0
+        u_detail=$(say "There are no jobs in the crontabs of root and other users." "In den Crontabs von root und anderen Benutzern gibt es keine Jobs.")
+    fi
+
+    # Stopped, it is a danger when the crontabs have jobs it no longer starts, else a warning.
+    c_title=$(say "Cron service" "Cron-Dienst")
+    c_unit=${cron% *}
+    c_run=${cron##* }
+    if [ "$c_unit" = - ]; then c_unit=cron; fi
+    if [ -z "$cron" ]; then
+        c_state=none
+        c_value=
+        c_detail=$(say "No cron service was found." "Es wurde kein cron-Dienst gefunden.")
+    elif [ "$c_run" = active ]; then
+        c_state=ok
+        c_value=$(say running "läuft")
+        c_detail=$(say "$c_unit is running." "$c_unit läuft.")
+    else
+        if [ "$total" -gt 0 ]; then c_state=danger; else c_state=warning; fi
+        c_value=$(say stopped gestoppt)
+        c_detail=$(say "$c_unit is not running, so no cron job starts." "$c_unit läuft nicht, daher startet kein cron-Job.")
+    fi
+
+    if [ "$c_state" = danger ] || [ "$c_state" = warning ]; then
+        summary=$(say "The cron service is not running, so no cron job starts." "Der cron-Dienst läuft nicht, daher startet kein cron-Job.")
+        if [ "$bad" = 1 ]; then
+            summary="$summary $(say "1 job failed in the last 24 hours." "1 Job ist in den letzten 24 Stunden fehlgeschlagen.")"
+        elif [ "$bad" -gt 1 ]; then
+            summary="$summary $(say "$bad jobs failed in the last 24 hours." "$bad Jobs sind in den letzten 24 Stunden fehlgeschlagen.")"
+        fi
+    elif [ "$bad" -gt 0 ]; then
         if [ "$bad" = 1 ]; then
             summary=$(say "1 job failed in the last 24 hours." "1 Job ist in den letzten 24 Stunden fehlgeschlagen.")
         else
             summary=$(say "$bad jobs failed in the last 24 hours." "$bad Jobs sind in den letzten 24 Stunden fehlgeschlagen.")
         fi
+    elif [ "$converted" -gt 0 ]; then
+        summary=$(say "No recorded job and no converted timer failed in the last 24 hours." "Kein aufgezeichneter Job und kein umgewandelter Timer ist in den letzten 24 Stunden fehlgeschlagen.")
     elif [ "$recorded" -gt 0 ]; then
-        overall=ok
         summary=$(say "No recorded job failed in the last 24 hours." "Kein aufgezeichneter Job ist in den letzten 24 Stunden fehlgeschlagen.")
     elif [ "$total" -gt 0 ]; then
-        overall=none
         summary=$(say "No job records its runs, so their results are not known." "Kein Job zeichnet seine Läufe auf, daher sind die Ergebnisse nicht bekannt.")
     else
-        overall=ok
         summary=$(say "There are no jobs in the crontabs of root and other users." "In den Crontabs von root und anderen Benutzern gibt es keine Jobs.")
     fi
-    head_json "$overall" "$summary"
 
-    title=$(say "Failed jobs (last 24 hours)" "Fehlgeschlagene Jobs (letzte 24 Stunden)")
-    if [ "$recorded" = 0 ]; then
-        item failed none "$title" "" "$(say "No job records its runs." "Kein Job zeichnet seine Läufe auf.")"
-    elif [ "$bad" -gt 0 ]; then
-        item failed danger "$title" "$bad" "$(failed_list)"
-    else
-        item failed ok "$title" 0 "$(say "Recorded jobs: $recorded, none failed." "Aufgezeichnete Jobs: $recorded, keiner fehlgeschlagen.")"
-    fi
+    head_json "$(worst "$f_state" "$u_state" "$c_state")" "$summary"
+    item failed "$f_state" "$f_title" "$f_value" "$f_detail"
     printf ','
-
-    title=$(say "Jobs without recording" "Jobs ohne Aufzeichnung")
-    plain=$((total - recorded))
-    if [ "$plain" -gt 0 ]; then
-        item unrecorded none "$title" "$plain" "$(say "$plain of $total jobs in the crontabs of root and other users; their results are not known." "$plain von $total Jobs in den Crontabs von root und anderen Benutzern; ihre Ergebnisse sind nicht bekannt.")"
-    elif [ "$total" -gt 0 ]; then
-        item unrecorded ok "$title" 0 "$(say "Every job in the crontabs of root and other users records its runs." "Jeder Job in den Crontabs von root und anderen Benutzern zeichnet seine Läufe auf.")"
-    else
-        item unrecorded ok "$title" 0 "$(say "There are no jobs in the crontabs of root and other users." "In den Crontabs von root und anderen Benutzern gibt es keine Jobs.")"
-    fi
+    item unrecorded "$u_state" "$u_title" "$u_value" "$u_detail"
+    printf ','
+    item cron "$c_state" "$c_title" "$c_value" "$c_detail"
     printf ']}\n'
 }
 
@@ -334,6 +525,8 @@ write() {
     since=$((now - window))
     checked=$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)
     count
+    count_timers
+    cron=$(cron_service)
     # 711 as the page sets it: others reach the status files by name but list nothing.
     install -d -m 711 "$state" && chmod 711 "$state" || exit 1
     for lang in en de; do
