@@ -350,6 +350,46 @@
         return { command, stdin };
     }
 
+    /* ---------- cron's log ---------- */
+
+    /* Text as cron writes it into its log (mkprint in misc.c of Debian's cron and cronie):
+       of its UTF-8 bytes, those below 32 as ^@ … ^_, DEL as ^?, those from 128 as \ooo. */
+    function mkprints(text) {
+        let out = "";
+        new TextEncoder().encode(String(text)).forEach(b => {
+            if (b < 32) out += "^" + String.fromCharCode(b + 64);
+            else if (b < 127) out += String.fromCharCode(b);
+            else if (b === 127) out += "^?";
+            else out += "\\" + b.toString(8).padStart(3, "0");
+        });
+        return out;
+    }
+
+    /* The command cron logs when it starts a job, "(USER) CMD (COMMAND)": what it hands to
+       the shell (cronCommand), through mkprints. */
+    const loggedCommand = command => mkprints(cronCommand(command).command);
+
+    /* The output of CRON_LOG_SCRIPT in app/system.js, "SECONDS (USER) CMD (COMMAND)" for the
+       newest start of each -> Map of "USER\0COMMAND" -> ms. Other lines are left out. */
+    function parseCronLog(text) {
+        const out = new Map();
+        String(text || "").split("\n").forEach(line => {
+            const m = /^(\d{1,12}) \(([^()\s]+)\) CMD \((.*)\)$/.exec(line);
+            if (!m) return;
+            const key = m[2] + "\0" + m[3];
+            const ms = Number(m[1]) * 1000;
+            if (!out.has(key) || out.get(key) < ms) out.set(key, ms);
+        });
+        return out;
+    }
+
+    /* When cron last started command for user, in log (parseCronLog), or null. */
+    function lastStart(log, user, command) {
+        if (!log || !user || !command) return null;
+        const ms = log.get(user + "\0" + loggedCommand(command));
+        return ms === undefined ? null : ms;
+    }
+
     /* "%" in a crontab command becomes a newline unless escaped as "\%". */
     function hasUnescapedPercent(command) {
         return cronCommand(command).stdin !== null;
@@ -1007,6 +1047,7 @@
         parseUserCrontab, serializeUserCrontab, roundTrips, normalizeText, templateEnd,
         setEnabled, setJob, newJob, rawLine, entryLine,
         parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
+        mkprints, loggedCommand, parseCronLog, lastStart,
         parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, captureJobs, jobName, slug,
         cksum,

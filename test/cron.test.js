@@ -637,6 +637,27 @@ t("job ids", () => {
     assert.ok(C.JOB_ID_RE.test(C.makeJobId("!!!")));
     assert.ok(/^job-[0-9a-f]{4}$/.test(C.makeJobId("!!!")));
 });
+t("cron's log: commands as cron writes them, the newest start of each", () => {
+    assert.strictEqual(C.mkprints("a\tb\x01\x7f"), "a^Ib^A^?", "control characters as ^X, DEL as ^?");
+    assert.strictEqual(C.mkprints("café €"), "caf\\303\\251 \\342\\202\\254", "bytes from 128 as \\ooo");
+    assert.strictEqual(C.loggedCommand("date +\\%F > /tmp/x%input%more"), "date +%F > /tmp/x", "as cron runs it: before the first %");
+    assert.strictEqual(C.loggedCommand("echo a\\\\b 'x'"), "echo a\\\\b 'x'", "other backslashes stay");
+    const log = C.parseCronLog([
+        "1792500000 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+        "1792503600 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+        "1792503000 (www-data) CMD (php -f /var/www/cron.php)",
+        "1792503200 (root) CMD (echo \": (x) CMD (y)\")",
+        "1792503300 (root) CMD (date +%F > /tmp/x)",
+        "1792503400 (root) MAIL (mailed 10 bytes)", "x (root) CMD (y)", "1792503500 (a b) CMD (y)", "",
+    ].join("\n"));
+    assert.strictEqual(log.size, 4);
+    assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792503600000, "the newest");
+    assert.strictEqual(C.lastStart(log, "www-data", "php -f /var/www/cron.php"), 1792503000000);
+    assert.strictEqual(C.lastStart(log, "root", "php -f /var/www/cron.php"), null, "another user's start is not root's");
+    assert.strictEqual(C.lastStart(log, "root", "echo \": (x) CMD (y)\""), 1792503200000, "brackets in the command");
+    assert.strictEqual(C.lastStart(log, "root", "date +\\%F > /tmp/x%in"), 1792503300000, "a job with %");
+    assert.strictEqual(C.lastStart(null, "root", "x"), null, "no log");
+});
 t("record all: the jobs at the indexes recorded in one change, each with an ID of its own", () => {
     const W = C.WRAPPER_PATH;
     const text = "MAILTO=\"\"\n# nightly\n0 1 * * * /usr/local/bin/backup.sh\n" +

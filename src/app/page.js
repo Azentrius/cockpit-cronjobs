@@ -174,11 +174,14 @@ function lastCell(user, e, i, editable, frozen) {
         if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
         const can = editable && C.canCapture(info.command);
         const key = keyOf(user, "capture", i);
+        /* not recorded: when cron last started it, from its log */
+        const started = C.lastStart(state.cronLog, user, e.command);
         return h("div", { class: "cron-cell" },
             h("span", { class: "cron-muted" }, T.notRecorded),
             can ? h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", disabled: frozen,
                                 "data-key": key, "aria-describedby": cmdId,
-                                onclick: () => setCapture(user, i, true, key) }, T.recordLink) : null);
+                                onclick: () => setCapture(user, i, true, key) }, T.recordLink) : null,
+            started !== null ? h("span", { class: "az-cell-sub", title: T.startedTitle }, T.startedAt(fmtShort(started))) : null);
     }
     const job = runsOf(user, info.capture.id);
     if (!job) return h("span", { class: "cron-muted" }, "—");
@@ -476,6 +479,15 @@ function readOnlyTable(cols, rows) {
 
 function emptyState() { return h("p", { class: "cron-state" }, T.noEntries); }
 
+/* When cron last started command as user, from its log (state.cronLog); a dash when the
+   log could not be read. The log tells nothing about how the run ended. */
+function startedCell(user, command) {
+    if (!state.cronLog || !user || !command) return h("span", { class: "cron-muted" }, "—");
+    const ms = C.lastStart(state.cronLog, user, command);
+    return ms === null ? h("span", { class: "cron-muted", title: T.startedTitle }, T.notInLog)
+        : h("span", { title: T.startedTitle }, fmtShort(ms));
+}
+
 function renderSystem() {
     const sys = state.sys;
     ["etc-card", "crond-card", "users-card", "periodic-card"].forEach(id => { $(id).hidden = !sys; });
@@ -484,14 +496,15 @@ function renderSystem() {
     if (!sys) return;
 
     fill($("etc-body"), sys.etc.length === 0 ? emptyState() : readOnlyTable(
-        [T.colSchedule, T.colUser, T.colCommand],
+        [T.colSchedule, T.colUser, T.colStarted, T.colCommand],
         sys.etc.map(j => h("tr", null,
             h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule, j.tz)),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
+            h("td", { class: "az-nowrap", "data-label": T.colStarted }, startedCell(j.user, j.command)),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
 
     fill($("crond-body"), sys.crond.length === 0 ? emptyState() : readOnlyTable(
-        [T.colFile, T.colSchedule, T.colUser, T.colCommand],
+        [T.colFile, T.colSchedule, T.colUser, T.colStarted, T.colCommand],
         sys.crond.map(j => h("tr", { class: j.ignored ? "is-off" : null },
             h("td", { "data-label": T.colFile },
                 h("div", { class: "cron-cell" },
@@ -503,6 +516,8 @@ function renderSystem() {
             h("td", { class: "az-nowrap", "data-label": T.colSchedule },
                 j.schedule ? scheduleCell(j.schedule, j.tz) : h("span", { class: "cron-muted" }, "—")),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user || h("span", { class: "cron-muted" }, "—")),
+            h("td", { class: "az-nowrap", "data-label": T.colStarted },
+                j.ignored ? h("span", { class: "cron-muted" }, "—") : startedCell(j.user, j.command)),
             h("td", { "data-label": T.colCommand },
                 j.command ? h("span", { class: "az-mono" }, j.command) : h("span", { class: "cron-muted" }, "—"))))));
 
@@ -510,10 +525,12 @@ function renderSystem() {
     const readOnlyUsers = sys.users.filter(j => !state.users[j.user]);
     $("users-card").hidden = readOnlyUsers.length === 0;
     fill($("users-body"), readOnlyTable(
-        [T.colUser, T.colSchedule, T.colCommand],
+        [T.colUser, T.colSchedule, T.colStarted, T.colCommand],
         readOnlyUsers.map(j => h("tr", { class: j.enabled ? null : "is-off" },
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule, j.tz)),
+            h("td", { class: "az-nowrap", "data-label": T.colStarted },
+                j.enabled ? startedCell(j.user, j.command) : h("span", { class: "cron-muted" }, "—")),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
 
     $("periodic-card").hidden = sys.periodic.length === 0;

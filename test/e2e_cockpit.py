@@ -405,6 +405,13 @@ with sync_playwright() as p:
     by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
     check(by_cron[0] == "root" and by_cron[1] == "/root" and by_cron[2].get("CJ_E2E_EXPORT") == "quoted value" and
           "USER" not in by_cron[2], "cron ran the job as root with /etc/environment: " + repr(by_cron))
+    # cron's log: the page finds that start of the job, which does not record its runs, by the
+    # command as Debian's cron logs it
+    page.click("#reload")
+    wait_idle(page)
+    started = row_of(page, "cj-e2e-root-cron").locator("td[data-last]").inner_text()
+    check("Nicht erfasst" in started and "gestartet" in started, "the last start from cron's log: " + repr(started) + "\n" +
+          sh("journalctl _COMM=cron --no-pager -q -o short-unix -n 5").stdout)
     who_row = row_of(page, "0 5 1 1 *")   # yearly: the conversion checks its next 5 runs too
     who_row.locator("[data-key^='run:']").click()
     check("Außerdem gesetzt:" in page.inner_text("#run-env") and "CJ_E2E_EXPORT" in page.inner_text("#run-env"),

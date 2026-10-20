@@ -547,6 +547,29 @@ function removeRuns(user, id) {
     return spawn(asOwner(user, ["rm", "-rf", "--", runsDirOf(user) + "/" + id]), SPAWN_ROOT);
 }
 
+/* When cron last started each command, from its log in the journal of the last 35 days:
+   cron logs each start as "(USER) CMD (COMMAND)" (see C.loggedCommand). Only cron's own
+   messages count, by the fields journald sets itself (_UID 0, _COMM cron or crond), so no
+   one can log a start for it. The newest of each, "SECONDS (USER) CMD (COMMAND)"; nothing
+   without journalctl. */
+const CRON_LOG_SCRIPT = `command -v journalctl > /dev/null 2>&1 || exit 0
+journalctl --no-pager -q -o short-unix --since -35d _UID=0 _COMM=cron _COMM=crond 2>/dev/null |
+  awk '{
+    i = index($0, ": (")
+    if (i == 0) next
+    m = substr($0, i + 2)
+    if (m !~ /^[(][^()]*[)] CMD [(]/) next
+    split($1, t, ".")
+    last[m] = t[1]
+  }
+  END { for (m in last) print last[m] " " m }'
+`;
+
+export function readCronLog() {
+    return spawn(["sh", "-c", CRON_LOG_SCRIPT], Object.assign({}, SPAWN_ROOT, { binary: true }))
+        .then(out => C.parseCronLog(decode(out)));
+}
+
 /* Sets ($2 on) or clears ($2 off) the file no-overlap in a job's directory of runs ($1),
    which keeps the run recorder (version 3) from starting the job while a run of it goes
    on. Run as the owner of that directory, like everything in there. */

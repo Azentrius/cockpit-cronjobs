@@ -126,6 +126,9 @@
         userWrites: [],
         userRunsMade: [],
         failUserRuns: null,
+        /* cron's log: [seconds ago, user, command as cron logs it], newest start of each; null: unreadable */
+        cronLog: [[1800, "root", "cd / && run-parts --report /etc/cron.hourly"]],
+        cronLogReads: 0,
         /* NO_OVERLAP_SCRIPT calls: [key of the runs, "on" or "off"] */
         noOverlapSets: [],
         failNoOverlap: null,
@@ -347,6 +350,12 @@
             if (M.root === null) fail({ exit_status: 1, problem: null, message: "no crontab for root\n" });
             const bytes = new TextEncoder().encode(M.root);
             return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
+        }
+        /* cron's log in the journal (CRON_LOG_SCRIPT): the newest start of each command */
+        if (/_COMM=cron/.test(script)) {
+            M.cronLogReads++;
+            if (M.cronLog === null) fail({ exit_status: 1, problem: null, message: "journal unreadable" });
+            return M.cronLog.map(([ago, user, command]) => `${now() - ago} (${user}) CMD (${command})\n`).join("");
         }
         /* Whether a job may overlap its previous run (NO_OVERLAP_SCRIPT): the directory, on or off */
         if (/: > "\$1\/no-overlap"/.test(script)) {
