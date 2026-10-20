@@ -87,9 +87,16 @@ jobs:
 
   # The main flows against a real Cockpit, root's real crontab and a running cron daemon.
   # Destructive, which is what the runner's throwaway VM is for (see test/e2e_cockpit.py).
-  e2e:
+  # Twice: with the Cockpit of Ubuntu 24.04 itself (314), which a server keeps unless it is set up
+  # otherwise, and with the one from the backports, as Cockpit recommends for Ubuntu.
+  e2e-cockpit:
+    name: e2e (Cockpit from the ${{ matrix.cockpit }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        cockpit: [archive, backports]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -97,12 +104,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      # Cockpit from the backports, as Cockpit recommends for Ubuntu (the release itself has an old one).
       - name: Install Cockpit and cron
+        env:
+          COCKPIT: ${{ matrix.cockpit }}
         run: |
           . /etc/os-release
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends -t "$VERSION_CODENAME-backports" cockpit-ws cockpit-bridge cockpit-system
+          if [ "$COCKPIT" = backports ]; then set -- -t "$VERSION_CODENAME-backports"; else set --; fi
+          sudo apt-get install -y --no-install-recommends "$@" cockpit-ws cockpit-bridge cockpit-system
           sudo apt-get install -y --no-install-recommends cron
           sudo systemctl start cron
           sudo ln -sfn "$GITHUB_WORKSPACE/src" /usr/share/cockpit/cronjobs
@@ -142,5 +151,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-screenshots
+          name: e2e-screenshots-${{ matrix.cockpit }}
           path: test/shots/
+
+  # The required check: green only when the end-to-end test passed with both. It runs even when
+  # one of them failed, since a check that is skipped would count as passed.
+  e2e:
+    needs: e2e-cockpit
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: End-to-end test with both
+        env:
+          RESULT: ${{ needs.e2e-cockpit.result }}
+        run: |
+          echo "e2e-cockpit: $RESULT"
+          test "$RESULT" = success

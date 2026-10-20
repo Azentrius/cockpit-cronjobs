@@ -11,7 +11,8 @@ DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
     CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py
 
 Runs as root (the local session is root's). CI runs it the same way on the runner's
-throwaway VM (job e2e in .github/workflows/test.yml)."""
+throwaway VM, with the Cockpit of Ubuntu 24.04 and with the one from its backports
+(job e2e-cockpit in .github/workflows/test.yml)."""
 import json, os, pwd, re, shutil, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
@@ -21,7 +22,7 @@ if os.environ.get("CRONJOBS_E2E_DESTRUCTIVE") != "1":
 URL = os.environ.get("COCKPIT_URL", "http://127.0.0.1:9091/cockpit/@localhost/cronjobs/index.html")
 WRAP = "/usr/local/libexec/cockpit-cronjobs-run"
 STATE = "/var/lib/cockpit-cronjobs"
-# Installed with its units as the package installs them (job e2e in .github/workflows/test.yml).
+# Installed with its units as the package installs them (job e2e-cockpit in .github/workflows/test.yml).
 STATUS = "/usr/lib/cockpit-cronjobs/cronjobs-status"
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 SHOTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shots")

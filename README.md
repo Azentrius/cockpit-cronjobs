@@ -56,7 +56,7 @@ starts jobs on demand and turns cron jobs into systemd timers.
 
 ## Requirements
 
-- Cockpit (tested with 360 and 362)
+- Cockpit 314 or newer (tested with 314, the one of Ubuntu 24.04, and 362 from its backports)
 - cron: `cron` on Debian and Ubuntu, or `cronie` (Fedora, RHEL and its rebuilds, Arch, openSUSE)
 - coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`, `awk`: present on any normal installation
 - systemd, optionally: for the timers, the timeline entries of timers, the conversion and the status for
@@ -273,7 +273,8 @@ make check-ui     # browser tests against a stand-in for Cockpit (needs Python P
 
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
 crontab, so only use it on a throwaway machine or container (see the top of the file). CI runs it on
-every push and pull request, on the runner's throwaway VM (job `e2e`).
+every push and pull request, on the runner's throwaway VM, twice: with the Cockpit of Ubuntu 24.04 and
+with the one from its backports (check `e2e`).
 
 What comes next is in [ROADMAP.md](ROADMAP.md).
 
