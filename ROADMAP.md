@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-16. Each stage is cut so that it is useful on its own and brings its own tests. The
+As of 2026-10-21. Each stage is cut so that it is useful on its own and brings its own tests. The
 order is the recommendation; stages after 1.1 are proposals until they are decided.
 
 **Guardrails for every stage** (they keep applying):
@@ -105,9 +105,30 @@ Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHAN
 - ✅ **Cockpit's Applications page:** AppStream data (`de.azentrius.cronjobs`) in the packages, and the
   Azentrius package repository, packages.azentrius.com, whose catalog Cockpit reads: Cron Jobs is found
   and installed from Cockpit itself.
+- **Listing on cockpit-project.org:** proposed together with Image Update Monitor
+  (cockpit-project/cockpit-project.github.io, pull request 929); its maintainers decide.
 - **More translations** through `src/i18n/` (texts are already separate from the code).
 - **BusyBox systems** (e.g. Alpine): `flock` without `-w`, `setsid` without `-w`, `crond` with
   `/etc/crontabs`.
+
+---
+
+## Stage 6 – Fewer surprises ✅
+
+Done in 2.8.0 and 2.9.0 (see [CHANGELOG](CHANGELOG.md)): what goes wrong shows without opening the
+page, and fewer things go wrong unnoticed.
+
+- ✅ **Status for the Status Board** (2.8.0): failed jobs of the last 24 hours and jobs without
+  recording, readable without administrative access; since 2.9.0 also the jobs converted to systemd
+  timers and whether the cron service runs, each item linked to its place on the page, and the same
+  status as an icon in Cockpit's menu.
+- ✅ **Missed runs:** a recorded job whose next run cron did not start shows as missed.
+- ✅ **Starts from cron's log:** when cron last started the jobs that do not record their runs, and
+  those in `/etc/crontab` and `/etc/cron.d`.
+- ✅ **Record all:** recording for every job of a crontab in one step.
+- ✅ **Not overlapping:** a recorded job can be kept from starting while its previous run goes on
+  (run recorder version 3).
+- ✅ **Cockpit 314:** the end-to-end test runs with the Cockpit of Ubuntu 24.04 too.
 
 ---
 
@@ -117,6 +138,7 @@ Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHAN
 |---|---|
 | Upgrading the run recorder | when `cockpit-cronjobs-run` changes, raise `CRONJOBS_RUN_VERSION` (the page then offers the update); old records must stay readable |
 | Shared design files (`azentrius.css`, `azentrius-theme.js`, `icons.js`, fonts) are copies | keep them byte-identical with the other Azentrius add-ons; change them only together |
+| The end-to-end test once missed the output of a failing timer in its runs dialog | if it comes back, wait there until the journal has the line |
 
 ---
 
@@ -131,8 +153,8 @@ Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHAN
 
 1. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
    Since 2.8.0 the status for the Status Board says which jobs failed in the last 24 hours, without
-   administrative access; a notifier shared by the Azentrius add-ons could read it instead of each
-   add-on sending its own messages.
+   administrative access, and since 2.9.0 whether cron runs; a notifier shared by the Azentrius add-ons
+   could read it instead of each add-on sending its own messages.
 
 Decided: packages and the listing in Cockpit's Applications page (stage 5), through the Azentrius
 package repository shared with the other add-ons.
