@@ -314,6 +314,7 @@ Cockpit uses that language. `node test/i18n.test.js` checks that every text exis
 ```sh
 make check        # unit tests: crontab logic, systemd conversion (against systemd-analyze), run recorder, removal of leftover runs, the list of runs, cron's log, back to cron and backups (dash, bash), differences (against GNU diff), texts, the status (dash, bash; mawk, gawk), the menu icon
 make check-ui     # browser tests against a stand-in for Cockpit (needs Python Playwright with Chromium)
+make docs-shots   # the screenshots of this README into docs/ (CI keeps them as the artifact docs-screenshots)
 ```
 
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
