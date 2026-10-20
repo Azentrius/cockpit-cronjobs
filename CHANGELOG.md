@@ -5,7 +5,8 @@
 The status for the Status Board keeps watching a job after it was converted to a systemd timer, and
 says when the cron service is not running. A click on a tile of the Status Board opens the place on
 the page where the finding is, and Cockpit's menu shows the status next to “Cron Jobs”. The latest
-results show a recorded job whose scheduled run cron did not start.
+results show a recorded job whose scheduled run cron did not start, and a recorded job can be kept from
+starting while its previous run goes on.
 
 - **Links for the Status Board:** every item of the status carries a `link` to its place on the page:
   `failed` `#/overview/results` (the latest results, failures first), `unrecorded`
@@ -24,7 +25,6 @@ results show a recorded job whose scheduled run cron did not start.
   Cockpit loads the page hidden right after the login (`preload`); until it is opened it only reads
   `/var/lib/cockpit-cronjobs/status.json` (or `status.de.json`) every five minutes and runs nothing
   else.
-
 - **Converted jobs:** a run of a job converted to a systemd timer that failed in the last 24 hours, or
   lost its end, counts in `failed`, read from the journal of its service as the page reads it
   (`R.parseJournal`): systemd's own messages only, the last 20 runs. Before, a converted job left the
@@ -46,6 +46,15 @@ results show a recorded job whose scheduled run cron did not start.
   comes first, then one write of the crontab through the locked step with its backup, each job wrapped
   with an ID of its own (`C.captureJobs`). Every other line stays byte for byte; when a line changed
   meanwhile, nothing is written. What the status counts as `unrecorded` is then one click away.
+- **Not starting while a run goes on:** a new option in the dialog of a recorded job. The page puts
+  the file `no-overlap` into the job's directory of runs, as its owner, after the crontab is written;
+  the line in the crontab stays as it is, so older versions read it as before. The run recorder,
+  version 3 (`CRONJOBS_RUN_VERSION`, the page offers the update as before), then checks each start
+  under the lock it takes for its records: when a run of this job goes on (a run marker whose process
+  is the recorder for this ID), the command does not run, the start goes into `skipped.jsonl` (the
+  last 20) and the recorder ends with 75; a start by hand says so on its output. The runs dialog says
+  that the job does not overlap and how many starts were skipped; a skipped start counts as one cron
+  made for missed runs. Without the option nothing changes: the job overlaps as with cron.
 - **Tests:** the unit test checks the status helper against the page's journal parser with the sample
   of systemd 259 and made-up runs (failed, killed, running, lost, older than a day, beyond the last 20,
   lines of the job that look like systemd's), units that are not a conversion's, other users' timers
@@ -55,7 +64,11 @@ results show a recorded job whose scheduled run cron did not start.
   and past the five minutes, a run that came, runs by hand, no run, no next run, the day summer time
   ends) and a browser test (the order, the title, the runs it opens). For record all a unit test of
   `C.captureJobs` (no ID given twice, a `%`, recorded jobs and other lines as they were) and a browser
-  test (the dialog, cancelling, one write with its backup, another user's crontab).
+  test (the dialog, cancelling, one write with its backup, another user's crontab). For not starting
+  while a run goes on, the recorder with dash and bash (skipped silently or with a word by hand, the
+  last 20 skips, beside its own slow run, not held back by another job, a dead marker or without the
+  option), `R.parseRuns`, and a browser test (only with recording, set and cleared as root and as
+  another user, the runs dialog, a failure to set it).
 - **Tests for the links and the menu:** `test/menu.test.js` (new, Node): the icon for every state, an
   item worse than the whole, an item out of date (in German and English, with the time), what the
   board ignores, the file of the page's language, the start once shown, and every link of the helper

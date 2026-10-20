@@ -188,6 +188,11 @@
         fCapture: "Ergebnis und Ausgabe erfassen",
         captureHelp: path => `Der Job läuft dann über \`${path}\`, das Ergebnis, Dauer und Ausgabe festhält. ` +
                              "Seine Zeile in der Crontab ändert sich entsprechend.",
+        fNoOverlap: "Nicht starten, solange ein Lauf noch läuft",
+        noOverlapHelp: "Ein Start, der den vorigen Lauf noch laufend vorfindet, wird ausgelassen und bei den Läufen vermerkt. " +
+                       "Ohne diese Einstellung startet der Job pünktlich, auch neben dem vorigen Lauf, wie bei cron.",
+        noOverlapNeedsCapture: "Nur für Jobs, die ihre Läufe erfassen: Den doppelten Start verhindert `cockpit-cronjobs-run`.",
+        noOverlapFailed: "Der Job wurde gespeichert, aber ob er neben einem laufenden Lauf starten darf, ließ sich nicht einstellen",
         save: "Speichern",
         saving: "Wird gespeichert …",
         scheduleHelp: "Fünf Felder: Minute, Stunde, Tag, Monat, Wochentag – zum Beispiel `30 2 * * 1`. " +
@@ -298,6 +303,9 @@
         runsEmpty: "Noch keine Läufe erfasst.",
         runsNote: (n, path) => `Aufbewahrt werden die letzten ${n} Läufe mit je bis zu 64 KiB Ausgabe, unter \`${path}\`.`,
         runsJournalNote: unit => `Die Läufe von \`${unit}\` stammen aus dem Journal; wie weit es zurückreicht, hängt von seinen Einstellungen ab.`,
+        noOverlapNote: "Der Job startet nicht, solange ein Lauf von ihm noch läuft.",
+        skippedNote: (n, when) => `${n === 1 ? "1 Start wurde" : n + " Starts wurden"} ausgelassen, weil ein Lauf noch lief, ` +
+                                  `zuletzt ${when}.`,
         journalFailed: "Das Journal ließ sich nicht lesen",
         journalFix: "Schließen Sie den Dialog und öffnen Sie die Läufe erneut. Bleibt der Fehler, prüfen Sie den " +
                     "Dienst systemd-journald.",

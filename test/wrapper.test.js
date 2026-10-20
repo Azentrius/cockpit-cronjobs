@@ -247,6 +247,73 @@ t("running marker", () => {
     assert.ok(!fs.readdirSync(dir).some(f => f.endsWith(".running")));
 });
 
+/* A job set not to overlap (the file no-overlap in its directory): a start while a run of
+   it goes on is skipped with 75 and noted in skipped.jsonl, said only when started by hand.
+   A run goes on while the marker's process is the recorder for this ID; here first a
+   stand-in with that command line, then the recorder itself. A marker whose process is
+   gone, a run of another job, and the same job without no-overlap do not hold it back. */
+for (const sh of SHELLS) t(`no overlap (${path.basename(sh)})`, () => {
+    const state = tmpState();
+    const dir = runsDir(state, "single");
+    fs.mkdirSync(dir, { recursive: true });
+    const setting = path.join(dir, "no-overlap");
+    fs.writeFileSync(setting, "");
+    const goingOn = id => spawn("sleep", ["30"], { argv0: `cockpit-cronjobs-run ${id} 'sleep 30'`, stdio: "ignore" });
+    const marker = (name, pid) => fs.writeFileSync(path.join(dir, name + ".running"), `{"start":1,"pid":${pid},"trigger":"schedule"}\n`);
+    const skipped = () => {
+        const f = path.join(dir, "skipped.jsonl");
+        return fs.existsSync(f) ? fs.readFileSync(f, "utf8").trim().split("\n").map(l => JSON.parse(l)) : [];
+    };
+    const markers = () => fs.readdirSync(dir).filter(f => f.endsWith(".running")).sort();
+    const live = goingOn("single");
+    const other = goingOn("single-2");
+    try {
+        marker("20261020T000001Z-1", live.pid);
+        let r = run(sh, ["single", "echo second"], { state });
+        assert.deepStrictEqual([r.rc, r.out, r.err], [75, "", ""], "skipped, without a word");
+        r = run(sh, ["single", "echo third"], { state, env: { CRONJOBS_TRIGGER: "manual" } });
+        assert.deepStrictEqual([r.rc, r.out, r.err], [75, "", "cockpit-cronjobs-run: not started, a run of single is still going on\n"]);
+        assert.deepStrictEqual(skipped().map(x => [x.trigger, Object.keys(x).sort().join()]),
+                               [["schedule", "start,trigger"], ["manual", "start,trigger"]]);
+        assert.ok(skipped().every(x => Math.abs(x.start - Date.now() / 1000) < 60), "when");
+        assert.deepStrictEqual([records(state, "single"), markers()], [[], ["20261020T000001Z-1.running"]], "no run, no marker");
+        for (let k = 0; k < 20; k++) run(sh, ["single", "true"], { state });
+        assert.strictEqual(skipped().length, 20, "the last 20 skipped starts");
+        /* without no-overlap: it starts beside the run, as with cron */
+        fs.unlinkSync(setting);
+        r = run(sh, ["single", "echo beside"], { state });
+        assert.deepStrictEqual([r.rc, r.out], [0, "beside\n"]);
+        fs.writeFileSync(setting, "");
+        /* a run of another job, even one whose ID begins the same, does not hold it back */
+        fs.unlinkSync(path.join(dir, "20261020T000001Z-1.running"));
+        marker("20261020T000002Z-2", other.pid);
+        r = run(sh, ["single", "echo another"], { state });
+        assert.deepStrictEqual([r.rc, r.out], [0, "another\n"]);
+        fs.unlinkSync(path.join(dir, "20261020T000002Z-2.running"));
+        /* a marker whose process is gone (killed, power loss): the run starts, the old one is aborted */
+        marker("20261020T000003Z-3", 999999999);
+        r = run(sh, ["single", "exit 3"], { state });
+        assert.strictEqual(r.rc, 3, "the command's exit code");
+        assert.deepStrictEqual(records(state, "single").map(x => [x.rc, !!x.aborted]), [[0, false], [0, false], [null, true], [3, false]]);
+    } finally {
+        live.kill();
+        other.kill();
+    }
+    /* the recorder itself: a slow run, and a start beside it */
+    const env = { PATH: "/usr/bin:/bin", SHELL: "/bin/sh", CRONJOBS_STATE_DIR: state };
+    const slow = spawn(sh, [WRAPPER, "single", "sleep 1.5"], { env, stdio: "ignore" });
+    const until = Date.now() + 3000;
+    while (Date.now() < until && !markers().length) spawnSync("sleep", ["0.05"]);
+    assert.strictEqual(markers().length, 1, "the slow run's marker");
+    const beside = run(sh, ["single", "echo beside"], { state });
+    assert.strictEqual(beside.rc, 75, "not beside the recorder's own run");
+    const done = Date.now() + 5000;
+    while (Date.now() < done && markers().length) spawnSync("sleep", ["0.05"]);
+    assert.deepStrictEqual(markers(), [], "the slow run ended");
+    assert.ok(slow.pid > 0);
+    assert.strictEqual(run(sh, ["single", "echo after"], { state }).out, "after\n", "starts again once it ended");
+});
+
 /* ---------- lib/runs.js ---------- */
 
 t("parse runs", () => {
@@ -264,7 +331,16 @@ t("parse runs", () => {
     assert.deepStrictEqual(j.running, [{ start: 300, pid: 42, trigger: "schedule" }]);
     assert.deepStrictEqual(j.runs.map(x => [x.start, R.outcome(x), R.duration(x)]), [[250, "aborted", null], [200, "failed", 12], [100, "ok", 3]]);
     assert.strictEqual(j.runs[1].trigger, "manual");
-    assert.deepStrictEqual(r.empty, { runs: [], running: [], kb: null });
+    assert.deepStrictEqual(r.empty, { runs: [], running: [], skipped: [], noOverlap: false, kb: null });
+});
+t("parse runs: a job that may not overlap, and the starts the recorder skipped", () => {
+    const r = R.parseRuns("\x1esingle\noption no-overlap\n" +
+        'skipped {"start":300,"trigger":"schedule"}\nskipped {"start":400,"trigger":"manual"}\nskipped {"start":"x"}\n' +
+        'skipped not json\n{"start":100,"end":101,"rc":0,"trigger":"schedule","bytes":0,"truncated":false,"out":""}\n' +
+        "\x1eother\noption something-else\n");
+    assert.deepStrictEqual([r.single.noOverlap, r.single.skipped], [true, [{ start: 400, trigger: "manual" }, { start: 300, trigger: "schedule" }]]);
+    assert.strictEqual(r.single.runs.length, 1, "skipped starts are no runs");
+    assert.deepStrictEqual([r.other.noOverlap, r.other.skipped], [false, []]);
 });
 t("parse runs: bad output names are dropped", () => {
     const r = R.parseRuns('\x1ea\n{"start":1,"end":2,"rc":0,"out":"../../etc/shadow"}\n');

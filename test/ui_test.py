@@ -587,6 +587,67 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (record all, other user): " + repr(page.problems))
     page.context.close()
 
+    # ---------- not starting while a run goes on ----------
+    page = open_page(browser)
+    # only with recording: off, and saying why, until recording is on
+    row(page, 1).locator("[data-key^=edit]").click()
+    check(not page.is_checked("#f-capture") and page.is_disabled("#f-no-overlap") and
+          page.inner_text("#f-no-overlap-help").startswith("Nur für Jobs, die ihre Läufe erfassen"),
+          "not without recording: " + page.inner_text("#f-no-overlap-help"))
+    page.check("#f-capture")
+    check(not page.is_disabled("#f-no-overlap") and not page.is_checked("#f-no-overlap") and
+          "wird ausgelassen" in page.inner_text("#f-no-overlap-help"), "offered with recording, off: " + page.inner_text("#f-no-overlap-help"))
+    page.keyboard.press("Escape")
+    # set on root's recorded job: after the crontab, as root (the owner of root's runs)
+    row(page, 0).locator("[data-key^=edit]").click()
+    page.check("#f-no-overlap")
+    page.click("#edit-save")
+    wait_js(page, "window.__mock.noOverlapSets.length === 1")
+    wait_idle(page)
+    check(mock(page, "noOverlapSets") == [["update-geoip-1a2b", "on"]] and mock(page, "asUser") == [],
+          "set for its runs, as root: " + repr(mock(page, "noOverlapSets")))
+    # the runs dialog says so, and how many starts were skipped
+    page.evaluate("""() => { const now = Math.floor(Date.now() / 1000);
+        window.__mock.runs['update-geoip-1a2b'].skipped = [{ start: now - 600, trigger: 'schedule' }, { start: now - 300, trigger: 'manual' }]; }""")
+    page.click("#reload")
+    wait_idle(page)
+    row(page, 0).locator("[data-key^=runs]").click()
+    note = page.inner_text("#runs-note")
+    check("Der Job startet nicht, solange ein Lauf von ihm noch läuft." in note and
+          "2 Starts wurden ausgelassen, weil ein Lauf noch lief, zuletzt " in note, "the runs dialog: " + note)
+    page.click("#runs-close-btn")
+    # shown checked when edited again; cleared
+    row(page, 0).locator("[data-key^=edit]").click()
+    check(page.is_checked("#f-no-overlap"), "on when the dialog opens again")
+    page.uncheck("#f-no-overlap")
+    page.click("#edit-save")
+    wait_js(page, "window.__mock.noOverlapSets.length === 2")
+    wait_idle(page)
+    check(mock(page, "noOverlapSets")[1] == ["update-geoip-1a2b", "off"], "cleared: " + repr(mock(page, "noOverlapSets")))
+    # another user's job: recorded and set in one save, as that user
+    card = page.locator("#user-crontabs section[data-user='www-data']")
+    card.locator("[data-key='edit:www-data:0']").click()
+    page.check("#f-capture")
+    page.check("#f-no-overlap")
+    page.click("#edit-save")
+    wait_js(page, "window.__mock.noOverlapSets.length === 3")
+    wait_idle(page)
+    key, mode = mock(page, "noOverlapSets")[2]
+    check(re.fullmatch(r"www-data/cron-[0-9a-f]{4}", key) is not None and mode == "on" and
+          any(a[0] == "www-data" and "no-overlap" in " ".join(a) for a in mock(page, "asUser")) and
+          key.split("/")[1] in mock(page, "sys.users['www-data']"),
+          "www-data's job recorded and set, as www-data: " + repr(mock(page, "noOverlapSets")))
+    # when it cannot be set: the job is saved, and the page says what is missing
+    page.evaluate("() => { window.__mock.failNoOverlap = 'Permission denied'; }")
+    row(page, 0).locator("[data-key^=edit]").click()
+    page.check("#f-no-overlap")
+    page.click("#edit-save")
+    wait_js(page, "document.querySelector('#alerts').innerText.includes('ließ sich nicht einstellen')")
+    check("Permission denied" in page.inner_text("#alerts") and page.locator("#edit-dlg").is_hidden(),
+          "saved, not set, said so: " + page.inner_text("#alerts"))
+    check(not page.problems, "no console problems (not overlapping): " + repr(page.problems))
+    page.context.close()
+
     # ---------- leftover runs ----------
     page = open_page(browser)
     check(page.locator("#orphans").is_visible() and "Die erfassten Läufe von 1 Job " in page.inner_text("#orphans"),

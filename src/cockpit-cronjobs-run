@@ -12,6 +12,10 @@
 # directory belongs to the user; Cockpit Cron Jobs creates it). When nothing can be
 # recorded, the command runs anyway.
 #
+# A job whose directory holds the file no-overlap (set on the page) does not start
+# while a run of it goes on: the start is noted in skipped.jsonl (its last 20) and
+# the script ends with 75, without running the command.
+#
 # Cockpit Cron Jobs installs this file to /usr/local/libexec/ when you turn on
 # recording for a job. Jobs that use it stop working if it is removed.
 #
@@ -19,7 +23,7 @@
 # environment is changed.
 #
 # SPDX-License-Identifier: Apache-2.0
-CRONJOBS_RUN_VERSION=2
+CRONJOBS_RUN_VERSION=3
 
 _cj_sh=${SHELL:-/bin/sh}
 _cj_umask=$(umask)
@@ -62,8 +66,47 @@ umask 077
 
 _cj_stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 _cj_start=$(date +%s)
-printf '{"start":%s,"pid":%s,"trigger":"%s"}\n' "$_cj_start" "$$" "$_cj_trigger" \
-    > "$_cj_dir/$_cj_stamp.running" 2>/dev/null || _cj_run
+_cj_marker=$(printf '{"start":%s,"pid":%s,"trigger":"%s"}' "$_cj_start" "$$" "$_cj_trigger")
+
+# Whether the run marker $1 belongs to a run of this job that goes on: its process is
+# this script, started for this ID.
+_cj_live() {
+    _cj_pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$1" | head -n 1)
+    [ -n "$_cj_pid" ] && [ -r "/proc/$_cj_pid/cmdline" ] &&
+        tr '\000' ' ' < "/proc/$_cj_pid/cmdline" | grep -qF "cockpit-cronjobs-run $_cj_id "
+}
+
+if [ -f "$_cj_dir/no-overlap" ]; then
+    # Checked and marked under the lock every run of this job takes for its records, so
+    # that of two starts at once only one runs. 75: a run goes on, this one is skipped.
+    (
+        if command -v flock > /dev/null 2>&1; then
+            flock -w 10 9 2>/dev/null || flock 9 || :
+        fi
+        for _cj_r in "$_cj_dir"/*.running; do
+            [ -f "$_cj_r" ] || continue
+            _cj_live "$_cj_r" || continue
+            printf '{"start":%s,"trigger":"%s"}\n' "$_cj_start" "$_cj_trigger" >> "$_cj_dir/skipped.jsonl"
+            if [ "$(wc -l < "$_cj_dir/skipped.jsonl")" -gt "$_cj_keep" ]; then
+                tail -n "$_cj_keep" "$_cj_dir/skipped.jsonl" > "$_cj_dir/skipped.tmp" &&
+                    mv -f "$_cj_dir/skipped.tmp" "$_cj_dir/skipped.jsonl"
+            fi
+            exit 75
+        done
+        printf '%s\n' "$_cj_marker" > "$_cj_dir/$_cj_stamp.running"
+    ) 9> "$_cj_dir/.lock" 2>/dev/null
+    case $? in
+        0) ;;
+        75)
+            if [ "$_cj_trigger" = manual ]; then
+                echo "cockpit-cronjobs-run: not started, a run of $_cj_id is still going on" >&2
+            fi
+            exit 75 ;;
+        *) _cj_run ;;
+    esac
+else
+    printf '%s\n' "$_cj_marker" > "$_cj_dir/$_cj_stamp.running" 2>/dev/null || _cj_run
+fi
 
 # The output goes to our standard output (for cron) and, through a FIFO, to tail,
 # which keeps its last bytes for the record. If tail cannot write, cat drains the

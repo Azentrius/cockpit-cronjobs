@@ -215,9 +215,12 @@ export function renderRunsDialog() {
     const tab = d.user ? crontabOf(d.user) : null;
     const editable = !!tab && tab.status === "ok" && !tab.locked;
     $("runs-capture-off").hidden = !editable || !d.id || !!d.unit;
-    fill($("runs-note"), d.id ? rich(T.runsNote(KEEP_RUNS, runsDirOf(d.user) + "/")) : null, d.id && d.unit ? " " : null,
-        d.unit ? rich(T.runsJournalNote(d.unit)) : null);
     const job = d.id ? runsOf(d.user, d.id) : null;
+    const skipped = job && job.skipped ? job.skipped : [];
+    fill($("runs-note"), d.id ? rich(T.runsNote(KEEP_RUNS, runsDirOf(d.user) + "/")) : null, d.id && d.unit ? " " : null,
+        d.unit ? rich(T.runsJournalNote(d.unit)) : null,
+        job && job.noOverlap ? [" ", T.noOverlapNote] : null,
+        skipped.length ? [" ", T.skippedNote(skipped.length, fmtShort(skipped[0].start * 1000))] : null);
     const body = $("runs-body");
     const focusedKey = document.activeElement && body.contains(document.activeElement)
         ? document.activeElement.dataset.key : null;

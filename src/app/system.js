@@ -503,6 +503,11 @@ const RUNS_SCRIPT = `job() {
     fi
     printf 'running %s %s\\n' "$alive" "$line"
   done
+  if [ -f "$1/no-overlap" ] && [ ! -L "$1/no-overlap" ]; then echo 'option no-overlap'; fi
+  f=$1/skipped.jsonl
+  if [ -f "$f" ] && [ ! -L "$f" ]; then
+    timeout 5 tail -c 4096 "$f" 2>/dev/null | tail -n ${KEEP_RUNS} | tr -d '\\036' | sed 's/^/skipped /'
+  fi
 }
 for d in '${RUNS_DIR}'/*; do
   job "$d" ""
@@ -540,6 +545,23 @@ export function readOutput(user, id, out) {
 function removeRuns(user, id) {
     if (!USER_RE.test(user) || !R.ID_RE.test(id)) return Promise.resolve();
     return spawn(asOwner(user, ["rm", "-rf", "--", runsDirOf(user) + "/" + id]), SPAWN_ROOT);
+}
+
+/* Sets ($2 on) or clears ($2 off) the file no-overlap in a job's directory of runs ($1),
+   which keeps the run recorder (version 3) from starting the job while a run of it goes
+   on. Run as the owner of that directory, like everything in there. */
+const NO_OVERLAP_SCRIPT = `umask 077
+case $2 in
+  on) mkdir -p -- "$1" && : > "$1/no-overlap" ;;
+  off) rm -f -- "$1/no-overlap" ;;
+  *) exit 2 ;;
+esac
+`;
+
+export function setNoOverlap(user, id, on) {
+    if (!USER_RE.test(user) || !R.ID_RE.test(id)) return Promise.reject(new Error("not a job of " + user + ": " + id));
+    return spawn(asOwner(user, ["sh", "-c", NO_OVERLAP_SCRIPT, "cockpit-cronjobs", runsDirOf(user) + "/" + id, on ? "on" : "off"]),
+                 SPAWN_ROOT);
 }
 
 /* A copied line may share the ID; its runs stay as long as a line of user's crontab

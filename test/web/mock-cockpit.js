@@ -126,6 +126,9 @@
         userWrites: [],
         userRunsMade: [],
         failUserRuns: null,
+        /* NO_OVERLAP_SCRIPT calls: [key of the runs, "on" or "off"] */
+        noOverlapSets: [],
+        failNoOverlap: null,
         /* commands run as another user: [user, command…] */
         asUser: [],
         /* UNITS_SCRIPT calls: [step, name, user]; wrongUser: what systemd reports as User= */
@@ -156,7 +159,8 @@
         lockBusy: false,
         systemd: params.get("systemd") !== "no",
         cronActive: params.get("cron") !== "inactive",
-        wrapper: wrapperParam === "missing" ? null : { version: wrapperParam === "0" ? 0 : 2 },
+        /* the run recorder installed: the version the page wants (C.WRAPPER_VERSION), 0 for an old one */
+        wrapper: wrapperParam === "missing" ? null : { version: wrapperParam === "0" ? 0 : 3 },
         wrapperInstalls: [],
         removedRuns: [],
         orphanCalls: [],
@@ -248,6 +252,8 @@
             M.runs[id].runs.slice().reverse().forEach(r => out.push(JSON.stringify(r) + "\n"));
             M.runs[id].running.forEach(r => out.push("running " + (r.alive === false ? 0 : 1) + " " +
                 JSON.stringify({ start: r.start, pid: r.pid || 4242, trigger: r.trigger || "schedule" }) + "\n"));
+            if (M.runs[id].noOverlap) out.push("option no-overlap\n");
+            (M.runs[id].skipped || []).forEach(s => out.push("skipped " + JSON.stringify(s) + "\n"));
         });
         return out.join("");
     }
@@ -341,6 +347,15 @@
             if (M.root === null) fail({ exit_status: 1, problem: null, message: "no crontab for root\n" });
             const bytes = new TextEncoder().encode(M.root);
             return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
+        }
+        /* Whether a job may overlap its previous run (NO_OVERLAP_SCRIPT): the directory, on or off */
+        if (/: > "\$1\/no-overlap"/.test(script)) {
+            if (M.failNoOverlap) fail({ exit_status: 1, problem: null, message: M.failNoOverlap });
+            const key = runsKey(args[4]);
+            M.noOverlapSets.push([key, args[5]]);
+            M.runs[key] = M.runs[key] || { runs: [], running: [], kb: 4 };
+            M.runs[key].noOverlap = args[5] === "on";
+            return "";
         }
         /* Removing leftover runs: the script checks every ID again against all crontabs. */
         if (/for key in "\$@"/.test(script)) {
