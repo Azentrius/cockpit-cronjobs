@@ -637,6 +637,31 @@ t("job ids", () => {
     assert.ok(C.JOB_ID_RE.test(C.makeJobId("!!!")));
     assert.ok(/^job-[0-9a-f]{4}$/.test(C.makeJobId("!!!")));
 });
+t("record all: the jobs at the indexes recorded in one change, each with an ID of its own", () => {
+    const W = C.WRAPPER_PATH;
+    const text = "MAILTO=\"\"\n# nightly\n0 1 * * * /usr/local/bin/backup.sh\n" +
+                 `*/5 * * * * ${W} backup-0001 '/usr/local/bin/backup.sh'\n` +
+                 "0 2 * * * date +%F\n#[cronjobs:off] 0 3 * * * /usr/local/bin/backup.sh\n@reboot  /usr/local/bin/warmup.sh\n";
+    const entries = C.parseUserCrontab(text);
+    const before = JSON.stringify(entries);
+    const seq = [0x0001, 0x0001, 0x0002, 0x0002, 0x0003, 0x0007];
+    const out = C.captureJobs(entries, entries.map((e, i) => i), () => seq.shift());
+    assert.strictEqual(JSON.stringify(entries), before, "the entries given stay as they are");
+    const lines = C.serializeUserCrontab(out).split("\n");
+    assert.deepStrictEqual(lines, [
+        "MAILTO=\"\"", "# nightly",
+        `0 1 * * * ${W} backup-0002 '/usr/local/bin/backup.sh'`,
+        `*/5 * * * * ${W} backup-0001 '/usr/local/bin/backup.sh'`,
+        "0 2 * * * date +%F",
+        `#[cronjobs:off] 0 3 * * * ${W} backup-0003 '/usr/local/bin/backup.sh'`,
+        `@reboot ${W} warmup-0007 '/usr/local/bin/warmup.sh'`, "",
+    ], "an ID taken in the crontab or by an earlier job is not given twice; a % and lines that are no job stay");
+    assert.deepStrictEqual(seq, [], "an ID for each job recorded, none for the others");
+    const again = C.captureJobs(out, out.map((e, i) => i), () => 9);
+    assert.strictEqual(C.serializeUserCrontab(again), C.serializeUserCrontab(out), "recorded jobs stay as they are");
+    assert.strictEqual(C.serializeUserCrontab(C.captureJobs(entries, [])), text, "no index: byte for byte");
+    assert.strictEqual(C.serializeUserCrontab(C.captureJobs(entries, [1, 4, 99])), text, "a comment, a %, no line");
+});
 t("job names", () => {
     assert.strictEqual(C.jobName("/usr/local/bin/backup-db.sh >/dev/null 2>&1"), "backup-db.sh");
     assert.strictEqual(C.jobName("cd / && run-parts --report /etc/cron.hourly"), "cron.hourly");

@@ -383,6 +383,28 @@ export async function setCapture(user, i, on, focusKey, shownBase) {
     restoreFocus(focusKey);
 }
 
+/* The jobs of crontab r that "record all" is about: enabled and not recorded (a job
+   converted to a timer is switched off), split into those it records and those it
+   cannot (a % in the command). */
+export function unrecorded(r) {
+    const all = jobsOf(r).filter(({ e }) => e.enabled && !jobInfo(e).capture);
+    return { jobs: all.filter(({ e }) => C.canCapture(e.command)), blocked: all.filter(({ e }) => !C.canCapture(e.command)) };
+}
+
+/* Turns recording on for the jobs at indexes of user's crontab as shown in base, in one
+   write. The run recorder, and another user's directory for runs, first, as for one job.
+   Nothing is written when one of the lines changed meanwhile. */
+export async function setCaptureAll(user, indexes, focusKey, base) {
+    const lines = indexes.map(i => base.entries[i] ? base.entries[i].line : null);
+    if (!(await ensureWrapper())) { restoreFocus(focusKey); return; }
+    if (user !== "root" && !(await ensureUserRuns(user))) { restoreFocus(focusKey); return; }
+    const res = await commit(base, entries => indexes.every((i, k) => jobAt(entries, i, lines[k]))
+        ? C.captureJobs(entries, indexes) : null, T.okCaptureAll(indexes.length));
+    reportResult(res);
+    if (res.ok) refreshRuns();
+    restoreFocus(focusKey);
+}
+
 /* ---------- administrative access ---------- */
 
 let superuser = null;

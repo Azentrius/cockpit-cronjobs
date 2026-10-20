@@ -9,7 +9,8 @@ import {
 } from "./core.js";
 import { ensureUserRuns, errText, installWrapper, removeRunsIfUnused, wrapperCurrent } from "./system.js";
 import {
-    commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, setCapture, takenIds,
+    commit, crontabOf, jobAt, jobInfo, jobsOf, jobTz, loading, noteFor, refreshRuns, setCapture, setCaptureAll, takenIds,
+    unrecorded,
 } from "./crontab.js";
 import { alertEl, closeMenu, describe, restoreFocus } from "./page.js";
 
@@ -295,10 +296,31 @@ export function openCaptureOff(user, index, openerKey) {
     if (!e || e.kind !== "job" || !jobInfo(e).capture) return;
     $("confirm-title").textContent = T.captureOffTitle;
     fill($("confirm-body"), rich(T.captureOffBody));
+    fill($("confirm-list")).hidden = true;
     $("confirm-ok").textContent = T.captureOff;
     openDialog($("confirm-dlg"), openerKey, {
         kind: "confirm",
         action: () => setCapture(user, index, false, openerKey, base),
+    }, $("confirm-cancel"));
+}
+
+/* Confirm turning recording on for every job of user's crontab that can record: what
+   each one is, and how many cannot (a % in the command). */
+export function openCaptureAll(user, openerKey) {
+    const base = crontabOf(user);
+    if (state.busy || loading || !base || base.status !== "ok" || base.locked) return;
+    const { jobs, blocked } = unrecorded(base);
+    if (!jobs.length) return;
+    $("confirm-title").textContent = T.recordAllTitle;
+    fill($("confirm-body"), rich(T.recordAllBody(jobs.length, C.WRAPPER_PATH)),
+         blocked.length ? [" ", T.recordAllBlocked(blocked.length)] : null);
+    fill($("confirm-list"), jobs.map(({ e }) => h("li", null,
+        h("span", { class: "az-mono" }, e.command),
+        h("span", { class: "cron-modal-sub" }, describe(e.schedule))))).hidden = false;
+    $("confirm-ok").textContent = T.recordAllOk(jobs.length);
+    openDialog($("confirm-dlg"), openerKey, {
+        kind: "confirm",
+        action: () => setCaptureAll(user, jobs.map(x => x.i), openerKey, base),
     }, $("confirm-cancel"));
 }
 

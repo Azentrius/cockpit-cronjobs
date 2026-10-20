@@ -32,7 +32,7 @@ import { $, fill, icon, rich, state, T } from "./app/core.js";
 import { crontabOf, jobAt, loading, refreshRuns, refreshTimers, requestLoad, watchSuperuser } from "./app/crontab.js";
 import { clearAlerts, updateNextRuns } from "./app/page.js";
 import {
-    closeDialog, confirmDelete, confirmOk, dialog, form, openCaptureOff, openEdit, submitEdit, updateForm,
+    closeDialog, confirmDelete, confirmOk, dialog, form, openCaptureAll, openCaptureOff, openEdit, submitEdit, updateForm,
 } from "./app/dialogs.js";
 import { orphanList, removeOrphanRuns, startRun, stopRun } from "./app/runs.js";
 import { submitBack, submitConvert, toggleUnits, touchConvertName, updateConvert } from "./app/convert.js";
@@ -60,6 +60,7 @@ function init() {
     $("reload").addEventListener("click", () => { clearAlerts(); requestLoad(); });
     $("add").addEventListener("click", () => openEdit("root", null, "add"));
     $("backups").addEventListener("click", () => openBackups("root", "backups"));
+    $("record-all").addEventListener("click", () => openCaptureAll("root", "record-all"));
 
     $("edit-form").addEventListener("submit", submitEdit);
     $("edit-cancel").addEventListener("click", () => closeDialog());
