@@ -25,8 +25,10 @@ security fixes.
 
 ## Especially relevant
 
-Cron Jobs changes the root crontab, writes systemd units and installs a run
-recorder that runs as root. Reports are particularly welcome for:
+Cron Jobs changes the root crontab and, with administrative access, those of
+other users, writes systemd units, installs a run recorder that runs as root and
+as those users, and its packages bring a status helper that runs as root from a
+timer. Reports are particularly welcome for:
 
 - ways to get commands, names or texts interpreted as shell code instead of
   being passed as arguments,
@@ -35,5 +37,12 @@ recorder that runs as root. Reports are particularly welcome for:
 - unit names, paths or environment values that escape `/etc/systemd/system`
   or `/var/lib/cockpit-cronjobs`, or change what systemd runs,
 - the run recorder (`cockpit-cronjobs-run`) exposing recorded output to other
-  users or letting a job influence other jobs' records,
-- release archives or `SHA256SUMS` that do not match the tagged source.
+  users or letting a job influence other jobs' records or starts,
+- another user making root read, follow or remove something through that
+  user's directory of runs (`/var/lib/cockpit-cronjobs/users/USER`), in the
+  page or in the status helper (`cronjobs-status`),
+- user names, commands or output reaching the status files, which anyone can
+  read,
+- a log line that passes for a start cron logged itself,
+- release archives, packages or `SHA256SUMS` that do not match the tagged
+  source.

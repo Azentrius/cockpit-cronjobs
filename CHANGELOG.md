@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+The descriptions say what the page does since 2.8 and 2.9.
+
+- **Packages:** the description of the `.deb` and `.rpm` and the AppStream data (Cockpit's Applications
+  page) name the crontabs of other users, missed runs, starts from cron's log and the status for the
+  Azentrius Status Board.
+- **README** and **SECURITY.md:** the status names converted jobs and the cron service, the safety notes
+  cron's log and jobs that do not overlap, and the parts of the page worth a security report include
+  the run recorder as other users, the status helper and cron's log.
+
 ## 2.9.0 – 2026-10-21
 
 The status follows converted jobs and the cron service, links to the page and shows in Cockpit's menu;
