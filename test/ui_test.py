@@ -274,7 +274,7 @@ with sync_playwright() as p:
                    ["tab-overview"] * 2, ["tab-system"] * 2], "keyboard: " + repr(keys))
     page.keyboard.press("Tab")
     check(not page.evaluate("() => !!document.activeElement.closest('#tabs')"), "only the tab shown is in the tab order")
-    check(page.evaluate("() => location.hash") == "", "switching does not change the address")
+    check(page.evaluate("() => location.hash") == "#/system", "the tab chosen goes into the address (for the Status Board's links)")
     # Refresh: off and "Lädt …" while loading, keeps the tab
     calls = len(mock(page, "calls"))
     page.click("#tab-timers")
@@ -1745,6 +1745,121 @@ with sync_playwright() as p:
     wait_js(page, "document.querySelector('#sys-alerts').innerText.length > 0")
     check("System crontabs" in page.inner_text("#sys-alerts") or "System-Crontabs" in page.inner_text("#sys-alerts"), "system read error alert")
     check(page.locator("#etc-card").is_hidden(), "etc hidden on error")
+    page.context.close()
+
+    # ---------- the status icon in Cockpit's menu (menu-status.js) ----------
+    STATUS_EN, STATUS_DE = "/var/lib/cockpit-cronjobs/status.json", "/var/lib/cockpit-cronjobs/status.de.json"
+
+    def menu_status(page):
+        """What the page sent the shell for its menu entry last ("unset" before the first)."""
+        notes = mock(page, "notes")
+        return notes[-1][1]["page_status"] if notes else "unset"
+
+    page = open_page(browser)
+    check(mock(page, "notes") == [["notify", {"page_status": None}]] and mock(page, "fileReads") == [STATUS_DE],
+          "ok: no icon, sent once; only the German status file read: " + repr([mock(page, "notes"), mock(page, "fileReads")]))
+    page.context.close()
+    page = open_page(browser, "status=failed")
+    check(menu_status(page) == {"type": "error", "title": "1 Job ist in den letzten 24 Stunden fehlgeschlagen."},
+          "a failed job: the error icon, the summary as its tooltip: " + repr(menu_status(page)))
+    page.context.close()
+    page = open_page(browser, "status=failed", cookie="en")
+    check(menu_status(page) == {"type": "error", "title": "1 job failed in the last 24 hours."} and
+          mock(page, "fileReads") == [STATUS_EN] and "Refresh" in page.inner_text("#reload"),
+          "English chosen in Cockpit's menu: the English file, as the page: " + repr(menu_status(page)))
+    page.context.close()
+    page = open_page(browser, "status=stale")
+    st = menu_status(page)
+    check(st and st["type"] == "warning" and st["title"].startswith("Kein aufgezeichneter Job ist in den letzten 24 Stunden "
+                                                                    "fehlgeschlagen. (Stand ") and st["title"].endswith(", veraltet)"),
+          "out of date (an hour after its time): a warning that says so: " + repr(st))
+    page.context.close()
+    page = open_page(browser, "status=missing")
+    check(menu_status(page) is None and not page.problems, "no status file: no icon, the page as always")
+    page.context.close()
+
+    # Loaded hidden after the login: the icon only; the page starts once it is shown.
+    page = browser.new_context(viewport={"width": 1280, "height": 900}, locale="de-DE").new_page()
+    page.problems = []
+    page.on("pageerror", lambda e: page.problems.append("pageerror: " + str(e)))
+    page.goto(BASE + "?hidden=1&status=failed")
+    wait_js(page, "window.__mock.notes.length > 0")
+    page.wait_for_timeout(300)
+    hidden_state = [menu_status(page)["type"], len(mock(page, "calls")), page.inner_text("#meta"), page.inner_text("#sig-version")]
+    check(hidden_state == ["error", 0, "", "Cron Jobs"], "hidden: the icon, nothing run, the page not started: " + repr(hidden_state))
+    page.evaluate("() => window.__mock.hint(false)")
+    wait_js(page, "document.querySelector('#meta').textContent.includes('Serverzeit')")
+    check(len(mock(page, "calls")) > 0 and page.inner_text("#sig-version").startswith("Cron Jobs " + VERSION) and not page.problems,
+          "shown: the page starts")
+    page.context.close()
+
+    # ---------- places: where the Status Board's links lead (tabs.js) ----------
+    def open_at(browser, place, query="", hidden=False):
+        """The page loaded at #/<place>, as the Status Board's link opens it (a small window, so it scrolls)."""
+        page = browser.new_context(viewport={"width": 1280, "height": 500}, timezone_id="Europe/Berlin", locale="de-DE").new_page()
+        page.problems = []
+        page.on("pageerror", lambda e: page.problems.append("pageerror: " + str(e)))
+        page.goto(BASE + "?" + query + ("&hidden=1" if hidden else "") + "#/" + place)
+        if not hidden:
+            wait_js(page, "document.querySelector('#meta').textContent.includes('Serverzeit')")
+            wait_idle(page)
+        return page
+
+    def top_of(page, el_id):
+        return page.evaluate(f"() => Math.round(document.getElementById('{el_id}').getBoundingClientRect().top)")
+
+    for place, tab, el in [("overview/results", "tab-overview", "sum-card"), ("overview/crontab", "tab-overview", "root-card"),
+                           ("overview/next", "tab-overview", "tl-card"), ("system", "tab-system", None)]:
+        page = open_at(browser, place)
+        where = [selected_tab(page), top_of(page, el) if el else page.evaluate("() => window.scrollY")]
+        check(where == [tab, 0], f"opened at #/{place}: {tab}, " + (f"{el} at the top" if el else "not scrolled") + ": " + repr(where))
+        page.context.close()
+
+    # The page stays loaded; Cockpit changes only its address (the frame's hash).
+    page = open_at(browser, "")
+    check(selected_tab(page) == "tab-overview" and page.evaluate("() => window.scrollY") == 0, "no place: the first tab")
+    page.evaluate("() => { location.hash = '#/overview/crontab'; }")
+    wait_js(page, "Math.abs(document.getElementById('root-card').getBoundingClientRect().top) < 1")
+    page.evaluate("() => { location.hash = '#/timers'; }")
+    wait_js(page, "!document.getElementById('panel-timers').hidden")
+    page.evaluate("() => { location.hash = '#/overview/results'; }")
+    wait_js(page, "!document.getElementById('panel-overview').hidden")
+    page.wait_for_timeout(100)
+    check(top_of(page, "sum-card") == 0, "jumps while loaded: the crontab, the timers, the results at the top")
+    # A tab chosen on the page goes into the address, so the link to the place before is a change again.
+    page.click("#tab-system")
+    check(page.evaluate("() => location.hash") == "#/system", "a tab chosen: into the address")
+    page.evaluate("() => { location.hash = '#/overview/results'; }")
+    wait_js(page, "!document.getElementById('panel-overview').hidden")
+    page.wait_for_timeout(100)
+    check(top_of(page, "sum-card") == 0, "the link to the results again, after a tab was chosen on the page")
+    # A reload scrolls nowhere; paths that are no place change nothing; an empty address: the first tab.
+    page.evaluate("() => window.scrollTo(0, 0)")
+    page.click("#reload")
+    wait_idle(page)
+    check(page.evaluate("() => window.scrollY") == 0, "a reload scrolls nowhere: the link was followed already")
+    page.click("#tab-timers")
+    for nowhere in ["#/nowhere", "#/constructor", "#/timers/toString", "#/overview/__proto__"]:
+        page.evaluate(f"() => {{ location.hash = '{nowhere}'; }}")
+        page.wait_for_timeout(60)
+    check(selected_tab(page) in ("tab-timers", "tab-overview") and page.evaluate("() => window.scrollY") == 0 and
+          not page.problems, "paths that are no place: no tab of their own, no scrolling, no error")
+    page.evaluate("() => { location.hash = '#/system'; }")
+    wait_js(page, "!document.getElementById('panel-system').hidden")
+    page.evaluate("() => { location.hash = ''; }")
+    wait_js(page, "!document.getElementById('panel-overview').hidden")
+    check(selected_tab(page) == "tab-overview", "an empty address: the first tab")
+    page.context.close()
+
+    # Loaded hidden at a place (the board jumps to a preloaded page): scrolled once shown and loaded.
+    page = open_at(browser, "overview/crontab", hidden=True)
+    wait_js(page, "window.__mock.notes.length > 0")
+    page.wait_for_timeout(200)
+    check(len(mock(page, "calls")) == 0 and page.evaluate("() => window.scrollY") == 0, "hidden at a place: nothing yet")
+    page.evaluate("() => window.__mock.hint(false)")
+    wait_js(page, "document.querySelector('#meta').textContent.includes('Serverzeit')")
+    wait_idle(page)
+    check(top_of(page, "root-card") == 0 and not page.problems, "shown: the page loads, then scrolls to the crontab")
     page.context.close()
 
     browser.close()

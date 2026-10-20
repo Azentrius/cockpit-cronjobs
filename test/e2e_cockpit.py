@@ -624,6 +624,54 @@ with sync_playwright() as p:
     check(crontab() == start and fail_timer not in page.inner_text("#sum-body") and conv_fail not in page.inner_text("#sum-body") and
           "Der cron-Dienst läuft nicht" not in page.inner_text("#notices"), "back as before")
 
+    # In Cockpit's shell: the page loaded hidden for its menu entry ("preload"), not started, the
+    # icon as `status --lang de` says; then the Status Board's links, cockpit.jump into the loaded
+    # page (its tab, the shell's address, no reload), and a tab chosen on the page in the address.
+    sh("systemctl start cockpit-cronjobs-status.service")
+    rc, doc, out = status_as_nobody("de")
+    types = {"danger": "error", "warning": "warning", "info": "info"}
+    want = {"type": types[doc["state"]], "title": doc.get("summary")} if doc.get("state") in types else None
+    shell = ctx.new_page()
+    ours = []
+    shell.on("pageerror", lambda e: ours.append(str(e)) if "/cronjobs/" in (e.stack or "") else None)
+    shell.goto(URL.split("/cockpit/")[0] + "/system")
+
+    def page_status():
+        stored = json.loads(shell.evaluate("() => sessionStorage.getItem('cockpit:page_status')") or "{}")
+        return stored.get("localhost", {}).get("cronjobs", "unset")
+
+    # No icon to show: the shell may keep nothing for the page at all.
+    shown = (None, "unset") if want is None else (want,)
+    end = time.time() + 60
+    while time.time() < end and page_status() not in shown:
+        shell.wait_for_timeout(250)
+    own = next((f for f in shell.frames if f.name.endswith("/cronjobs")), None)
+    check(own is not None and page_status() in shown and own.evaluate("() => document.getElementById('sig-version').textContent") == "Cron Jobs"
+          and not shell.locator('iframe[name$="/cronjobs"]').is_visible(),
+          f"shell: the page loaded hidden, not started, the menu icon as the status ({doc.get('state')}): {page_status()!r}")
+    if own:
+        own.evaluate("() => { window.cronjobsNotReloaded = true; }")
+
+        def at(path, tab, how):
+            def there():
+                return shell.url.endswith("/cronjobs#/" + path) and own.evaluate(
+                    f"() => document.getElementById('tab-{tab}').getAttribute('aria-selected') === 'true'"
+                    " && window.cronjobsNotReloaded === true && document.querySelector('#meta').textContent.includes('Serverzeit')")
+            end = time.time() + 30
+            while time.time() < end and not there():
+                shell.wait_for_timeout(250)
+            check(there(), f"Status Board link {how}: the tab {tab}, the page not loaded again: {shell.url}")
+
+        jumper = next((f for f in shell.frames if f.name.endswith("/system")), own)
+        jumper.evaluate("p => cockpit.jump(p)", "/cronjobs#/system")
+        at("system", "system", "into the hidden page")
+        own.evaluate("p => cockpit.jump(p)", "/cronjobs#/overview/results")
+        at("overview/results", "overview", "#/overview/results")
+        shell.frame_locator('iframe[name$="/cronjobs"]').locator("#tab-timers").click()
+        at("timers", "timers", "(the tab chosen on the page goes into the address)")
+    check(not ours, "shell: no JavaScript error of the page: " + repr(ours))
+    shell.close()
+
     # another user's crontab: a card of its own, written as that user's crontab with backups of its own,
     # and cron runs the jobs as that user
     card = page.locator(f"#user-crontabs section[data-user='{USER}']")

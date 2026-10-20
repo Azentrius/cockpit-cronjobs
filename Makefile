@@ -56,6 +56,7 @@ check:
 	node test/i18n.test.js
 	node test/files.test.js
 	node test/status.test.js
+	node test/menu.test.js
 
 check-ui:
 	python3 test/ui_test.py

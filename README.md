@@ -46,7 +46,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
   name the crontab they come from, and back to cron removes only units converted from the crontab whose
   note it follows, so a note a user writes into their own crontab cannot reach anyone else's timer.
 - **A status for the Status Board.** Failed jobs of the last 24 hours and jobs without recording, in the
-  status format all Azentrius Cockpit add-ons share, readable without administrative access (see below).
+  status format all Azentrius Cockpit add-ons share, readable without administrative access, with a
+  link to the place on the page; the same state as an icon in Cockpit's menu (see below).
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 
@@ -182,11 +183,11 @@ boot) and writes it to `/var/lib/cockpit-cronjobs/status.json` (English) and `st
 mode 644; `status` only reads the file of the language asked for (German for `de` and its regions,
 English for any other language). Without the file it reports `none` and why.
 
-| Item | State |
-|---|---|
-| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, with the number of those jobs, their IDs and the names of the timers; `ok` when none did; `none` when no job records its runs and none was converted |
-| `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known; `ok` when every job records them |
-| `cron` | `ok` when the cron service runs; when it does not, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask |
+| Item | State | Link |
+|---|---|---|
+| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, with the number of those jobs, their IDs and the names of the timers; `ok` when none did; `none` when no job records its runs and none was converted | `#/overview/results`: the latest results, failures first |
+| `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known; `ok` when every job records them | `#/overview/crontab`: the root crontab, the other users' after it |
+| `cron` | `ok` when the cron service runs; when it does not, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask | `#/overview/notices`: where the page says that cron is not running |
 
 Only the crontabs of root and the other users count: the jobs there are the ones the page can record,
 read as the page reads them, and the jobs converted from them, whose runs come from the journal of
@@ -196,6 +197,19 @@ The files hold numbers, states, job IDs and the names of timers converted from r
 names, commands or output. Timers converted from another user's crontab are only counted, since the
 name a conversion suggests for them begins with the user's. Each item is stale after an hour without a
 new status (`stale_after`), that is four runs of the timer missed.
+
+A click on the tile on the Status Board goes to the link of its most important item: the page opens
+on that tab and scrolls to the card. Cockpit keeps a page that is loaded and, when the board jumps to
+it again, only changes its address, so the page follows every change of it (`locationchanged`). Every
+tab has an address of its own (`#/overview`, `#/timers`, `#/system`), and a tab chosen on the page goes
+into it.
+
+**In Cockpit's menu** the entry “Cron Jobs” shows the same state with Cockpit's own icon (red: a job
+failed or cron is stopped; yellow: a warning, or the status is more than an hour old) and the summary
+as its tooltip, judged as the Status Board judges it; nothing to do, no icon. For this Cockpit loads
+the page hidden right after the login (`preload` in `src/manifest.json`, as for Cockpit's own Software
+updates page); until you open it, the page only reads the status file of its language every five
+minutes (`src/menu-status.js`) and runs nothing else.
 
 The packages and `make install` turn the timer on, and it stays on through upgrades. To turn it off for
 good: `sudo systemctl mask --now cockpit-cronjobs-status.timer`.
