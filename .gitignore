@@ -8,3 +8,4 @@ build/
 dist/
 first.sha256
 SHA256SUMS
+test/docs-shots/

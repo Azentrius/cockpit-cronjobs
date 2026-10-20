@@ -12,7 +12,7 @@ VERSION := $(shell sed -n 's/^ *const VERSION = "\(.*\)";/\1/p' src/app.js)
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || date +%s)
 PACKAGE = cockpit-cronjobs-$(VERSION).tar.gz
 
-.PHONY: all install uninstall devel-install devel-uninstall check check-ui lint dist package stage packages
+.PHONY: all install uninstall devel-install devel-uninstall check check-ui docs-shots lint dist package stage packages
 
 all:
 	@echo "Nothing to build. Try: make install, make check, make check-ui, make package, make packages"
@@ -60,6 +60,10 @@ check:
 
 check-ui:
 	python3 test/ui_test.py
+
+# The screenshots of the README, into docs/ (needs Python Playwright with Chromium).
+docs-shots:
+	python3 test/docs_shots.py docs
 
 # Source archive of the last commit.
 dist:

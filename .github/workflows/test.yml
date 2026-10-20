@@ -84,6 +84,13 @@ jobs:
         with:
           name: screenshots
           path: test/shots/
+      - name: Screenshots for the README (test/docs_shots.py; make docs-shots puts them into docs/)
+        run: python test/docs_shots.py test/docs-shots
+      - name: Keep the screenshots for the README
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-screenshots
+          path: test/docs-shots/
 
   # The main flows against a real Cockpit, root's real crontab and a running cron daemon.
   # Destructive, which is what the runner's throwaway VM is for (see test/e2e_cockpit.py).
