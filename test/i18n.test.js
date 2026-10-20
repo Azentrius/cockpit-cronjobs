@@ -9,7 +9,7 @@ const path = require("path");
 const SRC = path.join(__dirname, "..", "src");
 const LANGS = fs.readdirSync(path.join(SRC, "i18n")).filter(f => f.endsWith(".js")).map(f => f.replace(/\.js$/, ""));
 const texts = Object.fromEntries(LANGS.map(l => [l, require(path.join(SRC, "i18n", l + ".js"))]));
-const app = ["app.js"].concat(fs.readdirSync(path.join(SRC, "app")).filter(f => f.endsWith(".js")).map(f => path.join("app", f)))
+const app = ["app.js", "menu-status.js"].concat(fs.readdirSync(path.join(SRC, "app")).filter(f => f.endsWith(".js")).map(f => path.join("app", f)))
     .map(f => fs.readFileSync(path.join(SRC, f), "utf8")).join("\n");
 const html = fs.readFileSync(path.join(SRC, "index.html"), "utf8");
 const libs = ["cron.js", "systemd.js"].map(f => fs.readFileSync(path.join(SRC, "lib", f), "utf8")).join("\n");

@@ -129,6 +129,8 @@ const item = (doc, id) => doc.items.find(i => i.id === id);
 
 const STATES = ["none", "ok", "info", "warning", "danger"];
 const ISO_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+/* Where each item leads on the page (PLACES in src/app/tabs.js; test/ui_test.py follows them). */
+const LINKS = { failed: "#/overview/results", unrecorded: "#/overview/crontab", cron: "#/overview/notices" };
 
 /* The overall state from the items: the worst of danger, warning and info; else ok when an item
    is ok; else none. */
@@ -156,7 +158,9 @@ function contract(text) {
         assert.ok(typeof i.title === "string" && /\S/.test(i.title));
         if ("value" in i) assert.ok(typeof i.value === "string" && /\S/.test(i.value));
         assert.ok(typeof i.detail === "string" && /\S/.test(i.detail));
-        assert.ok(!("link" in i));
+        /* The place on the page, as the Status Board takes a link (LINK_RE in its src/lib/status.js). */
+        assert.strictEqual(i.link, LINKS[i.id], i.id + " links its place");
+        assert.ok(/^#\/[A-Za-z0-9/_-]{0,80}$/.test(i.link), i.link);
         assert.ok(ISO_RE.test(i.checked_at));
         assert.strictEqual(i.stale_after, 3600);
     });

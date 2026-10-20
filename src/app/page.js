@@ -19,7 +19,7 @@ import { openCaptureOff, openDelete, openEdit } from "./dialogs.js";
 import { openRun, openRuns, openTimerRuns, renderOrphans, renderOrphansDialog } from "./runs.js";
 import { convertBlocker, openBack, openConvert } from "./convert.js";
 import { openBackups } from "./backups.js";
-import { hiddenBesidesTabs, showTabOf } from "./tabs.js";
+import { hiddenBesidesTabs, scrollToPlace, showTabOf } from "./tabs.js";
 
 /* ---------- alerts ---------- */
 
@@ -92,6 +92,7 @@ export function renderAll() {
     renderTimers();
     renderSystem();
     renderOrphansDialog();
+    scrollToPlace();
 }
 
 /* "Refresh" is off while the page loads (and says so) or saves. */

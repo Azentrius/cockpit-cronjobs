@@ -76,11 +76,25 @@ head_json() {
     printf '"checked_at":"%s","state":"%s","summary":"%s","items":[' "$checked" "$1" "$2"
 }
 
+# Where a click on the Status Board goes: the place on the page that shows the item (PLACES in
+# src/app/tabs.js): the latest results with the failures first, the crontabs, the notices (where
+# the page says that cron is not running).
+link() {
+    case $1 in
+        failed) printf '#/overview/results' ;;
+        unrecorded) printf '#/overview/crontab' ;;
+        cron) printf '#/overview/notices' ;;
+    esac
+}
+
 # item ID STATE TITLE VALUE DETAIL (VALUE may be empty)
 item() {
     printf '{"id":"%s","state":"%s","title":"%s",' "$1" "$2" "$3"
     if [ -n "$4" ]; then printf '"value":"%s",' "$4"; fi
-    printf '"detail":"%s","checked_at":"%s","stale_after":%s}' "$5" "$checked" "$stale"
+    printf '"detail":"%s",' "$5"
+    place=$(link "$1")
+    if [ -n "$place" ]; then printf '"link":"%s",' "$place"; fi
+    printf '"checked_at":"%s","stale_after":%s}' "$checked" "$stale"
 }
 
 # The jobs of a crontab (standard input), one line each: "J ID" for a job whose runs are recorded,

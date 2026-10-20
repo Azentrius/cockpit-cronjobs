@@ -2,9 +2,28 @@
 
 ## Unreleased
 
-The status for the Status Board keeps watching a job after it was converted to a systemd timer and
-says when the cron service is not running; the latest results show a recorded job whose scheduled run
-cron did not start.
+The status for the Status Board keeps watching a job after it was converted to a systemd timer, and
+says when the cron service is not running. A click on a tile of the Status Board opens the place on
+the page where the finding is, and Cockpit's menu shows the status next to “Cron Jobs”. The latest
+results show a recorded job whose scheduled run cron did not start.
+
+- **Links for the Status Board:** every item of the status carries a `link` to its place on the page:
+  `failed` `#/overview/results` (the latest results, failures first), `unrecorded`
+  `#/overview/crontab` (the root crontab, the other users' after it), `cron` `#/overview/notices`
+  (where the page says that cron is not running). The tile goes to the link of its most important
+  item.
+- **The page follows its address:** Cockpit keeps a page that is loaded and, when the Status Board
+  jumps to it again, only changes its address. The page now listens to `locationchanged`: the tab at
+  once, the card once the page has loaded and is shown. Every tab has an address (`#/overview`,
+  `#/timers`, `#/system`), and a tab chosen on the page goes into it, so the link to the place shown
+  before leads there again. Without a place the page opens on Overview as before; a path that is no
+  place changes nothing.
+- **Status in Cockpit's menu:** the menu entry “Cron Jobs” carries Cockpit's own status icon (red: a
+  job failed or cron is stopped; yellow: a warning, or the status is more than an hour old) with the
+  summary as its tooltip, judged as the Status Board judges it; nothing to do, no icon. For this
+  Cockpit loads the page hidden right after the login (`preload`); until it is opened it only reads
+  `/var/lib/cockpit-cronjobs/status.json` (or `status.de.json`) every five minutes and runs nothing
+  else.
 
 - **Converted jobs:** a run of a job converted to a systemd timer that failed in the last 24 hours, or
   lost its end, counts in `failed`, read from the journal of its service as the page reads it
@@ -29,6 +48,15 @@ cron did not start.
   stops cron for real and finds that in the status and on the page. A unit test for `R.missed` (within
   and past the five minutes, a run that came, runs by hand, no run, no next run, the day summer time
   ends) and a browser test (the order, the title, the runs it opens).
+- **Tests for the links and the menu:** `test/menu.test.js` (new, Node): the icon for every state, an
+  item worse than the whole, an item out of date (in German and English, with the time), what the
+  board ignores, the file of the page's language, the start once shown, and every link of the helper
+  a place of the page with an element to scroll to. `test/status.test.js`: the link of every item.
+  The browser tests open each place, follow changes of the address while the page stays loaded, the
+  tab chosen on the page in the address, paths that are no place, a reload that scrolls nowhere, the
+  page loaded hidden at a place, and the icon (failed, out of date, English, no file, hidden). The
+  end-to-end test loads the page without Cockpit's shell, as before; it starts there as well, since
+  cockpit-ws drops the icon's `notify` without a shell.
 
 ## 2.8.1 – 2026-10-19
 

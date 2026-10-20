@@ -28,6 +28,8 @@
         update: "Update",
         readOnly: "Read only",
         sourceCode: "Source code",
+        /* The tooltip of the icon in Cockpit's menu when the status is older than an hour. */
+        menuStale: (summary, when) => `${summary} (as of ${when}, out of date)`,
         none: "none",
         noEntries: "No entries.",
         loading: "Loading …",

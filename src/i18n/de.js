@@ -27,6 +27,7 @@
         update: "Update",
         readOnly: "Nur lesen",
         sourceCode: "Quellcode",
+        menuStale: (summary, when) => `${summary} (Stand ${when}, veraltet)`,
         none: "keine",
         noEntries: "Keine Einträge.",
         loading: "Wird geladen …",
