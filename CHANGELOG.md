@@ -1,13 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.9.0 – 2026-10-21
 
-The status for the Status Board keeps watching a job after it was converted to a systemd timer, and
-says when the cron service is not running. A click on a tile of the Status Board opens the place on
-the page where the finding is, and Cockpit's menu shows the status next to “Cron Jobs”. The latest
-results show a recorded job whose scheduled run cron did not start, a recorded job can be kept from
-starting while its previous run goes on, and cron's log tells when it last started the jobs that do
-not record their runs.
+The status follows converted jobs and the cron service, links to the page and shows in Cockpit's menu;
+the page shows missed runs and when cron last started a job, records all jobs of a crontab at once and
+can keep a job from starting while its previous run goes on (run recorder version 3).
 
 - **Links for the Status Board:** every item of the status carries a `link` to its place on the page:
   `failed` `#/overview/results` (the latest results, failures first), `unrecorded`
