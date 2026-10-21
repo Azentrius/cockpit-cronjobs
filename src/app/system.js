@@ -561,12 +561,14 @@ function removeRuns(user, id) {
    belongs to the start of its PID; an end with a PID to that, one without to the start
    whose failure the same process logged, else to the newest start of its command (which
    is a guess only when runs of one command overlap). A PID that started no job (the one
-   that feeds the job what follows a %) is left out. Only cron's own messages count, by the
-   fields journald sets itself (_UID 0, _COMM cron or crond), so no one can log a run for
-   it. One line for each command, "START END RESULT (USER) CMD (COMMAND)": seconds, END and
-   RESULT ("exit:N", "signal:N") "-" when not logged; nothing without journalctl. */
+   that feeds the job what follows a %) is left out. Only messages of root (_UID 0, which
+   journald sets itself, so no other user can log a run for it) as CRON (Debian's cron) or
+   CROND (cronie) count. Not by _COMM: journald reads that from /proc when it takes the
+   message, and the job's process logs its start right before it becomes the shell. One line
+   for each command, "START END RESULT (USER) CMD (COMMAND)": seconds, END and RESULT
+   ("exit:N", "signal:N") "-" when not logged; nothing without journalctl. */
 const CRON_LOG_SCRIPT = `command -v journalctl > /dev/null 2>&1 || exit 0
-journalctl --no-pager -q -o short-unix --since -35d _UID=0 _COMM=cron _COMM=crond 2>/dev/null |
+journalctl --no-pager -q -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND 2>/dev/null |
   awk '
   # "(USER) CMD (COMMAND)" of message m, whose event is ev; n the PID before COMMAND, or ""
   function job(m, ev,   j, c) {

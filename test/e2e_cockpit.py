@@ -401,6 +401,11 @@ with sync_playwright() as p:
     sh("crontab -u root -", input=start + "* * * * * { " + WHO + "; } > /tmp/cj-e2e-root-cron\n"
                                           "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n"
                                           "* * * * * exit 3 # cj-e2e-root-fail\n")
+    # and one of /etc/cron.d, kept until the status below has counted it
+    crond_fail = f"{CROND_DIR}/cj-e2e-crondfail"
+    with open(crond_fail, "w") as f:
+        f.write("* * * * * root exit 5 # cj-e2e-crond-fail\n")
+    os.chmod(crond_fail, 0o644)
     page.click("#reload")
     wait_idle(page)
     by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
@@ -413,26 +418,34 @@ with sync_playwright() as p:
     logs_all = bool(re.search(r"(^| )-L ?15( |$)", (read(f"/proc/{cron_pid}/cmdline") or "").replace("\0", " ")))
     deadline = time.time() + 30
     while time.time() < deadline:
-        journal = sh("journalctl _COMM=cron --no-pager -q -o cat --since -3min").stdout
-        if "exit 3 # cj-e2e-root-fail)" in journal and (not logs_all or (
-                re.search(r"\) END \(\[\d+\] \{ id -un", journal) and "failed with exit status 3" in journal)):
+        journal = sh("journalctl SYSLOG_IDENTIFIER=CRON --no-pager -q -o cat --since -3min").stdout
+        if "exit 3 # cj-e2e-root-fail)" in journal and "exit 5 # cj-e2e-crond-fail)" in journal and (not logs_all or (
+                re.search(r"\) END \(\[\d+\] \{ id -un", journal) and "failed with exit status 3" in journal and
+                "failed with exit status 5" in journal)):
             break
         time.sleep(2)
     page.click("#reload")
     wait_idle(page)
     started = row_of(page, "cj-e2e-root-cron").locator("td[data-last]").inner_text()
     failed = row_of(page, "cj-e2e-root-fail").locator("td[data-last]").inner_text()
-    said = "\n" + sh("journalctl _COMM=cron --no-pager -q -o short-unix -n 8").stdout
+    sums = page.locator("#sum-body tbody tr").all_inner_texts() if page.locator("#sum-card").is_visible() else []
+    said = "\n" + sh("journalctl SYSLOG_IDENTIFIER=CRON --no-pager -q -o short-unix -n 12").stdout
     page.click("#tab-system")
     hint = page.inner_text("#cronlog-hint")
+    crond_row = page.locator("#crond-body tbody tr", has_text="cj-e2e-crondfail").inner_text()
     page.click("#tab-overview")
     if logs_all:
-        check(started.startswith("OK") and "Log von cron" in started and "Fehler · Exit 3" in failed and not hint,
-              "cron at -L 15: how the runs ended, from its log: " + repr((started, failed, hint)) + said)
+        check(started.startswith("OK") and "Log von cron" in started and "Fehler · Exit 3" in failed and not hint and
+              "Fehler · Exit 5" in crond_row,
+              "cron at -L 15: how the runs ended, from its log: " + repr((started, failed, crond_row, hint)) + said)
+        check(any("cj-e2e-root-fail" in x and "Fehler · Exit 3" in x and "root-Crontab · Log von cron" in x for x in sums) and
+              any("cj-e2e-crond-fail" in x and "Fehler · Exit 5" in x and "/etc/cron.d/cj-e2e-crondfail · Log von cron" in x for x in sums),
+              "cron at -L 15: the failures in the latest results: " + repr(sums))
     else:
         check("Nicht erfasst" in started and "gestartet" in started and "gestartet" in failed and "Fehler" not in failed and
-              "-L 15" in hint, "cron as installed: the last start from its log, and a hint: " +
-              repr((started, failed, hint)) + said)
+              "Fehler" not in crond_row and "-L 15" in hint, "cron as installed: the last start from its log, and a hint: " +
+              repr((started, failed, crond_row, hint)) + said)
+        check(not any("Log von cron" in x for x in sums), "cron as installed: nothing from its log in the latest results: " + repr(sums))
     who_row = row_of(page, "0 5 1 1 *")   # yearly: the conversion checks its next 5 runs too
     who_row.locator("[data-key^='run:']").click()
     check("Außerdem gesetzt:" in page.inner_text("#run-env") and "CJ_E2E_EXPORT" in page.inner_text("#run-env"),
@@ -612,14 +625,17 @@ with sync_playwright() as p:
     def status_item(doc, name):
         return next((i for i in doc.get("items", []) if i.get("id") == name), {})
 
+    # With cron at -L 15 its log counts too: the job of /etc/cron.d by its path (that of the root
+    # crontab is gone by now, so it does not count)
     for lang, summary, running in (("en", " failed in the last 24 hours.", "running"),
                                    ("de", " in den letzten 24 Stunden fehlgeschlagen.", "läuft")):
         rc, doc, out = status_as_nobody(lang)
         failed = status_item(doc, "failed")
-        named = failed.get("detail", "").split(", ")
+        named = re.sub(r" (and|und) \d+ (more|weitere)$", "", failed.get("detail", "")).split(", ")
         check(rc == 0 and doc.get("schema") == 1 and doc.get("addon") == "cronjobs" and doc.get("state") == "danger" and
               doc.get("summary", "").endswith(summary) and failed.get("state") == "danger" and
-              "sumfail-0001" in named and f"{conv_fail}.timer" in named and fail_timer not in out and
+              "sumfail-0001" in named and f"{conv_fail}.timer" in named and f"{fail_timer}.timer" not in out and
+              (crond_fail in named) == logs_all and "cj-e2e-root-fail" not in out and
               status_item(doc, "cron").get("state") == "ok" and status_item(doc, "cron").get("value") == running and
               USER not in out,
               f"the status ({lang}) as a user without rights: " + out)
@@ -646,6 +662,7 @@ with sync_playwright() as p:
     sh(f"systemctl disable --now {conv_fail}.timer; rm -f /etc/systemd/system/{conv_fail}.service /etc/systemd/system/{conv_fail}.timer; "
        f"systemctl daemon-reload; systemctl reset-failed {conv_fail}.service")
     sh("crontab -u root -", input=start)
+    os.remove(crond_fail)
     shutil.rmtree(f"{STATE}/runs/sumfail-0001", ignore_errors=True)
     page.click("#reload")
     wait_idle(page)

@@ -1,13 +1,14 @@
 /* Cron Jobs: the latest results at a glance: the last run of every recorded job (in
  * every crontab the page shows) and of every active systemd timer, failures first, then
- * the recorded jobs whose last scheduled run cron did not start.
+ * the recorded jobs whose last scheduled run cron did not start; and the last run of the
+ * other jobs where cron's log tells how it ended.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import { $, C, cronNext, fill, fmtDuration, fmtShort, h, icon, keyOf, R, SD, state, T } from "./core.js";
 import { jobInfo, jobsOf, jobTz, runsOf } from "./crontab.js";
-import { labelEl, runLabel, timerDuration, timerRunLabel } from "./page.js";
+import { cronLogLabel, labelEl, runLabel, timerDuration, timerRunLabel } from "./page.js";
 import { openRuns, openTimerRuns } from "./runs.js";
 
 /* Whether the successful ones are listed too; failed, missed and running ones always are. */
@@ -20,6 +21,17 @@ const MISSED = { kind: "warning", icon: "clock" };
    within the minute, a busy server a little later, and the browser's clock may be off. */
 const MISSED_GRACE = 5 * 60 * 1000;
 
+/* The newest run cron started of a job that does not record its runs, from its log, when the
+   log tells how it ended (C.cronLogOutcome): failed, OK or running; "ended" says too little. */
+const LOGGED = { failed: "failed", signal: "failed", ok: "ok", running: "running" };
+function fromCronLog(out, user, command, source) {
+    const run = C.lastRun(state.cronLog, user, command);
+    const s = run ? LOGGED[C.cronLogOutcome(run, state.basics.cronLogs)] : null;
+    if (!s) return;
+    out.push({ state: s, label: cronLogLabel(run), when: run.start, dur: run.end !== null ? Math.max(0, run.end - run.start) / 1000 : null,
+               name: command, source: source + " · " + T.inCronLog, key: null, title: T.cronLogTitle, open: null });
+}
+
 /* Everything with a last result: { state: "failed" | "missed" | "running" | "ok", label,
    when (ms), due (ms, the run that was missed), dur (s or null), name, source, key,
    title, open }. A run that was aborted counts as failed: it needs a look as much. */
@@ -29,7 +41,11 @@ function results() {
     const tabs = [["root", state.root]].concat(Object.keys(state.users).sort().map(u => [u, state.users[u]]));
     tabs.forEach(([user, tab]) => jobsOf(tab).forEach(({ e, i }) => {
         const info = jobInfo(e);
-        if (!e.enabled || !info.capture) return;
+        if (!e.enabled) return;
+        if (!info.capture) {
+            fromCronLog(out, user, e.command, user === "root" ? T.rootTitle : T.userTitle(user));
+            return;
+        }
         const job = runsOf(user, info.capture.id);
         if (!job) return;
         const key = keyOf(user, "sum", i);
@@ -72,6 +88,12 @@ function results() {
         if (!l) return;
         out.push(Object.assign(item, { state: l.kind === "success" ? "ok" : "failed", label: l, when: t.last, dur: timerDuration(t) }));
     });
+    const sys = state.sys;
+    if (sys) {
+        sys.etc.forEach(j => fromCronLog(out, j.user, j.command, "/etc/crontab"));
+        sys.crond.forEach(j => { if (!j.ignored && j.user && j.command) fromCronLog(out, j.user, j.command, "/etc/cron.d/" + j.file); });
+        sys.users.forEach(j => { if (j.enabled && !state.users[j.user]) fromCronLog(out, j.user, j.command, T.userTitle(j.user)); });
+    }
     return out.sort((a, b) => ORDER[a.state] - ORDER[b.state] || (b.when || 0) - (a.when || 0) || a.name.localeCompare(b.name));
 }
 
@@ -89,7 +111,8 @@ export function renderSummary() {
                                  running ? T.sumRunning(running) : null, ok ? T.sumOk(ok) : null].filter(Boolean).join(" · ");
     const rows = all.filter(x => x.state !== "ok" || showOk).map(x => h("tr", null,
         h("td", { class: "az-nowrap", "data-label": T.colResult },
-            labelEl(x.label.kind, x.label.icon, x.label.text, { "data-key": x.key, title: x.title, onclick: x.open })),
+            x.open ? labelEl(x.label.kind, x.label.icon, x.label.text, { "data-key": x.key, title: x.title, onclick: x.open })
+                : h("span", { title: x.title }, labelEl(x.label.kind, x.label.icon, x.label.text))),
         h("td", { "data-label": T.colJob },
             h("div", { class: "cron-cell" },
                 h("span", { class: "az-mono" }, x.name),
