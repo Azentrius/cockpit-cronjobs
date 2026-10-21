@@ -402,7 +402,7 @@ with sync_playwright() as p:
                                           "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n"
                                           "* * * * * exit 3 # cj-e2e-root-fail\n")
     # and one of /etc/cron.d, kept until the status below has counted it
-    crond_fail = f"{CROND_DIR}/cj-e2e-fail"
+    crond_fail = f"{CROND_DIR}/cj-e2e-crondfail"
     with open(crond_fail, "w") as f:
         f.write("* * * * * root exit 5 # cj-e2e-crond-fail\n")
     os.chmod(crond_fail, 0o644)
@@ -432,14 +432,14 @@ with sync_playwright() as p:
     said = "\n" + sh("journalctl _COMM=cron --no-pager -q -o short-unix -n 8").stdout
     page.click("#tab-system")
     hint = page.inner_text("#cronlog-hint")
-    crond_row = page.locator("#crond-body tbody tr", has_text="cj-e2e-fail").inner_text()
+    crond_row = page.locator("#crond-body tbody tr", has_text="cj-e2e-crondfail").inner_text()
     page.click("#tab-overview")
     if logs_all:
         check(started.startswith("OK") and "Log von cron" in started and "Fehler · Exit 3" in failed and not hint and
               "Fehler · Exit 5" in crond_row,
               "cron at -L 15: how the runs ended, from its log: " + repr((started, failed, crond_row, hint)) + said)
         check(any("cj-e2e-root-fail" in x and "Fehler · Exit 3" in x and "root-Crontab · Log von cron" in x for x in sums) and
-              any("cj-e2e-crond-fail" in x and "Fehler · Exit 5" in x and "/etc/cron.d/cj-e2e-fail · Log von cron" in x for x in sums),
+              any("cj-e2e-crond-fail" in x and "Fehler · Exit 5" in x and "/etc/cron.d/cj-e2e-crondfail · Log von cron" in x for x in sums),
               "cron at -L 15: the failures in the latest results: " + repr(sums))
     else:
         check("Nicht erfasst" in started and "gestartet" in started and "gestartet" in failed and "Fehler" not in failed and
@@ -634,7 +634,7 @@ with sync_playwright() as p:
         named = re.sub(r" (and|und) \d+ (more|weitere)$", "", failed.get("detail", "")).split(", ")
         check(rc == 0 and doc.get("schema") == 1 and doc.get("addon") == "cronjobs" and doc.get("state") == "danger" and
               doc.get("summary", "").endswith(summary) and failed.get("state") == "danger" and
-              "sumfail-0001" in named and f"{conv_fail}.timer" in named and fail_timer not in out and
+              "sumfail-0001" in named and f"{conv_fail}.timer" in named and f"{fail_timer}.timer" not in out and
               (crond_fail in named) == logs_all and "cj-e2e-root-fail" not in out and
               status_item(doc, "cron").get("state") == "ok" and status_item(doc, "cron").get("value") == running and
               USER not in out,
