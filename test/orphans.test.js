@@ -347,6 +347,13 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest start of each command,
         "1792503100.3 host CRON[104]: (root) MAIL (mailed 10 bytes of output)\n" +
         "1792503200.4 host CRON[105]: (root) CMD (echo \": (x) CMD (y)\")\n" +
         "-- Boot 1234 --\n" +
+        /* Debian's cron with -L 8 and more: the job's PID before the command, and END lines */
+        "1792507200.5 host CRON[106]: (root) CMD ([4500] cd / && run-parts --report /etc/cron.hourly)\n" +
+        "1792503700.1 host CRON[107]: (root) CMD ([4321] /usr/local/bin/backup.sh)\n" +
+        "1792503760.1 host CRON[108]: (root) CMD ([4400] /usr/local/bin/backup.sh)\n" +
+        "1792503770.1 host CRON[108]: (root) END ([4400] /usr/local/bin/backup.sh)\n" +
+        "1792503780.1 host CRON[109]: (root) CMD ([ -x /usr/bin/foo ] && foo)\n" +
+        "1792503790.1 host CRON[110]: (root) CMD ([12]x)\n" +
         "EOF\n", { mode: 0o755 });
     const r = spawnSync(sh, ["-c", LOG_SCRIPT], {
         env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", FAKE_ARGS: path.join(root, "args") },
@@ -356,10 +363,15 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest start of each command,
     assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), [
         "1792503000 (www-data) CMD (php -f /var/www/cron.php)",
         "1792503200 (root) CMD (echo \": (x) CMD (y)\")",
-        "1792503600 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
-    ]);
+        "1792503760 (root) CMD (/usr/local/bin/backup.sh)",
+        "1792503780 (root) CMD ([ -x /usr/bin/foo ] && foo)",
+        "1792503790 (root) CMD ([12]x)",
+        "1792507200 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+    ], "one line for each command, whether cron logged a PID or not; brackets that are no PID stay");
     const log = C.parseCronLog(r.stdout.toString());
-    assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792503600000);
+    assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792507200000);
+    assert.strictEqual(C.lastStart(log, "root", "/usr/local/bin/backup.sh"), 1792503760000, "with the PID");
+    assert.strictEqual(C.lastStart(log, "root", "[ -x /usr/bin/foo ] && foo"), 1792503780000);
     /* only cron's own messages, by the fields journald sets: _UID 0 and _COMM cron or crond */
     assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => a.startsWith("_") || a.startsWith("-")),
                            ["--no-pager", "-q", "-o", "--since", "-35d", "_UID=0", "_COMM=cron", "_COMM=crond"]);

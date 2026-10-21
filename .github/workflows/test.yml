@@ -95,15 +95,20 @@ jobs:
   # The main flows against a real Cockpit, root's real crontab and a running cron daemon.
   # Destructive, which is what the runner's throwaway VM is for (see test/e2e_cockpit.py).
   # Twice: with the Cockpit of Ubuntu 24.04 itself (314), which a server keeps unless it is set up
-  # otherwise, and with the one from the backports, as Cockpit recommends for Ubuntu.
+  # otherwise, and with the one from the backports, as Cockpit recommends for Ubuntu. The second
+  # time cron logs more (-L 15: also the end, failures and the job's PID), as an admin may set it.
   e2e-cockpit:
-    name: e2e (Cockpit from the ${{ matrix.cockpit }})
+    name: e2e (Cockpit from the ${{ matrix.cockpit }}${{ matrix.cron-opts && format(', cron {0}', matrix.cron-opts) || '' }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        cockpit: [archive, backports]
+        include:
+          - cockpit: archive
+            cron-opts: ""
+          - cockpit: backports
+            cron-opts: "-L 15"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,13 +119,23 @@ jobs:
       - name: Install Cockpit and cron
         env:
           COCKPIT: ${{ matrix.cockpit }}
+          CRON_OPTS: ${{ matrix.cron-opts }}
         run: |
           . /etc/os-release
           sudo apt-get update
           if [ "$COCKPIT" = backports ]; then set -- -t "$VERSION_CODENAME-backports"; else set --; fi
           sudo apt-get install -y --no-install-recommends "$@" cockpit-ws cockpit-bridge cockpit-system
           sudo apt-get install -y --no-install-recommends cron
-          sudo systemctl start cron
+          if [ -n "$CRON_OPTS" ]; then
+            sudo mkdir -p /etc/systemd/system/cron.service.d
+            printf '[Service]\nEnvironment="EXTRA_OPTS=%s"\n' "$CRON_OPTS" |
+              sudo tee /etc/systemd/system/cron.service.d/options.conf > /dev/null
+            sudo systemctl daemon-reload
+          fi
+          sudo systemctl restart cron
+          args=$(ps -o args= -p "$(systemctl show -p MainPID --value cron)")
+          echo "cron: $args"
+          case "$args " in *" -P${CRON_OPTS:+ $CRON_OPTS} "*) ;; *) echo "::error::cron runs without its options"; exit 1;; esac
           sudo ln -sfn "$GITHUB_WORKSPACE/src" /usr/share/cockpit/cronjobs
           # The status for the Status Board as the package installs it; the test starts its unit.
           sudo install -D -m 755 status/cronjobs-status /usr/lib/cockpit-cronjobs/cronjobs-status
