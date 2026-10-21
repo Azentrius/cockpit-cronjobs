@@ -548,10 +548,11 @@ function removeRuns(user, id) {
 }
 
 /* When cron last started each command, from its log in the journal of the last 35 days:
-   cron logs each start as "(USER) CMD (COMMAND)" (see C.loggedCommand). Only cron's own
-   messages count, by the fields journald sets itself (_UID 0, _COMM cron or crond), so no
-   one can log a start for it. The newest of each, "SECONDS (USER) CMD (COMMAND)"; nothing
-   without journalctl. */
+   cron logs each start as "(USER) CMD (COMMAND)" (see C.loggedCommand), Debian's cron with
+   -L 8 and more as "(USER) CMD ([PID] COMMAND)", PID being the job's, which is left out
+   here. Only cron's own messages count, by the fields journald sets itself (_UID 0, _COMM
+   cron or crond), so no one can log a start for it. The newest of each, "SECONDS (USER) CMD
+   (COMMAND)"; nothing without journalctl. */
 const CRON_LOG_SCRIPT = `command -v journalctl > /dev/null 2>&1 || exit 0
 journalctl --no-pager -q -o short-unix --since -35d _UID=0 _COMM=cron _COMM=crond 2>/dev/null |
   awk '{
@@ -559,6 +560,9 @@ journalctl --no-pager -q -o short-unix --since -35d _UID=0 _COMM=cron _COMM=cron
     if (i == 0) next
     m = substr($0, i + 2)
     if (m !~ /^[(][^()]*[)] CMD [(]/) next
+    j = index(m, " CMD (") + 5
+    c = substr(m, j + 1)
+    if (c ~ /^[[][0-9]+[]] /) m = substr(m, 1, j) substr(c, index(c, " ") + 1)
     split($1, t, ".")
     last[m] = t[1]
   }

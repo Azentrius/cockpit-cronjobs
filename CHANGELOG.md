@@ -2,8 +2,13 @@
 
 ## Unreleased
 
-The descriptions say what the page does since 2.8 and 2.9.
+The descriptions say what the page does since 2.8 and 2.9; the last start from cron's log is found
+however much cron logs.
 
+- **Last start with cron's PID:** Debian's cron started with `-L 8` or more (the job's PID in the log)
+  logs a start as `(USER) CMD ([PID] COMMAND)`; the page found no start then. It leaves the PID out
+  now, so such starts count, and those logged before and after a change of the option count as one
+  command. The end-to-end test runs once with cron at `-L 15`.
 - **Packages:** the description of the `.deb` and `.rpm` and the AppStream data (Cockpit's Applications
   page) name the crontabs of other users, missed runs, starts from cron's log and the status for the
   Azentrius Status Board.

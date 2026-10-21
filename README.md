@@ -23,9 +23,10 @@ starts jobs on demand and turns cron jobs into systemd timers.
   is five minutes past; runs started by hand do not stand in for it.
 - **Starts from cron's log.** For a job that does not record its runs, and for the jobs in
   `/etc/crontab`, `/etc/cron.d` and the crontabs the page only shows, the page says when cron last started
-  it: cron logs each start as `(USER) CMD (COMMAND)`, and the page reads those of the last 35 days from
-  the journal, only messages cron itself logged (`_UID` 0, `_COMM` cron or crond, fields journald sets),
-  and matches them by user and by the command as cron logs it. The log does not say how a run ended.
+  it: cron logs each start as `(USER) CMD (COMMAND)` (Debian's cron with `-L 8` and more puts the job's
+  PID before the command), and the page reads those of the last 35 days from the journal, only messages
+  cron itself logged (`_UID` 0, `_COMM` cron or crond, fields journald sets), and matches them by user
+  and by the command as cron logs it. As cron is set up by default, the log does not say how a run ended.
 - **Runs from the journal.** Every systemd timer gets the same runs dialog as a recorded job, from the
   journal of its service: start, duration, result and output. A job converted to a timer keeps its
   history there: the runs recorded before the conversion and those of its service since.
