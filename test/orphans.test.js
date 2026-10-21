@@ -418,9 +418,10 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, i
     assert.deepStrictEqual(C.lastRun(log, "root", "/usr/local/bin/fail.sh"),
                            { start: 1792503800000, end: 1792503801000, result: { exit: 3 } }, "with the PID");
     assert.strictEqual(C.lastStart(log, "root", "[ -x /usr/bin/foo ] && foo"), 1792503780000);
-    /* only cron's own messages, by the fields journald sets: _UID 0 and _COMM cron or crond */
-    assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => a.startsWith("_") || a.startsWith("-")),
-                           ["--no-pager", "-q", "-o", "--since", "-35d", "_UID=0", "_COMM=cron", "_COMM=crond"]);
+    /* only messages of root (_UID, which journald sets) as CRON or CROND; not by _COMM, which journald
+       may read after the job's process became its shell */
+    assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => /^[-_A-Z]/.test(a)),
+                           ["--no-pager", "-q", "-o", "--since", "-35d", "_UID=0", "SYSLOG_IDENTIFIER=CRON", "SYSLOG_IDENTIFIER=CROND"]);
 });
 
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);

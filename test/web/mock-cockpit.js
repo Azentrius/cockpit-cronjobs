@@ -357,8 +357,8 @@
             const bytes = new TextEncoder().encode(M.root);
             return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
         }
-        /* cron's log in the journal (CRON_LOG_SCRIPT): the newest start of each command */
-        if (/_COMM=cron/.test(script)) {
+        /* cron's log in the journal (CRON_LOG_SCRIPT): the newest run of each command */
+        if (/SYSLOG_IDENTIFIER=CRON /.test(script)) {
             M.cronLogReads++;
             if (M.cronLog === null) fail({ exit_status: 1, problem: null, message: "journal unreadable" });
             return M.cronLog.map(([ago, user, command, endAgo, result]) =>

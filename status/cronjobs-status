@@ -544,7 +544,7 @@ count_log() {
     logs_failures && command -v journalctl > /dev/null 2>&1 || return 0
     logged=1
     system_jobs >> "$tmp/known"
-    journalctl --no-pager -q -o short-unix --since "@$since" _UID=0 _COMM=cron _COMM=crond < /dev/null 2> /dev/null |
+    journalctl --no-pager -q -o short-unix --since "@$since" _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND < /dev/null 2> /dev/null |
         awk "$FAILURES_AWK" > "$tmp/logfailed"
     awk 'FILENAME == ARGV[1] {
              k = substr($0, index($0, " ") + 1)

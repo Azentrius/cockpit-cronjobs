@@ -418,7 +418,7 @@ with sync_playwright() as p:
     logs_all = bool(re.search(r"(^| )-L ?15( |$)", (read(f"/proc/{cron_pid}/cmdline") or "").replace("\0", " ")))
     deadline = time.time() + 30
     while time.time() < deadline:
-        journal = sh("journalctl _COMM=cron --no-pager -q -o cat --since -3min").stdout
+        journal = sh("journalctl SYSLOG_IDENTIFIER=CRON --no-pager -q -o cat --since -3min").stdout
         if "exit 3 # cj-e2e-root-fail)" in journal and "exit 5 # cj-e2e-crond-fail)" in journal and (not logs_all or (
                 re.search(r"\) END \(\[\d+\] \{ id -un", journal) and "failed with exit status 3" in journal and
                 "failed with exit status 5" in journal)):
@@ -429,7 +429,7 @@ with sync_playwright() as p:
     started = row_of(page, "cj-e2e-root-cron").locator("td[data-last]").inner_text()
     failed = row_of(page, "cj-e2e-root-fail").locator("td[data-last]").inner_text()
     sums = page.locator("#sum-body tbody tr").all_inner_texts() if page.locator("#sum-card").is_visible() else []
-    said = "\n" + sh("journalctl _COMM=cron --no-pager -q -o short-unix -n 8").stdout
+    said = "\n" + sh("journalctl SYSLOG_IDENTIFIER=CRON --no-pager -q -o short-unix -n 12").stdout
     page.click("#tab-system")
     hint = page.inner_text("#cronlog-hint")
     crond_row = page.locator("#crond-body tbody tr", has_text="cj-e2e-crondfail").inner_text()

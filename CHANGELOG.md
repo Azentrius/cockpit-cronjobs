@@ -14,6 +14,11 @@ start from cron's log is found however much cron logs.
   `unrecorded` that their failures show there. cron's log is read only then, from the last 24 hours.
 - **Latest results:** the runs from cron's log whose end it tells (failed, OK, running) are listed too,
   marked as from cron's log, so the link of the status item leads to them.
+- **Starts that went missing from cron's log:** the page took only lines with `_COMM` cron or crond,
+  but cron logs a start from the job's process right before it becomes the shell, and journald reads
+  `_COMM` from `/proc` when it takes the message: under load it was `sh` already, and the start was not
+  found (seen with three jobs starting at once). Lines now count when root logged them (`_UID` 0, set
+  by journald) as `CRON` or `CROND`.
 - **Results from cron's log:** for a job that does not record its runs, and for those in `/etc/crontab`,
   `/etc/cron.d` and the crontabs the page only shows, the page reads from cron's log how the newest run
   ended, where cron logs it: Debian's cron with `-L 15` (or 2 and 4) logs the end and failures, with the
