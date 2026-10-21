@@ -13,12 +13,14 @@
 #
 # cockpit-cronjobs-status.timer runs "write" every 15 minutes. It reads the crontabs of root and
 # of the other users and the recorded runs of their jobs (see cockpit-cronjobs-run), the runs of
-# the jobs converted from them to systemd timers (from the journal), and whether the cron service
-# runs, and writes only numbers, states, job IDs and unit names: no user names, no commands, no
+# the jobs converted from them to systemd timers (from the journal), whether the cron service
+# runs, and, when Debian's cron logs failed jobs (-L with 4), cron's log of the last 24 hours, and
+# writes only numbers, states, job IDs, unit names and paths: no user names, no commands, no
 # output. A job counts as failed when one of its recorded runs in the last 24 hours ended with an
 # exit code other than 0 or was aborted, as on the page; a converted job when systemd says a run of
-# its service in the last 24 hours failed, or the run lost its end. Jobs in /etc/crontab and
-# /etc/cron.d are not counted: the page cannot record them.
+# its service in the last 24 hours failed, or the run lost its end; any other job of those crontabs,
+# /etc/crontab and /etc/cron.d when cron logged that a run of it started in the last 24 hours
+# failed (the page's CRON_LOG_SCRIPT reads the same lines).
 #
 # Exit codes: 0 done (a failed job is a finding, not an error), 64 wrong call, 77 "write" without
 # root, 1 the status could not be written.
@@ -28,10 +30,11 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-# CRONJOBS_STATE_DIR, CRONJOBS_SPOOL_DIR, CRONJOBS_PAGE_DIR, CRONJOBS_UNIT_DIR and CRONJOBS_SYSTEMD
-# are for the tests.
+# CRONJOBS_STATE_DIR, CRONJOBS_SPOOL_DIR, CRONJOBS_PAGE_DIR, CRONJOBS_UNIT_DIR, CRONJOBS_SYSTEMD,
+# CRONJOBS_ETC_DIR and CRONJOBS_CRON_ARGS are for the tests.
 state=${CRONJOBS_STATE_DIR:-/var/lib/cockpit-cronjobs}
 units=${CRONJOBS_UNIT_DIR:-/etc/systemd/system}
+etc=${CRONJOBS_ETC_DIR:-/etc}
 # Seconds after which the Status Board calls the status stale: four runs of the timer missed.
 stale=3600
 # Failed runs count for 24 hours.
@@ -98,10 +101,12 @@ item() {
 }
 
 # The jobs of a crontab (standard input), one line each: "J ID" for a job whose runs are recorded,
-# "U" for one that is not. A job is what the page takes for an enabled job (C.parseUserCrontab):
-# not a comment or a variable, a known @nickname or five valid schedule fields, then a command.
-# Recorded means wrapped as C.unwrapCommand reads it: /…/cockpit-cronjobs-run, an ID and the
-# command in single quotes ('…' and \' only), not blank.
+# "U KEY" for one that is not, KEY being how cron logs its start: "(USER) CMD (COMMAND)", USER the
+# crontab's owner (owner=), COMMAND as C.loggedCommand makes it (logged). A job is what the page
+# takes for an enabled job (C.parseUserCrontab): not a comment or a variable, a known @nickname or
+# five valid schedule fields, then a command; in a system crontab (sys=1: /etc/crontab, /etc/cron.d,
+# C.parseSystemCrontab) the user between them. Recorded means wrapped as C.unwrapCommand reads it:
+# /…/cockpit-cronjobs-run, an ID and the command in single quotes ('…' and \' only), not blank.
 JOBS_AWK='
 function val(t, f,   n, i, a) {
     if (t ~ /^[0-9]+$/) {
@@ -161,9 +166,40 @@ function recorded(c,   s, w) {
     id = w
     return 1
 }
+# What cron hands to the shell (C.cronCommand: up to the first % not escaped, \% as %), then its
+# bytes as cron logs them (C.mkprints: below 32 as ^X, DEL as ^?, from 128 as \ooo).
+function logged(s,   c, i, n, ch, esc, out, b) {
+    c = ""
+    esc = 0
+    n = length(s)
+    for (i = 1; i <= n; i++) {
+        ch = substr(s, i, 1)
+        if (esc) {
+            esc = 0
+            if (ch == "%") c = substr(c, 1, length(c) - 1) "%"
+            else c = c ch
+            continue
+        }
+        if (ch == "%") break
+        if (ch == "\\") esc = 1
+        c = c ch
+    }
+    out = ""
+    n = length(c)
+    for (i = 1; i <= n; i++) {
+        ch = substr(c, i, 1)
+        b = ord[ch]
+        if (b < 32) out = out "^" sprintf("%c", b + 64)
+        else if (b == 127) out = out "^?"
+        else if (b >= 128) out = out sprintf("\\%03o", b)
+        else out = out ch
+    }
+    return out
+}
 BEGIN {
     split("0 0 1 1 0", lo, " ")
     split("59 23 31 12 7", hi, " ")
+    for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
 }
 {
     t = $0
@@ -180,10 +216,17 @@ BEGIN {
         for (i = 1; i <= 5; i++) if (!field(fld[i], i)) next
     }
     cmd = substr(t, RLENGTH + 1)
+    user = owner
+    if (sys) {
+        if (!match(cmd, /^[^[:space:]]+[[:space:]]+/)) next
+        user = substr(cmd, 1, RLENGTH)
+        sub(/[[:space:]]+$/, "", user)
+        cmd = substr(cmd, RLENGTH + 1)
+    }
     sub(/[[:space:]]+$/, "", cmd)
     if (cmd == "") next
-    if (recorded(cmd)) print "J " id
-    else print "U"
+    if (!sys && recorded(cmd)) print "J " id
+    else print "U (" user ") CMD (" logged(cmd) ")"
 }
 '
 
@@ -232,6 +275,64 @@ END {
         if (failed[id] || (!done[id] && k < n)) found = 1
     }
     exit !found
+}
+'
+
+# The jobs that cron's log (standard input: journalctl -o short-unix, oldest first) says failed,
+# each once, as JOBS_AWK names them: "(USER) CMD (COMMAND)" of a start whose failure "(CRON) error
+# (grandchild #PID failed with exit status N)" or "... terminated by signal N" names its PID, as the
+# page reads them (CRON_LOG_SCRIPT). PID is the job's: that of the start line, or "[PID]" before
+# the command in it (-L 8). A PID that started no job (the one that feeds the job what follows a %)
+# is left out, and so are jobs of the run recorder: their runs count from their records.
+FAILURES_AWK='
+{
+    i = index($0, ": (")
+    if (i == 0) next
+    m = substr($0, i + 2)
+    p = substr($0, 1, i - 1)
+    if (!match(p, /[[][0-9]+[]]$/)) next
+    p = substr(p, RSTART + 1, RLENGTH - 2)
+    if (m ~ /^[(][^()]*[)] CMD [(].*[)]$/) {
+        j = index(m, " CMD (") + 5
+        c = substr(m, j + 1, length(m) - j - 1)
+        if (c ~ /^[[][0-9]+[]] /) {
+            p = substr(c, 2, index(c, "]") - 2)
+            c = substr(c, index(c, " ") + 1)
+        }
+        key[p] = substr(m, 1, index(m, ")")) " CMD (" c ")"
+        own[p] = match(c, /^\/[^ ]*\/cockpit-cronjobs-run/) && (substr(c, RLENGTH + 1, 1) == " " || substr(c, RLENGTH + 1, 1) == "^")
+    } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
+        split(m, w, " ")
+        n = substr(w[4], 2)
+        if (!(n in key) || own[n] || (key[n] in seen)) next
+        seen[key[n]] = 1
+        print key[n]
+    }
+}
+'
+
+# Whether the -L of a cron command line (standard input, as BASICS_SCRIPT reads it) has 4: Debian's
+# cron then logs failed jobs. As C.cronLogs reads it: 1 without one, the last one counting (getopt
+# "fPlL:nNx:", atoi).
+LEVEL_AWK='
+{
+    level = 1
+    for (k = 2; k <= NF; k++) {
+        w = $k
+        if (w == "--") break
+        if (w !~ /^-[^-]/) continue
+        for (j = 2; j <= length(w); j++) {
+            c = substr(w, j, 1)
+            if (c != "L" && c != "x") continue
+            if (j < length(w)) v = substr(w, j + 1)
+            else v = $(++k)
+            if (c == "L") level = int(v)
+            break
+        }
+    }
+    level = (level % 16 + 16) % 16
+    if (int(level / 4) % 2) exit 0
+    exit 1
 }
 '
 
@@ -366,14 +467,16 @@ count_timers() {
     done < "$tmp/units"
 }
 
-# Counts the jobs into total, recorded and bad, and writes the IDs of the failed ones to
-# $tmp/failed. Crontabs of users the system does not know are skipped, as cron skips them.
+# Counts the jobs into total, recorded and bad, writes the IDs of the failed ones to $tmp/failed
+# and the others as cron's log names them to $tmp/known ("- KEY"). Crontabs of users the system
+# does not know are skipped, as cron skips them.
 count() {
     total=0
     recorded=0
     bad=0
     seen=' '
     : > "$tmp/failed"
+    : > "$tmp/known"
     dir=$(spool)
     [ -n "$dir" ] || return 0
     for tab in "$dir"/*; do
@@ -382,10 +485,11 @@ count() {
         case $user in .*|*~|*.tmp|tmp.*) continue ;; esac
         case $user in [!A-Za-z0-9_]*|*[!A-Za-z0-9._-]*) continue ;; esac
         id -u "$user" > /dev/null 2>&1 || continue
-        if ! awk -v q="'" "$JOBS_AWK" < "$tab" > "$tmp/jobs"; then
+        if ! awk -v q="'" -v owner="$user" -v sys=0 "$JOBS_AWK" < "$tab" > "$tmp/jobs"; then
             echo "cronjobs-status: cannot read the crontab of $user" >&2
             exit 1
         fi
+        sed -n 's/^U /- /p' "$tmp/jobs" >> "$tmp/known"
         while read -r kind job; do
             total=$((total + 1))
             [ "$kind" = J ] || continue
@@ -401,20 +505,82 @@ count() {
     done
 }
 
-# The failed jobs by ID and the failed timers of root's crontab by name, the first few and how many
-# more; the timers of other users' crontabs only in that number.
+# Whether Debian's cron logs failed jobs (LEVEL_AWK), from the command line of the running cron,
+# read as the page reads it (BASICS_SCRIPT); CRONJOBS_CRON_ARGS stands in for it in the tests.
+# cronie (crond) logs no failure.
+logs_failures() {
+    if [ -n "${CRONJOBS_CRON_ARGS+x}" ]; then
+        a=$CRONJOBS_CRON_ARGS
+    else
+        p=$(pgrep -o -x cron 2> /dev/null) || return 1
+        [ -r "/proc/$p/cmdline" ] || return 1
+        a=$(tr '\000\n' '  ' < "/proc/$p/cmdline")
+    fi
+    [ -n "$a" ] || return 1
+    printf '%s\n' "$a" | awk "$LEVEL_AWK"
+}
+
+# The jobs of /etc/crontab and /etc/cron.d as cron's log names them, one line each: "PATH KEY".
+# Debian's cron reads only names of letters, digits, "_" and "-" in /etc/cron.d.
+system_jobs() {
+    if [ -f "$etc/crontab" ]; then
+        awk -v q="'" -v sys=1 "$JOBS_AWK" < "$etc/crontab" | sed -n 's|^U |/etc/crontab |p'
+    fi
+    for f in "$etc"/cron.d/*; do
+        [ -f "$f" ] || continue
+        n=${f##*/}
+        case $n in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+        awk -v q="'" -v sys=1 "$JOBS_AWK" < "$f" | sed -n "s|^U |/etc/cron.d/$n |p"
+    done
+}
+
+# When cron logs failed jobs (logged=1): counts the jobs it logged a failure of since $since into
+# bad, writes the paths of those in /etc/crontab and /etc/cron.d to $tmp/failed and counts those of
+# the crontabs in unnamed. Only jobs that are there now count, and those that record their runs
+# count from their records (count).
+count_log() {
+    logged=0
+    unnamed=0
+    logs_failures && command -v journalctl > /dev/null 2>&1 || return 0
+    logged=1
+    system_jobs >> "$tmp/known"
+    journalctl --no-pager -q -o short-unix --since "@$since" _UID=0 _COMM=cron _COMM=crond < /dev/null 2> /dev/null |
+        awk "$FAILURES_AWK" > "$tmp/logfailed"
+    awk 'FILENAME == ARGV[1] {
+             k = substr($0, index($0, " ") + 1)
+             if (!(k in name) || name[k] == "-") name[k] = $1
+             next
+         }
+         $0 in name { print name[$0] }' "$tmp/known" "$tmp/logfailed" > "$tmp/lognames"
+    while read -r n; do
+        bad=$((bad + 1))
+        if [ "$n" = - ]; then unnamed=$((unnamed + 1)); else printf '%s\n' "$n" >> "$tmp/failed"; fi
+    done < "$tmp/lognames"
+}
+
+# The failed jobs by ID or path and the failed timers of root's crontab by name, the first few and
+# how many more; the timers of other users' crontabs and the failed jobs of the crontabs that do
+# not record their runs only in that number.
 failed_list() {
     sort -u "$tmp/failed" > "$tmp/ids"
     n=$(wc -l < "$tmp/ids" | tr -d ' ')
     if [ "$n" = 0 ]; then
-        if [ "$hidden" = 1 ]; then
-            say "1 timer converted from the crontab of another user" "1 aus der Crontab eines anderen Benutzers umgewandelter Timer"
-        else
-            say "$hidden timers converted from the crontabs of other users" "$hidden aus Crontabs anderer Benutzer umgewandelte Timer"
+        parts=
+        if [ "$unnamed" = 1 ]; then
+            parts=$(say "1 job without recording, from cron's log" "1 Job ohne Aufzeichnung, aus dem Log von cron")
+        elif [ "$unnamed" -gt 1 ]; then
+            parts=$(say "$unnamed jobs without recording, from cron's log" "$unnamed Jobs ohne Aufzeichnung, aus dem Log von cron")
         fi
+        if [ "$hidden" -gt 0 ] && [ -n "$parts" ]; then parts="$parts; "; fi
+        if [ "$hidden" = 1 ]; then
+            parts="$parts$(say "1 timer converted from the crontab of another user" "1 aus der Crontab eines anderen Benutzers umgewandelter Timer")"
+        elif [ "$hidden" -gt 1 ]; then
+            parts="$parts$(say "$hidden timers converted from the crontabs of other users" "$hidden aus Crontabs anderer Benutzer umgewandelte Timer")"
+        fi
+        printf '%s' "$parts"
         return
     fi
-    more=$((hidden))
+    more=$((hidden + unnamed))
     if [ "$n" -gt "$named" ]; then more=$((more + n - named)); fi
     list=$(head -n "$named" "$tmp/ids" | paste -sd ',' - | sed 's/,/, /g')
     if [ "$more" -gt 0 ]; then
@@ -432,13 +598,13 @@ worst() {
     printf none
 }
 
-# The status document in $lang, from what count, count_timers and cron_service found.
+# The status document in $lang, from what count, count_log, count_timers and cron_service found.
 document() {
     known=$((recorded + converted))
 
     f_title=$(say "Failed jobs (last 24 hours)" "Fehlgeschlagene Jobs (letzte 24 Stunden)")
     f_value=
-    if [ "$known" = 0 ]; then
+    if [ "$known" = 0 ] && [ "$logged" = 0 ]; then
         f_state=none
         f_detail=$(say "No job records its runs." "Kein Job zeichnet seine Läufe auf.")
     elif [ "$bad" -gt 0 ]; then
@@ -448,7 +614,13 @@ document() {
     else
         f_state=ok
         f_value=0
-        if [ "$converted" -gt 0 ]; then
+        if [ "$logged" = 1 ] && [ "$known" = 0 ]; then
+            f_detail=$(say "cron's log shows no failed job." "Das Log von cron zeigt keinen fehlgeschlagenen Job.")
+        elif [ "$logged" = 1 ] && [ "$converted" -gt 0 ]; then
+            f_detail=$(say "Recorded jobs: $recorded, timers converted from cron: $converted; none failed, and cron's log shows no failed job." "Aufgezeichnete Jobs: $recorded, aus cron umgewandelte Timer: $converted; keiner fehlgeschlagen, und das Log von cron zeigt keinen fehlgeschlagenen Job.")
+        elif [ "$logged" = 1 ]; then
+            f_detail=$(say "Recorded jobs: $recorded, none failed, and cron's log shows no failed job." "Aufgezeichnete Jobs: $recorded, keiner fehlgeschlagen, und das Log von cron zeigt keinen fehlgeschlagenen Job.")
+        elif [ "$converted" -gt 0 ]; then
             f_detail=$(say "Recorded jobs: $recorded, timers converted from cron: $converted; none failed." "Aufgezeichnete Jobs: $recorded, aus cron umgewandelte Timer: $converted; keiner fehlgeschlagen.")
         else
             f_detail=$(say "Recorded jobs: $recorded, none failed." "Aufgezeichnete Jobs: $recorded, keiner fehlgeschlagen.")
@@ -457,7 +629,11 @@ document() {
 
     u_title=$(say "Jobs without recording" "Jobs ohne Aufzeichnung")
     plain=$((total - recorded))
-    if [ "$plain" -gt 0 ]; then
+    if [ "$plain" -gt 0 ] && [ "$logged" = 1 ]; then
+        u_state=none
+        u_value=$plain
+        u_detail=$(say "$plain of $total jobs in the crontabs of root and other users; their failures show in cron's log." "$plain von $total Jobs in den Crontabs von root und anderen Benutzern; ihre Fehlschläge zeigt das Log von cron.")
+    elif [ "$plain" -gt 0 ]; then
         u_state=none
         u_value=$plain
         u_detail=$(say "$plain of $total jobs in the crontabs of root and other users; their results are not known." "$plain von $total Jobs in den Crontabs von root und anderen Benutzern; ihre Ergebnisse sind nicht bekannt.")
@@ -503,6 +679,8 @@ document() {
         else
             summary=$(say "$bad jobs failed in the last 24 hours." "$bad Jobs sind in den letzten 24 Stunden fehlgeschlagen.")
         fi
+    elif [ "$logged" = 1 ]; then
+        summary=$(say "No job failed in the last 24 hours." "Kein Job ist in den letzten 24 Stunden fehlgeschlagen.")
     elif [ "$converted" -gt 0 ]; then
         summary=$(say "No recorded job and no converted timer failed in the last 24 hours." "Kein aufgezeichneter Job und kein umgewandelter Timer ist in den letzten 24 Stunden fehlgeschlagen.")
     elif [ "$recorded" -gt 0 ]; then
@@ -539,6 +717,7 @@ write() {
     since=$((now - window))
     checked=$(date -u -d "@$now" +%Y-%m-%dT%H:%M:%SZ)
     count
+    count_log
     count_timers
     cron=$(cron_service)
     # 711 as the page sets it: others reach the status files by name but list nothing.

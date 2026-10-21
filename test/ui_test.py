@@ -715,6 +715,12 @@ with sync_playwright() as p:
     check(last["echo before"].startswith("Beendet") and "OK" not in last["echo before"],
           "ended before cron's start: only ended: " + repr(last))
     check(last["echo long"].startswith("Läuft") and "seit " in last["echo long"], "no end yet: running: " + repr(last))
+    # the latest results: those runs too, where the log tells how they ended (not a mere end)
+    sums = page.locator("#sum-body tbody tr").all_inner_texts()
+    check(any("Fehler · Exit 2" in x and "not bold" in x and "root-Crontab · Log von cron" in x for x in sums) and
+          any("Beendet durch SIGKILL" in x and "sleepy" in x for x in sums) and any("echo long" in x and "Läuft" in x for x in sums) and
+          not any("echo before" in x for x in sums) and page.locator("#sum-body button", has_text="Fehler · Exit 2").count() == 0,
+          "the latest results: failures and runs from cron's log, not a button: " + repr(sums))
     show_tab(page, "system")
     hourly = page.locator("#etc-body tbody tr", has_text="cron.hourly").locator("td").nth(2).inner_text()
     check(page.inner_text("#cronlog-hint") == "" and "Läuft" not in hourly and ":" in hourly,
@@ -724,6 +730,9 @@ with sync_playwright() as p:
     wait_idle(page)
     hourly = page.locator("#etc-body tbody tr", has_text="cron.hourly").locator("td").nth(2).inner_text()
     check(hourly.startswith("Läuft"), "started since cron's start, no end: running: " + repr(hourly))
+    sums = page.locator("#sum-body tbody tr").all_inner_texts()
+    check(any("cron.hourly" in x and "/etc/crontab · Log von cron" in x and "Läuft" in x for x in sums),
+          "the latest results: a job of /etc/crontab: " + repr(sums))
     check(not page.problems, "no console problems (cron's log, results): " + repr(page.problems))
     page.context.close()
 

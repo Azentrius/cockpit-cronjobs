@@ -39,8 +39,9 @@ const OTHER = ["daemon", "nobody", "bin"].find(u => spawnSync("id", ["-u", u]).s
 
 /* Stand-ins for systemctl, pgrep and journalctl, first in PATH, answering as the real ones do for
    what the helper asks: the cron service FAKE_CRON ("UNIT STATE", or empty for none), the processes
-   FAKE_PGREP (names), and the journal of NAME.service from FAKE_JOURNAL/NAME.service.json, from
-   --since on as journalctl takes it. Each call of journalctl is logged to FAKE_JOURNAL/calls. */
+   FAKE_PGREP (names), the journal of NAME.service from FAKE_JOURNAL/NAME.service.json and, without
+   -u, cron's log from FAKE_JOURNAL/cron.log (as -o short-unix prints it), each from --since on as
+   journalctl takes it. Each call of journalctl is logged to FAKE_JOURNAL/calls ("-" for cron's log). */
 const FAKES = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-fakes-"));
 fs.writeFileSync(path.join(FAKES, "systemctl"), `#!/bin/sh
 for last; do :; done
@@ -66,7 +67,12 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-echo "$unit $since" >> "$FAKE_JOURNAL/calls"
+echo "\${unit:--} $since" >> "$FAKE_JOURNAL/calls"
+if [ -z "$unit" ]; then
+    [ -f "$FAKE_JOURNAL/cron.log" ] || exit 0
+    awk -v since="$since" '$1 + 0 >= since + 0' "$FAKE_JOURNAL/cron.log"
+    exit 0
+fi
 f=$FAKE_JOURNAL/$unit.json
 if [ ! -f "$f" ]; then echo "-- No entries --"; exit 0; fi
 awk -v since="$since" '{
@@ -78,8 +84,9 @@ awk -v since="$since" '{
 function fixture() {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-status-"));
     const fx = { base, state: path.join(base, "state"), spool: path.join(base, "spool"), units: path.join(base, "units"),
-                 journal: path.join(base, "journal"), cron: "", pgrep: "", systemd: "yes" };
-    for (const d of [fx.state, fx.spool, fx.units, fx.journal]) fs.mkdirSync(d);
+                 journal: path.join(base, "journal"), etc: path.join(base, "etc"), cron: "", pgrep: "", systemd: "yes",
+                 cronArgs: undefined };
+    for (const d of [fx.state, fx.spool, fx.units, fx.journal, fx.etc, path.join(fx.etc, "cron.d")]) fs.mkdirSync(d);
     return fx;
 }
 function crontab(fx, user, text) {
@@ -109,7 +116,8 @@ function run(sh, awk, fx, args, extra) {
     const env = { PATH: FAKES + ":" + (awk.bin ? awk.bin + ":" : "") + "/usr/bin:/bin" };
     if (fx) Object.assign(env, { CRONJOBS_STATE_DIR: fx.state, CRONJOBS_SPOOL_DIR: fx.spool, CRONJOBS_PAGE_DIR: SRC });
     if (fx && fx.units) Object.assign(env, { CRONJOBS_UNIT_DIR: fx.units, CRONJOBS_SYSTEMD: fx.systemd, FAKE_JOURNAL: fx.journal,
-                                             FAKE_CRON: fx.cron, FAKE_PGREP: fx.pgrep });
+                                             FAKE_CRON: fx.cron, FAKE_PGREP: fx.pgrep, CRONJOBS_ETC_DIR: fx.etc });
+    if (fx && fx.cronArgs !== undefined) env.CRONJOBS_CRON_ARGS = fx.cronArgs;
     Object.assign(env, extra || {});
     const r = spawnSync(sh, [STATUS].concat(args), { env, encoding: "utf8" });
     return { rc: r.status, out: r.stdout, err: r.stderr };
@@ -285,9 +293,168 @@ function journalCalls(fx) {
     return fs.existsSync(f) ? fs.readFileSync(f, "utf8").trim().split("\n") : [];
 }
 
+/* ---------- cron's log ---------- */
+
+/* An awk program of the helper, as it is there. */
+const HELPER = fs.readFileSync(STATUS, "utf8");
+const awkProgram = name => {
+    const m = new RegExp("^" + name + "='([\\s\\S]*?)'$", "m").exec(HELPER);
+    assert.ok(m, name);
+    return m[1];
+};
+const runAwk = (awk, args, input) => spawnSync(awk.bin ? path.join(awk.bin, "awk") : "awk", args,
+                                              { input, env: { LC_ALL: "C", PATH: "/usr/bin:/bin" } });
+
+/* Commands with what cron does to them before it logs them: the % rules, bytes it escapes. */
+const LOGGED = ["/bin/true", "date +\\%F > /tmp/x%input%more", "echo a\\\\%b", "echo a\\\\b 'x'", "printf 'café €'",
+                "echo \x7f \x01", "echo\ttab", "echo 100%", "%", "\\%", "echo \\\\\\%", "echo '%' \"\\%\"", "a  b   c"];
+
+for (const awk of AWKS.filter(a => a.bin)) {
+    t(awk.name + ": jobs named as cron logs them, as the page names them (C.loggedCommand)", () => {
+        const user = LOGGED.map(c => "* * * * * " + c).join("\n") + `\n@daily ${WRAP} rec-0001 'x'\n`;
+        let r = runAwk(awk, ["-v", "q='", "-v", "owner=root", "-v", "sys=0", awkProgram("JOBS_AWK")], user);
+        assert.strictEqual(r.status, 0, r.stderr.toString());
+        assert.deepStrictEqual(r.stdout.toString("latin1").trim().split("\n"),
+            C.parseUserCrontab(user).filter(e => e.kind === "job" && e.enabled)
+                .map(e => C.unwrapCommand(e.command) ? "J rec-0001" : `U (root) CMD (${C.loggedCommand(e.command)})`));
+        const system = "SHELL=/bin/sh\n" + LOGGED.map(c => "* * * * * root " + c).join("\n") +
+                       "\n@daily www-data\tphp -f /var/www/café.php\n17 *\t* * *\troot\tcd / && run-parts --report /etc/cron.hourly\n";
+        r = runAwk(awk, ["-v", "q='", "-v", "sys=1", awkProgram("JOBS_AWK")], system);
+        assert.strictEqual(r.status, 0, r.stderr.toString());
+        assert.deepStrictEqual(r.stdout.toString("latin1").trim().split("\n"),
+            C.parseSystemCrontab(system).map(j => `U (${j.user}) CMD (${C.loggedCommand(j.command)})`));
+    });
+
+    t(awk.name + ": whether cron logs failures, read as the page reads it (C.cronLogs)", () => {
+        for (const args of ["/usr/sbin/cron -f -P", "/usr/sbin/cron -f -P -L 15", "/usr/sbin/cron -fL7", "/usr/sbin/cron -L 5",
+                            "/usr/sbin/cron -L 15 -L 2", "/usr/sbin/cron -L x", "/usr/sbin/cron -x ext -L 4", "/usr/sbin/cron -f -- -L 15",
+                            "/usr/sbin/cron -L -1", "/usr/sbin/cron -L 4abc", "/usr/sbin/cron -L", "/usr/sbin/cron -L 12", "/usr/sbin/cron -L 3"]) {
+            const r = runAwk(awk, [awkProgram("LEVEL_AWK")], args + "\n");
+            assert.strictEqual(r.status === 0, C.cronLogs("debian", args, 0).failure, args);
+        }
+    });
+}
+
+/* A line of cron's log as journalctl -o short-unix prints it. */
+const logLine = (sec, pid, msg) => `${sec}.250000 host CRON[${pid}]: ${msg}`;
+function cronLog(fx, lines) {
+    fs.writeFileSync(path.join(fx.journal, "cron.log"), lines.join("\n") + "\n");
+}
+const L15 = "/usr/sbin/cron -f -P -L 15";
+
 for (const sh of SHELLS) {
     for (const awk of AWKS) {
         const name = sh + ", " + awk.name + ": ";
+
+        t(name + "failures in cron's log count: jobs of /etc/crontab and /etc/cron.d by path, the others in number", () => {
+            const fx = fixture();
+            fx.cronArgs = L15;
+            crontab(fx, "root", `MAILTO=""\n*/5 * * * * /usr/local/bin/backup.sh\n0 1 * * * date +\\%F > /tmp/x%input\n` +
+                                `@daily /usr/local/bin/ok.sh\n* * * * * ${wrapped("rec-0001", "x")}\n`);
+            runs(fx, "root", "rec-0001", [rec(NOW - 60, 0)]);
+            fs.writeFileSync(path.join(fx.etc, "crontab"), "SHELL=/bin/sh\n17 *\t* * *\troot\tcd / && run-parts --report /etc/cron.hourly\n");
+            fs.writeFileSync(path.join(fx.etc, "cron.d", "hibiscus-daily-sync"), "30 4 * * * root /opt/hibiscus/sync.sh\n");
+            fs.writeFileSync(path.join(fx.etc, "cron.d", "web"), "45 4 * * * www-data\tphp -f /var/www/café.php\n");
+            fs.writeFileSync(path.join(fx.etc, "cron.d", "not.read"), "0 3 * * * root /gone.sh\n");
+            const cmd = (user, command, pid) => `(${user}) CMD ([${pid}] ${C.loggedCommand(command)})`;
+            const fails = (pid, how) => `(CRON) error (grandchild #${pid} ${how})`;
+            cronLog(fx, [
+                /* more than 24 hours ago */
+                logLine(NOW - 90000, 90, cmd("root", "/usr/local/bin/ok.sh", 91)), logLine(NOW - 89999, 90, fails(91, "failed with exit status 1")),
+                logLine(NOW - 600, 100, cmd("root", "/usr/local/bin/backup.sh", 101)),
+                logLine(NOW - 599, 100, fails(101, "failed with exit status 2")),
+                logLine(NOW - 599, 100, `(root) END ([101] /usr/local/bin/backup.sh)`),
+                logLine(NOW - 590, 110, cmd("root", "date +\\%F > /tmp/x%input", 111)),
+                logLine(NOW - 589, 110, fails(111, "terminated by signal 9")),
+                logLine(NOW - 580, 120, cmd("root", "/opt/hibiscus/sync.sh", 121)), logLine(NOW - 579, 120, fails(121, "failed with exit status 1")),
+                logLine(NOW - 570, 130, cmd("www-data", "php -f /var/www/café.php", 131)),
+                logLine(NOW - 569, 130, fails(131, "failed with exit status 255")),
+                /* a job that is no longer there, one cron does not read, the run recorder, what feeds a % */
+                logLine(NOW - 560, 140, cmd("root", "/gone.sh", 141)), logLine(NOW - 559, 140, fails(141, "failed with exit status 1")),
+                logLine(NOW - 550, 150, cmd("root", `${WRAP} rec-0001 'x'`, 151)), logLine(NOW - 549, 150, fails(151, "failed with exit status 3")),
+                logLine(NOW - 540, 160, cmd("root", "/usr/local/bin/ok.sh", 161)), logLine(NOW - 539, 160, fails(162, "terminated by signal 13")),
+                logLine(NOW - 539, 160, "(root) END ([161] /usr/local/bin/ok.sh)"),
+                /* without -L 8: the PID of the line that logged the start */
+                logLine(NOW - 300, 171, "(root) CMD (cd / && run-parts --report /etc/cron.hourly)"),
+                logLine(NOW - 299, 170, fails(171, "failed with exit status 1")),
+            ]);
+            const { en, de } = written(sh, awk, fx);
+            const f = item(en, "failed");
+            assert.deepStrictEqual([en.state, f.state, f.value, f.detail],
+                                   ["danger", "danger", "5", "/etc/cron.d/hibiscus-daily-sync, /etc/cron.d/web, /etc/crontab and 2 more"]);
+            assert.strictEqual(item(de, "failed").detail, "/etc/cron.d/hibiscus-daily-sync, /etc/cron.d/web, /etc/crontab und 2 weitere");
+            assert.strictEqual(en.summary, "5 jobs failed in the last 24 hours.");
+            assert.strictEqual(item(en, "unrecorded").detail,
+                               "3 of 4 jobs in the crontabs of root and other users; their failures show in cron's log.");
+            assert.strictEqual(item(de, "unrecorded").detail,
+                               "3 von 4 Jobs in den Crontabs von root und anderen Benutzern; ihre Fehlschläge zeigt das Log von cron.");
+            const calls = journalCalls(fx).filter(c => c.startsWith("- "));
+            assert.strictEqual(calls.length, 1, calls.join("; "));
+            assert.ok(Math.abs(Number(calls[0].split(" ")[1]) - (NOW - 86400)) < 600, calls[0]);
+        });
+
+        t(name + "only failures in cron's log: what the detail says without paths", () => {
+            const fx = fixture();
+            fx.cronArgs = L15;
+            crontab(fx, "root", "*/5 * * * * /usr/local/bin/backup.sh\n");
+            cronLog(fx, [logLine(NOW - 600, 100, "(root) CMD ([101] /usr/local/bin/backup.sh)"),
+                         logLine(NOW - 599, 100, "(CRON) error (grandchild #101 failed with exit status 2)")]);
+            let d = written(sh, awk, fx);
+            assert.deepStrictEqual([item(d.en, "failed").value, item(d.en, "failed").detail], ["1", "1 job without recording, from cron's log"]);
+            assert.strictEqual(item(d.de, "failed").detail, "1 Job ohne Aufzeichnung, aus dem Log von cron");
+            if (!OTHER) return;
+            crontab(fx, OTHER, "15 3 * * * /bin/report\n");
+            convertedUnits(fx, `${OTHER}-backup`, OTHER);
+            journal(fx, `${OTHER}-backup`, journalRun(NOW - 200, "killed"));
+            cronLog(fx, [logLine(NOW - 600, 100, "(root) CMD ([101] /usr/local/bin/backup.sh)"),
+                         logLine(NOW - 599, 100, "(CRON) error (grandchild #101 failed with exit status 2)"),
+                         logLine(NOW - 500, 200, `(${OTHER}) CMD ([201] /bin/report)`),
+                         logLine(NOW - 499, 200, "(CRON) error (grandchild #201 failed with exit status 1)")]);
+            d = written(sh, awk, fx);
+            assert.deepStrictEqual([item(d.en, "failed").value, item(d.en, "failed").detail],
+                                   ["3", "2 jobs without recording, from cron's log; 1 timer converted from the crontab of another user"]);
+            assert.strictEqual(item(d.de, "failed").detail,
+                               "2 Jobs ohne Aufzeichnung, aus dem Log von cron; 1 aus der Crontab eines anderen Benutzers umgewandelter Timer");
+            assert.ok(!d.raw.en.includes(OTHER) && !d.raw.de.includes(OTHER), "no user name");
+        });
+
+        t(name + "cron logs failures, none failed: ok, and says so", () => {
+            const fx = fixture();
+            fx.cronArgs = L15;
+            crontab(fx, "root", "30 1 * * 0 /usr/sbin/fstrim -a\n");
+            cronLog(fx, [logLine(NOW - 600, 100, "(root) CMD ([101] /usr/sbin/fstrim -a)"), logLine(NOW - 590, 100, "(root) END ([101] /usr/sbin/fstrim -a)")]);
+            let d = written(sh, awk, fx);
+            assert.deepStrictEqual([d.en.state, item(d.en, "failed").state, item(d.en, "failed").value, item(d.en, "failed").detail],
+                                   ["ok", "ok", "0", "cron's log shows no failed job."]);
+            assert.strictEqual(item(d.de, "failed").detail, "Das Log von cron zeigt keinen fehlgeschlagenen Job.");
+            assert.strictEqual(d.en.summary, "No job failed in the last 24 hours.");
+            assert.strictEqual(d.de.summary, "Kein Job ist in den letzten 24 Stunden fehlgeschlagen.");
+            crontab(fx, "root", `30 1 * * 0 /usr/sbin/fstrim -a\n* * * * * ${wrapped("rec-0001", "x")}\n`);
+            runs(fx, "root", "rec-0001", [rec(NOW - 60, 0)]);
+            d = written(sh, awk, fx);
+            assert.strictEqual(item(d.en, "failed").detail, "Recorded jobs: 1, none failed, and cron's log shows no failed job.");
+            assert.strictEqual(item(d.de, "failed").detail, "Aufgezeichnete Jobs: 1, keiner fehlgeschlagen, und das Log von cron zeigt keinen fehlgeschlagenen Job.");
+            convertedUnits(fx, "nightly", "root");
+            journal(fx, "nightly", journalRun(NOW - 300, "ok"));
+            d = written(sh, awk, fx);
+            assert.strictEqual(item(d.en, "failed").detail,
+                               "Recorded jobs: 1, timers converted from cron: 1; none failed, and cron's log shows no failed job.");
+        });
+
+        t(name + "cron logs no failures: its log is not read", () => {
+            for (const args of ["/usr/sbin/cron -f -P", "/usr/sbin/cron -f -P -L 11", undefined]) {
+                const fx = fixture();
+                fx.cronArgs = args;
+                crontab(fx, "root", "*/5 * * * * /usr/local/bin/backup.sh\n");
+                cronLog(fx, [logLine(NOW - 600, 100, "(root) CMD ([101] /usr/local/bin/backup.sh)"),
+                             logLine(NOW - 599, 100, "(CRON) error (grandchild #101 failed with exit status 2)")]);
+                const { en } = written(sh, awk, fx);
+                assert.deepStrictEqual([item(en, "failed").state, item(en, "failed").detail], ["none", "No job records its runs."], String(args));
+                assert.strictEqual(item(en, "unrecorded").detail,
+                                   "1 of 1 jobs in the crontabs of root and other users; their results are not known.");
+                assert.deepStrictEqual(journalCalls(fx), [], "not read: " + args);
+            }
+        });
 
         t(name + "no crontabs: nothing failed, no jobs", () => {
             const fx = fixture();

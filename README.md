@@ -20,7 +20,8 @@ starts jobs on demand and turns cron jobs into systemd timers.
   failures first, successful ones folded away. Runs and timers are read again every half minute, so a
   failure shows within a minute without reloading. A recorded job whose scheduled run cron did not
   start (cron stopped, the server down at the time) shows as missed, with the time it was due, once that
-  is five minutes past; runs started by hand do not stand in for it.
+  is five minutes past; runs started by hand do not stand in for it. Where cron's log tells how the last
+  run of another job ended (see below), that run is listed too, marked as from cron's log.
 - **Runs from cron's log.** For a job that does not record its runs, and for the jobs in
   `/etc/crontab`, `/etc/cron.d` and the crontabs the page only shows, the page says when cron last started
   it: cron logs each start as `(USER) CMD (COMMAND)` (Debian's cron with `-L 8` and more puts the job's
@@ -59,8 +60,9 @@ starts jobs on demand and turns cron jobs into systemd timers.
   on again exactly as before, the note is gone, and the timer is stopped and its units removed. The units
   name the crontab they come from, and back to cron removes only units converted from the crontab whose
   note it follows, so a note a user writes into their own crontab cannot reach anyone else's timer.
-- **A status for the Status Board.** Failed jobs of the last 24 hours (recorded ones and those converted
-  to systemd timers), jobs without recording and whether the cron service runs, in the status format all
+- **A status for the Status Board.** Failed jobs of the last 24 hours (recorded ones, those converted
+  to systemd timers, and those cron's log says failed), jobs without recording and whether the cron
+  service runs, in the status format all
   Azentrius Cockpit add-ons share, readable without administrative access, each with a link to its place
   on the page; the same state as an icon in Cockpit's menu (see below).
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
@@ -210,18 +212,23 @@ English for any other language). Without the file it reports `none` and why.
 
 | Item | State | Link |
 |---|---|---|
-| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, with the number of those jobs, their IDs and the names of the timers; `ok` when none did; `none` when no job records its runs and none was converted | `#/overview/results`: the latest results, failures first |
-| `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known; `ok` when every job records them | `#/overview/crontab`: the root crontab, the other users' after it |
+| `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, or cron's log says a run of another job failed, with the number of those jobs, their IDs, the names of the timers and the paths of the jobs of `/etc/crontab` and `/etc/cron.d`; `ok` when none did; `none` when no job records its runs, none was converted and cron logs no failures | `#/overview/results`: the latest results, failures first |
+| `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known (or, when cron logs failures, only those); `ok` when every job records them | `#/overview/crontab`: the root crontab, the other users' after it |
 | `cron` | `ok` when the cron service runs; when it does not, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask | `#/overview/notices`: where the page says that cron is not running |
 
-Only the crontabs of root and the other users count: the jobs there are the ones the page can record,
+The crontabs of root and the other users count: the jobs there are the ones the page can record,
 read as the page reads them, and the jobs converted from them, whose runs come from the journal of
 their service as on the page. A converted job counts only while both units are the ones the
-conversion wrote, checked as back to cron checks them. `/etc/crontab` and `/etc/cron.d` do not count.
-The files hold numbers, states, job IDs and the names of timers converted from root's crontab; no user
-names, commands or output. Timers converted from another user's crontab are only counted, since the
-name a conversion suggests for them begins with the user's. Each item is stale after an hour without a
-new status (`stale_after`), that is four runs of the timer missed.
+conversion wrote, checked as back to cron checks them. When Debian's cron logs failures (`-L` with 4,
+read from its command line as the page reads it), its log of the last 24 hours counts as well, read
+as on the page: a failure belongs to the job whose start names the same process, and counts when that
+job is still in one of those crontabs, `/etc/crontab` or `/etc/cron.d` and does not record its runs
+(those count from their records). The files hold numbers, states, job IDs, the names of timers
+converted from root's crontab and the paths of `/etc/crontab` and `/etc/cron.d/FILE` for their jobs;
+no user names, commands or output. Timers converted from another user's crontab and jobs of the
+crontabs that failed by cron's log are only counted, since the name a conversion suggests begins with
+the user's and a job without recording has no name but its command. Each item is stale after an hour
+without a new status (`stale_after`), that is four runs of the timer missed.
 
 A click on the tile on the Status Board goes to the link of its most important item: the page opens
 on that tab and scrolls to the card. Cockpit keeps a page that is loaded and, when the board jumps to

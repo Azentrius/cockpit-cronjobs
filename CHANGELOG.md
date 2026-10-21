@@ -2,9 +2,18 @@
 
 ## Unreleased
 
-Jobs that do not record their runs show how their last run ended, where cron logs it; the descriptions
-say what the page does since 2.8 and 2.9; the last start from cron's log is found however much cron logs.
+Jobs that do not record their runs show how their last run ended, where cron logs it, in the latest
+results and in the status too; the descriptions say what the page does since 2.8 and 2.9; the last
+start from cron's log is found however much cron logs.
 
+- **Failures from cron's log in the status:** when Debian's cron logs failures (`-L` with 4), the item
+  `failed` counts the jobs whose run cron logged as failed in the last 24 hours, read as the page reads
+  them: those of `/etc/crontab` and `/etc/cron.d` by their path, those of the crontabs of root and other
+  users only in number ("1 job without recording, from cron's log"), and only jobs that are still
+  there and do not record their runs. `ok` then says that cron's log shows no failed job, and
+  `unrecorded` that their failures show there. cron's log is read only then, from the last 24 hours.
+- **Latest results:** the runs from cron's log whose end it tells (failed, OK, running) are listed too,
+  marked as from cron's log, so the link of the status item leads to them.
 - **Results from cron's log:** for a job that does not record its runs, and for those in `/etc/crontab`,
   `/etc/cron.d` and the crontabs the page only shows, the page reads from cron's log how the newest run
   ended, where cron logs it: Debian's cron with `-L 15` (or 2 and 4) logs the end and failures, with the

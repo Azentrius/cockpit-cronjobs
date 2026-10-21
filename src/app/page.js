@@ -489,7 +489,7 @@ function emptyState() { return h("p", { class: "cron-state" }, T.noEntries); }
 
 /* How the newest run cron started of a job ended, from its log (C.cronLogOutcome), as a
    label ({ kind, icon, text }); null when the log tells only that it started. */
-function cronLogLabel(run) {
+export function cronLogLabel(run) {
     const o = C.cronLogOutcome(run, state.basics.cronLogs);
     if (o === "failed") return { kind: "danger", icon: "exclamation-circle", text: T.statusFailed(run.result.exit) };
     if (o === "signal") return { kind: "danger", icon: "exclamation-circle", text: T.statusSignal(C.signalName(run.result.signal)) };
