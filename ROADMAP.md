@@ -83,7 +83,7 @@ read-only before).
 Done in 2.5.0 (see [CHANGELOG](CHANGELOG.md)): the latest results at the top of the overview, read again
 every half minute, and the runs of every systemd timer from the journal; the end-to-end test lets a
 recorded job and a timer fail under the real cron and systemd and finds both in the summary without
-reloading. Notifications are not part of it (see the open decision below).
+reloading. Notifications are not part of it (see the decisions below).
 
 **Goal:** see what failed without opening each job.
 
@@ -149,12 +149,14 @@ page, and fewer things go wrong unnoticed.
 
 ---
 
-## Open decisions
+## Decisions
 
-1. Stage 4: is a summary inside Cockpit enough, or should failures also notify someone (mail, ntfy, …)?
-   Since 2.8.0 the status for the Status Board says which jobs failed in the last 24 hours, without
-   administrative access, and since 2.9.0 whether cron runs; a notifier shared by the Azentrius add-ons
-   could read it instead of each add-on sending its own messages.
+None is open at the moment. Decided:
 
-Decided: packages and the listing in Cockpit's Applications page (stage 5), through the Azentrius
-package repository shared with the other add-ons.
+- **Notifications** (stage 4, decided on 2026-10-21): Cron Jobs sends no messages itself. A small
+  notifier shared by the Azentrius add-ons, a package of its own installed on each server, reads their
+  status on that server and sends a message (ntfy, mail or both) when a state turns to warning or
+  danger. Cron Jobs needs nothing new for it: its status (failed jobs of the last 24 hours, jobs
+  without recording, whether cron runs) is the interface. The notifier is planned on its own.
+- **Packages and the listing in Cockpit's Applications page** (stage 5): through the Azentrius package
+  repository shared with the other add-ons.
