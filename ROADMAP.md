@@ -115,7 +115,7 @@ Packages and Cockpit's Applications page are done in 2.6.0 (see [CHANGELOG](CHAN
 
 ## Stage 6 – Fewer surprises ✅
 
-Done in 2.8.0 and 2.9.0 (see [CHANGELOG](CHANGELOG.md)): what goes wrong shows without opening the
+Done in 2.8.0 to 2.10.0 (see [CHANGELOG](CHANGELOG.md)): what goes wrong shows without opening the
 page, and fewer things go wrong unnoticed.
 
 - ✅ **Status for the Status Board** (2.8.0): failed jobs of the last 24 hours and jobs without
@@ -125,7 +125,7 @@ page, and fewer things go wrong unnoticed.
 - ✅ **Missed runs:** a recorded job whose next run cron did not start shows as missed.
 - ✅ **Starts from cron's log:** when cron last started the jobs that do not record their runs, and
   those in `/etc/crontab` and `/etc/cron.d`.
-- ✅ **Results from cron's log** (after 2.9.0): how that run ended, where cron logs it: Debian's cron at
+- ✅ **Results from cron's log** (2.10.0): how that run ended, where cron logs it: Debian's cron at
   `-L 15` logs the end and failures (exit status, signal), cronie only the end; at Debian's default the
   System tab says how to set it. The failures count in the status as well (item `failed`), so they reach
   the Status Board and the notifier, and the runs show in the latest results.
