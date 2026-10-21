@@ -97,7 +97,6 @@
         colSchedule: "Schedule",
         colNext: "Next run",
         colLast: "Last run",
-        colStarted: "Last start",
         colCommand: "Command",
         colActions: "Actions",
         colUser: "User",
@@ -119,7 +118,16 @@
         notRecorded: "Not recorded",
         startedAt: time => `started ${time}`,
         notInLog: "Not in cron's log",
-        startedTitle: "From cron's log in the journal of the last 35 days, which does not say how the run ended.",
+        startedTitle: "When cron started it, from its log in the journal of the last 35 days. How the run ended is " +
+                      "there only when cron logs it.",
+        cronLogTitle: "From cron's log in the journal of the last 35 days; the job does not record its runs.",
+        inCronLog: "cron's log",
+        cronLogHintTitle: "cron logs only when jobs start",
+        cronLogHintBody: "So for jobs that do not record their runs, the page cannot tell how a run ended. Started with " +
+                         "the option `-L 15`, cron also logs the end and failures of every job, and the page shows them " +
+                         "here and on the overview. On Ubuntu: `systemctl edit cron.service`, under `[Service]` the " +
+                         "line `Environment=EXTRA_OPTS=-L 15`, then `systemctl restart cron`. On Debian: " +
+                         "`EXTRA_OPTS=\"-L 15\"` in `/etc/default/cron`, then restart cron.",
         recordLink: "Record runs",
         noRunYet: "No run yet",
         statusOk: "OK",
@@ -129,6 +137,7 @@
         statusAborted: "Aborted",
         statusStopped: "Stopped",
         statusRunning: "Running",
+        statusEnded: "Ended",
         statusMissed: "Missed",
         missedDue: time => `due ${time}`,
         missedTitle: time => `cron did not start the run due at ${time}. Show runs`,

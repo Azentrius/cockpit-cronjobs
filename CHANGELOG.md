@@ -2,15 +2,24 @@
 
 ## Unreleased
 
-The descriptions say what the page does since 2.8 and 2.9; the last start from cron's log is found
-however much cron logs.
+Jobs that do not record their runs show how their last run ended, where cron logs it; the descriptions
+say what the page does since 2.8 and 2.9; the last start from cron's log is found however much cron logs.
 
+- **Results from cron's log:** for a job that does not record its runs, and for those in `/etc/crontab`,
+  `/etc/cron.d` and the crontabs the page only shows, the page reads from cron's log how the newest run
+  ended, where cron logs it: Debian's cron with `-L 15` (or 2 and 4) logs the end and failures, with the
+  exit status or signal, and the page shows "Failed · exit N", "OK" (an end without failure), "Running"
+  and the duration; cronie logs only the end ("Ended"). A failure belongs to the run whose process it
+  names. What cron logs is read from its command line; "OK" and "Running" count only for runs it
+  started since then. At Debian's default (`-L 1`, starts only) the System tab says how to set the
+  option. The column in the System tab is now "Last run". The end-to-end test runs a failing job under
+  cron at `-L 15`.
 - **Last start with cron's PID:** Debian's cron started with `-L 8` or more (the job's PID in the log)
   logs a start as `(USER) CMD ([PID] COMMAND)`; the page found no start then. It leaves the PID out
   now, so such starts count, and those logged before and after a change of the option count as one
   command. The end-to-end test runs once with cron at `-L 15`.
 - **Packages:** the description of the `.deb` and `.rpm` and the AppStream data (Cockpit's Applications
-  page) name the crontabs of other users, missed runs, starts from cron's log and the status for the
+  page) name the crontabs of other users, missed runs, runs from cron's log and the status for the
   Azentrius Status Board.
 - **README** and **SECURITY.md:** the status names converted jobs and the cron service, the safety notes
   cron's log and jobs that do not overlap, and the parts of the page worth a security report include

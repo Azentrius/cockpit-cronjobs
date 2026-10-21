@@ -219,9 +219,9 @@ export const state = {
     sys: null,
     sysError: null,
     basics: { mta: null, crontab: true, flavor: "debian", systemd: false, cron: null, wrapper: null,
-              cronEnv: null, managerEnv: {} },
+              cronEnv: null, managerEnv: {}, cronLogs: null },
     runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setCrontab */
     timers: { status: "none", list: [] },   /* none | ok | error */
-    cronLog: null,   /* when cron last started each command (C.parseCronLog), null when not read */
+    cronLog: null,   /* the newest run cron started of each command (C.parseCronLog), null when not read */
     suAtLoad: undefined,
 };

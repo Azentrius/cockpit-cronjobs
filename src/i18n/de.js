@@ -95,7 +95,6 @@
         colSchedule: "Zeitplan",
         colNext: "Nächster Lauf",
         colLast: "Letzter Lauf",
-        colStarted: "Letzter Start",
         colCommand: "Befehl",
         colActions: "Aktionen",
         colUser: "Benutzer",
@@ -117,7 +116,16 @@
         notRecorded: "Nicht erfasst",
         startedAt: time => `gestartet ${time}`,
         notInLog: "Nicht im Log von cron",
-        startedTitle: "Aus dem Log von cron im Journal der letzten 35 Tage, das nicht sagt, wie der Lauf ausging.",
+        startedTitle: "Wann cron ihn gestartet hat, aus seinem Log im Journal der letzten 35 Tage. Wie der Lauf " +
+                      "ausging, steht dort nur, wenn cron es loggt.",
+        cronLogTitle: "Aus dem Log von cron im Journal der letzten 35 Tage; der Job erfasst seine Läufe nicht.",
+        inCronLog: "Log von cron",
+        cronLogHintTitle: "cron loggt nur, wann Jobs starten",
+        cronLogHintBody: "Für Jobs, die ihre Läufe nicht erfassen, kann die Seite deshalb nicht sagen, wie ein Lauf " +
+                         "ausging. Mit der Option `-L 15` gestartet, loggt cron auch Ende und Fehlschläge jedes Jobs, " +
+                         "und die Seite zeigt sie hier und in der Übersicht. Unter Ubuntu: `systemctl edit cron.service`, " +
+                         "unter `[Service]` die Zeile `Environment=EXTRA_OPTS=-L 15`, dann `systemctl restart cron`. " +
+                         "Unter Debian: `EXTRA_OPTS=\"-L 15\"` in `/etc/default/cron`, dann cron neu starten.",
         recordLink: "Läufe erfassen",
         noRunYet: "Noch kein Lauf",
         statusOk: "OK",
@@ -127,6 +135,7 @@
         statusAborted: "Abgebrochen",
         statusStopped: "Angehalten",
         statusRunning: "Läuft",
+        statusEnded: "Beendet",
         statusMissed: "Ausgefallen",
         missedDue: time => `fällig ${time}`,
         missedTitle: time => `cron hat den Lauf um ${time} nicht gestartet. Läufe anzeigen`,
