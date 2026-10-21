@@ -21,12 +21,15 @@ starts jobs on demand and turns cron jobs into systemd timers.
   failure shows within a minute without reloading. A recorded job whose scheduled run cron did not
   start (cron stopped, the server down at the time) shows as missed, with the time it was due, once that
   is five minutes past; runs started by hand do not stand in for it.
-- **Starts from cron's log.** For a job that does not record its runs, and for the jobs in
+- **Runs from cron's log.** For a job that does not record its runs, and for the jobs in
   `/etc/crontab`, `/etc/cron.d` and the crontabs the page only shows, the page says when cron last started
   it: cron logs each start as `(USER) CMD (COMMAND)` (Debian's cron with `-L 8` and more puts the job's
   PID before the command), and the page reads those of the last 35 days from the journal, only messages
   cron itself logged (`_UID` 0, `_COMM` cron or crond, fields journald sets), and matches them by user
-  and by the command as cron logs it. As cron is set up by default, the log does not say how a run ended.
+  and by the command as cron logs it. How that run ended is in the log only when cron logs it: Debian's
+  cron with `-L 15` logs the end and failures (exit status, signal) as well, and the page shows them
+  (failed, OK, running, with the duration); cronie logs the end, never a result. As Debian's cron is set
+  up by default, it logs only starts, and the System tab says how to change that.
 - **Runs from the journal.** Every systemd timer gets the same runs dialog as a recorded job, from the
   journal of its service: start, duration, result and output. A job converted to a timer keeps its
   history there: the runs recorded before the conversion and those of its service since.
@@ -299,8 +302,9 @@ sudo rm -rf /var/lib/cockpit-cronjobs
   the crontab is put back.
 - The status timer only reads: it writes nothing but its two status files. In another user's directory it
   reads only what has the form of runs, as the page does (no links, regular files, under a time limit).
-- Starts from cron's log count only when journald says cron logged them itself (`_UID` 0, `_COMM` cron
-  or crond); a line someone else logs as `CRON` is left out.
+- Runs from cron's log count only when journald says cron logged them itself (`_UID` 0, `_COMM` cron
+  or crond); a line someone else logs as `CRON` is left out. A failure counts for the run whose process
+  it names, and only for the newest run of that job.
 - A job set not to overlap is checked and marked under the run recorder's lock, so of two starts at once
   only one runs; the setting lies in the job's directory of runs and is written there as its owner.
 

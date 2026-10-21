@@ -210,8 +210,9 @@ export function readHomes(names) {
 }
 
 /* Host name, time zone as cron sees it, what is installed, and how cron gives its jobs
-   their environment (C.cronEnvModel): the cron daemon's command line (running, else
-   its unit's ExecStart), the environment systemd gives services, the PAM service files
+   their environment (C.cronEnvModel): the cron daemon's command line (running, with the
+   time it started, which also says what it logs, C.cronLogs; else its unit's ExecStart),
+   the environment systemd gives services, the PAM service files
    of cron (Debian) and crond (cronie) with what they include, and the env files those
    or pam_env read. File contents lose RS (\\036). All of it is readable without root. */
 const BASICS_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
@@ -269,6 +270,8 @@ sec crond
 p=$(pgrep -o -x cron 2>/dev/null || pgrep -o -x crond 2>/dev/null)
 if [ -n "$p" ] && [ -r "/proc/$p/cmdline" ]; then
   printf 'run '; tr '\\000\\n' '  ' < "/proc/$p/cmdline"; echo
+  a=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
+  case $a in ''|*[!0-9]*) ;; *) echo "since $(( $(date +%s) - a ))" ;; esac
 fi
 if has_systemd; then
   for u in cron.service crond.service cronie.service; do
@@ -303,8 +306,8 @@ export function readBasics() {
     return spawn(["sh", "-c", BASICS_SCRIPT], { err: "ignore", environ: ["LC_ALL=C"], binary: true }).then(raw => {
         const out = decode(raw);
         const res = { host: "", tz: null, mta: null, crontab: true, flavor: "debian", systemd: false,
-                      cron: null, wrapper: null, cronEnv: null, managerEnv: {} };
-        const daemon = { run: "", unit: "" };
+                      cron: null, wrapper: null, cronEnv: null, managerEnv: {}, cronLogs: null };
+        const daemon = { run: "", unit: "", since: "" };
         const pam = {};
         const files = {};
         sections(out).forEach(({ name, body }) => {
@@ -313,7 +316,7 @@ export function readBasics() {
             else if (name.startsWith("env:")) files[name.slice(4)] = body;
             else if (name === "crond") {
                 body.split("\n").forEach(line => {
-                    const m = /^(run|unit) (.*)$/.exec(line);
+                    const m = /^(run|unit|since) (.*)$/.exec(line);
                     if (m) daemon[m[1]] = m[2].trim();
                 });
             } else if (name === "manager") {
@@ -334,6 +337,7 @@ export function readBasics() {
         });
         res.cronEnv = C.cronEnvModel({ flavor: res.flavor, args: daemon.run || daemon.unit, pam, files,
                                        managerPath: res.managerEnv.PATH || null });
+        res.cronLogs = C.cronLogs(res.flavor, daemon.run, /^\d{1,12}$/.test(daemon.since) ? Number(daemon.since) * 1000 : null);
         return res;
     });
 }
@@ -547,26 +551,70 @@ function removeRuns(user, id) {
     return spawn(asOwner(user, ["rm", "-rf", "--", runsDirOf(user) + "/" + id]), SPAWN_ROOT);
 }
 
-/* When cron last started each command, from its log in the journal of the last 35 days:
-   cron logs each start as "(USER) CMD (COMMAND)" (see C.loggedCommand), Debian's cron with
-   -L 8 and more as "(USER) CMD ([PID] COMMAND)", PID being the job's, which is left out
-   here. Only cron's own messages count, by the fields journald sets itself (_UID 0, _COMM
-   cron or crond), so no one can log a start for it. The newest of each, "SECONDS (USER) CMD
-   (COMMAND)"; nothing without journalctl. */
+/* The newest run cron started of each command, from its log in the journal of the last 35
+   days. cron logs each start as "(USER) CMD (COMMAND)" (see C.loggedCommand) from the job's
+   process; Debian's cron with -L 8 and more as "(USER) CMD ([PID] COMMAND)", PID being the
+   job's, which is left out of the command. As far as cron logs them (C.cronLogs), the end
+   and the result of that run: Debian's cron "(USER) END (COMMAND)" (or with "[PID] ") and
+   "(CRON) error (grandchild #PID failed with exit status N)" or "… terminated by signal N",
+   cronie "(USER) CMDEND (COMMAND)", all from the process that waits for the job. A failure
+   belongs to the start of its PID; an end with a PID to that, one without to the start
+   whose failure the same process logged, else to the newest start of its command (which
+   is a guess only when runs of one command overlap). A PID that started no job (the one
+   that feeds the job what follows a %) is left out. Only cron's own messages count, by the
+   fields journald sets itself (_UID 0, _COMM cron or crond), so no one can log a run for
+   it. One line for each command, "START END RESULT (USER) CMD (COMMAND)": seconds, END and
+   RESULT ("exit:N", "signal:N") "-" when not logged; nothing without journalctl. */
 const CRON_LOG_SCRIPT = `command -v journalctl > /dev/null 2>&1 || exit 0
 journalctl --no-pager -q -o short-unix --since -35d _UID=0 _COMM=cron _COMM=crond 2>/dev/null |
-  awk '{
+  awk '
+  # "(USER) CMD (COMMAND)" of message m, whose event is ev; n the PID before COMMAND, or ""
+  function job(m, ev,   j, c) {
+    j = index(m, " " ev " (") + length(ev) + 2
+    c = substr(m, j + 1, length(m) - j - 1)
+    n = ""
+    if (c ~ /^[[][0-9]+[]] /) { n = substr(c, 2, index(c, "]") - 2); c = substr(c, index(c, " ") + 1) }
+    return substr(m, 1, index(m, ")")) " CMD (" c ")"
+  }
+  {
     i = index($0, ": (")
     if (i == 0) next
     m = substr($0, i + 2)
-    if (m !~ /^[(][^()]*[)] CMD [(]/) next
-    j = index(m, " CMD (") + 5
-    c = substr(m, j + 1)
-    if (c ~ /^[[][0-9]+[]] /) m = substr(m, 1, j) substr(c, index(c, " ") + 1)
+    p = substr($0, 1, i - 1)
+    if (!match(p, /[[][0-9]+[]]$/)) next
+    p = substr(p, RSTART + 1, RLENGTH - 2)
     split($1, t, ".")
-    last[m] = t[1]
+    if (m ~ /^[(][^()]*[)] CMD [(].*[)]$/) {
+      k = job(m, "CMD")
+      if (n == "") n = p
+      if ((k in last) && (last[k] in key) && key[last[k]] == k) delete key[last[k]]
+      last[k] = n; when[k] = t[1]; key[n] = k
+      delete fin[k]; delete res[k]
+    } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
+      split(m, w, " ")
+      n = substr(w[4], 2)
+      if (!(n in key) || last[key[n]] != n) next
+      if (w[5] == "failed") r = "exit:" w[9]
+      else r = "signal:" w[8]
+      sub(/[^0-9]+$/, "", r)
+      res[key[n]] = r; mid[p] = n
+    } else if (m ~ /^[(][^()]*[)] (END|CMDEND) [(].*[)]$/) {
+      ev = substr(m, index(m, ") ") + 2)
+      k = job(m, substr(ev, 1, index(ev, " ") - 1))
+      if (n == "" && (p in mid)) n = mid[p]
+      if (n == "" && (k in last)) n = last[k]
+      delete mid[p]
+      if ((n in key) && key[n] == k && last[k] == n && !(k in fin)) fin[k] = t[1]
+    }
   }
-  END { for (m in last) print last[m] " " m }'
+  END {
+    for (k in last) {
+      e = "-"; r = "-"
+      if (k in fin) e = fin[k]
+      if (k in res) r = res[k]
+      print when[k] " " e " " r " " k
+    }
+  }'
 `;
 
 export function readCronLog() {

@@ -22,14 +22,15 @@
       Cron-Jobs systemd-Timer und wieder zurück.
     </p>
     <p>
-      Failed and missed runs show at a glance, starts of jobs that do not record come from cron's
-      own log, and a status for the Azentrius Status Board and Cockpit's menu says when something
-      failed or cron is not running.
+      Failed and missed runs show at a glance, runs of jobs that do not record come from cron's
+      own log (with how they ended, where cron logs it), and a status for the Azentrius Status
+      Board and Cockpit's menu says when something failed or cron is not running.
     </p>
     <p xml:lang="de">
-      Fehlgeschlagene und ausgefallene Läufe sind auf einen Blick zu sehen, Starts von Jobs ohne
-      Erfassung kommen aus dem Log von cron, und ein Status für das Azentrius Status Board und
-      Cockpits Menü meldet, wenn etwas fehlschlug oder cron nicht läuft.
+      Fehlgeschlagene und ausgefallene Läufe sind auf einen Blick zu sehen, Läufe von Jobs ohne
+      Erfassung kommen aus dem Log von cron (mit ihrem Ausgang, wo cron ihn loggt), und ein Status
+      für das Azentrius Status Board und Cockpits Menü meldet, wenn etwas fehlschlug oder cron nicht
+      läuft.
     </p>
   </description>
   <extends>org.cockpit_project.cockpit</extends>

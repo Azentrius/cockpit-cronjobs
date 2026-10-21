@@ -666,7 +666,7 @@ with sync_playwright() as p:
     check(mock(page, "cronLogReads") >= 2, "read with each load: " + repr(mock(page, "cronLogReads")))
     tests = row_of(page, "not bold").locator("td[data-last]")
     check("Nicht erfasst" in tests.inner_text() and "gestartet " in tests.inner_text() and
-          (tests.locator(".az-cell-sub").get_attribute("title") or "").startswith("Aus dem Log von cron"),
+          (tests.locator(".az-cell-sub").get_attribute("title") or "").startswith("Wann cron ihn gestartet hat"),
           "an unrecorded job: when cron last started it: " + tests.inner_text())
     check("gestartet " in row_of(page, "echo a").locator("td[data-last]").inner_text(), "a % job: the command before the %")
     check("gestartet" not in row_of(page, "fstrim").locator("td[data-last]").inner_text(), "not in the log: nothing said")
@@ -676,11 +676,67 @@ with sync_playwright() as p:
     others = [v for k, v in etc.items() if "cron.hourly" not in k]
     check(hourly and "Nicht im Log" not in hourly and "—" not in hourly.split("\t")[2] and
           others and all("Nicht im Log von cron" in v for v in others) and
-          page.locator("#etc-body th", has_text="Letzter Start").count() == 1, "/etc/crontab: the last start of each: " + repr(etc))
+          page.locator("#etc-body th", has_text="Letzter Lauf").count() == 1, "/etc/crontab: the last start of each: " + repr(etc))
     crond = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
         tr.querySelector('.az-mono').textContent, tr.innerText]))""")
     check("Nicht im Log" not in crond["log-utf8"] and "Nicht im Log von cron" in crond["log-user"],
           "cron.d: bytes as cron logs them; a start of another user is not root's: " + repr(crond))
+    # Debian's cron as installed (-L 1) logs only starts: the System tab says how to have it log more
+    hint = page.inner_text("#cronlog-hint")
+    check("cron loggt nur, wann Jobs starten" in hint and "Environment=EXTRA_OPTS=-L 15" in hint and
+          page.locator("#cronlog-hint code").count() >= 4, "a hint on -L: " + repr(hint))
+    check(not page.problems, "no console problems (cron's log, starts): " + repr(page.problems))
+    page.context.close()
+
+    # cron at -L 15 (end, failures, PID): how the newest run ended. cron started 700 s ago: what it
+    # logs now says nothing about runs it started before (one that ended is only "ended")
+    page = open_page(browser, "cronlog=15")
+    page.evaluate("""() => {
+        window.__mock.cronSinceAgo = 700;
+        window.__mock.cronLog = [
+            [1800, 'root', 'cd / && run-parts --report /etc/cron.hourly'],
+            [300, 'root', "test -x /opt/x && echo '<b>not bold</b>' > /dev/null", 297, 'exit:2'],
+            [600, 'root', 'echo a%b', 590, null],
+            [650, 'root', '/usr/local/bin/sleepy', 640, 'signal:9'],
+            [800, 'root', 'echo before', 790, null],
+            [100, 'root', 'echo long', null, null],
+        ];
+    }""")
+    reload_with_root(page, root_text(page) + "0 5 * * * echo a\\%b%input\n0 6 * * * /usr/local/bin/sleepy\n"
+                                             "0 7 * * * echo before\n0 8 * * * echo long\n")
+    tests = row_of(page, "not bold").locator("td[data-last]")
+    check("Fehler · Exit 2" in tests.inner_text() and "Log von cron" in tests.inner_text() and
+          tests.locator("[data-key^='capture:']").count() == 1 and
+          (tests.locator(".az-label").first.evaluate("e => e.parentElement.title") or "").startswith("Aus dem Log von cron"),
+          "a failure from cron's log, and recording offered: " + tests.inner_text())
+    last = {t: row_of(page, t).locator("td[data-last]").inner_text() for t in ["echo a", "sleepy", "echo before", "echo long"]}
+    check(last["echo a"].startswith("OK") and " · 10 s" in last["echo a"], "ended, no failure logged: OK, with its duration: " + repr(last))
+    check("Beendet durch SIGKILL" in last["sleepy"], "a signal: " + repr(last))
+    check(last["echo before"].startswith("Beendet") and "OK" not in last["echo before"],
+          "ended before cron's start: only ended: " + repr(last))
+    check(last["echo long"].startswith("Läuft") and "seit " in last["echo long"], "no end yet: running: " + repr(last))
+    show_tab(page, "system")
+    hourly = page.locator("#etc-body tbody tr", has_text="cron.hourly").locator("td").nth(2).inner_text()
+    check(page.inner_text("#cronlog-hint") == "" and "Läuft" not in hourly and ":" in hourly,
+          "no hint at -L 15; started before cron's start, no end: only when: " + repr(hourly))
+    page.evaluate("() => { window.__mock.cronSinceAgo = 86400; }")
+    page.click("#reload")
+    wait_idle(page)
+    hourly = page.locator("#etc-body tbody tr", has_text="cron.hourly").locator("td").nth(2).inner_text()
+    check(hourly.startswith("Läuft"), "started since cron's start, no end: running: " + repr(hourly))
+    check(not page.problems, "no console problems (cron's log, results): " + repr(page.problems))
+    page.context.close()
+
+    # cronie logs start and end, never a result, whatever its options: "ended", and no hint
+    page = open_page(browser, "flavor=cronie")
+    page.evaluate("""() => { window.__mock.cronLog.push([600, 'root', "test -x /opt/x && echo '<b>not bold</b>' > /dev/null", 590, null]); }""")
+    page.click("#reload")
+    wait_idle(page)
+    tests = row_of(page, "not bold").locator("td[data-last]").inner_text()
+    check(tests.startswith("Beendet") and "OK" not in tests, "cronie: ended: " + repr(tests))
+    show_tab(page, "system")
+    check(page.inner_text("#cronlog-hint") == "", "cronie: no hint on -L")
+    check(not page.problems, "no console problems (cron's log, cronie): " + repr(page.problems))
     page.context.close()
     # the log cannot be read: dashes, and nothing about starts
     page = open_page(browser)

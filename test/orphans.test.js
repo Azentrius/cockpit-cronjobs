@@ -329,31 +329,63 @@ t("locked", () => {
     }
 });
 
-/* CRON_LOG_SCRIPT: when cron last started each command, from a stand-in for journalctl that
-   prints what journalctl -o short-unix prints and notes how it was called. */
+/* CRON_LOG_SCRIPT: the newest run cron started of each command, with its end and result as
+   far as cron logged them, from a stand-in for journalctl that prints what journalctl -o
+   short-unix prints (in the journal's order) and notes how it was called. The lines are those
+   of Debian's cron 3.0pl1 (do_command.c) and cronie 1.7 at the -L given. */
 const C = require("../src/lib/cron.js");
 const LOG_SCRIPT = constant(/const CRON_LOG_SCRIPT = `([\s\S]*?)`;/.exec(APP), "CRON_LOG_SCRIPT");
-for (const sh of SHELLS) t(sh + ": cron's log: the newest start of each command, nothing else", () => {
+for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, its end and result", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-log-"));
     fs.mkdirSync(path.join(root, "bin"));
     fs.writeFileSync(path.join(root, "bin", "journalctl"),
         "#!/bin/sh\n" +
         "printf '%s\\n' \"$*\" > \"$FAKE_ARGS\"\n" +
         "cat <<'EOF'\n" +
+        /* -L 1: starts only, from the job's process */
         "1792500000.123456 host CRON[100]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)\n" +
         "1792500060.5 host CRON[101]: pam_unix(cron:session): session opened for user root(uid=0) by root(uid=0)\n" +
-        "1792503600.000001 host CRON[102]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)\n" +
         "1792503000.2 host CROND[103]: (www-data) CMD (php -f /var/www/cron.php)\n" +
         "1792503100.3 host CRON[104]: (root) MAIL (mailed 10 bytes of output)\n" +
         "1792503200.4 host CRON[105]: (root) CMD (echo \": (x) CMD (y)\")\n" +
+        "1792503600.000001 host CRON[102]: (root) CMD (cd / && run-parts --report /etc/cron.hourly)\n" +
         "-- Boot 1234 --\n" +
-        /* Debian's cron with -L 8 and more: the job's PID before the command, and END lines */
-        "1792507200.5 host CRON[106]: (root) CMD ([4500] cd / && run-parts --report /etc/cron.hourly)\n" +
-        "1792503700.1 host CRON[107]: (root) CMD ([4321] /usr/local/bin/backup.sh)\n" +
-        "1792503760.1 host CRON[108]: (root) CMD ([4400] /usr/local/bin/backup.sh)\n" +
-        "1792503770.1 host CRON[108]: (root) END ([4400] /usr/local/bin/backup.sh)\n" +
-        "1792503780.1 host CRON[109]: (root) CMD ([ -x /usr/bin/foo ] && foo)\n" +
-        "1792503790.1 host CRON[110]: (root) CMD ([12]x)\n" +
+        /* -L 15: the job's PID before the command, the end and failures from the process that waits */
+        "1792503700.1 host CRON[106]: (root) CMD ([4321] /usr/local/bin/backup.sh)\n" +
+        "1792503760.1 host CRON[107]: (root) CMD ([4400] /usr/local/bin/backup.sh)\n" +
+        "1792503770.1 host CRON[107]: (root) END ([4400] /usr/local/bin/backup.sh)\n" +
+        "1792503780.1 host CRON[108]: (root) CMD ([ -x /usr/bin/foo ] && foo)\n" +
+        "1792503790.1 host CRON[109]: (root) CMD ([12]x)\n" +
+        "1792503800.1 host CRON[110]: (root) CMD ([4501] /usr/local/bin/fail.sh)\n" +
+        "1792503801.1 host CRON[110]: (CRON) error (grandchild #4501 failed with exit status 3)\n" +
+        "1792503801.2 host CRON[110]: (root) END ([4501] /usr/local/bin/fail.sh)\n" +
+        "1792503900.1 host CRON[111]: (root) CMD ([4600] sleep 999)\n" +
+        /* -L 7: no PID; a failure names the job's PID, which logged the start itself */
+        "1792504000.1 host CRON[4701]: (www-data) CMD (php -f /var/www/cron.php)\n" +
+        "1792504002.1 host CRON[4700]: (CRON) error (grandchild #4701 terminated by signal 11, dumped core)\n" +
+        "1792504002.2 host CRON[4700]: (www-data) END (php -f /var/www/cron.php)\n" +
+        "1792504100.1 host CRON[4801]: (root) CMD (cat > /tmp/x)\n" +
+        "1792504101.1 host CRON[4800]: (CRON) error (grandchild #4802 terminated by signal 13)\n" +
+        "1792504101.2 host CRON[4800]: (root) END (cat > /tmp/x)\n" +
+        "1792504200.1 host CRON[4901]: (root) CMD (slow)\n" +
+        "1792504260.1 host CRON[4903]: (root) CMD (slow)\n" +
+        "1792504290.1 host CRON[4900]: (root) END (slow)\n" +
+        "1792504300.1 host CRON[5001]: (root) CMD (flaky)\n" +
+        "1792504301.1 host CRON[5000]: (CRON) error (grandchild #5001 failed with exit status 1)\n" +
+        "1792504301.2 host CRON[5000]: (root) END (flaky)\n" +
+        "1792504360.1 host CRON[5061]: (root) CMD (flaky)\n" +
+        "1792504400.1 host CRON[5101]: (root) CMD (a)\n" +
+        "1792504401.1 host CRON[5100]: (CRON) error (grandchild #5101 failed with exit status 2)\n" +
+        "1792504500.1 host CRON[5101]: (root) CMD (b)\n" +
+        "1792504600.1 host CRON[5301]: (root) CMD (c)\n" +
+        "1792504660.1 host CRON[5361]: (root) CMD (c)\n" +
+        "1792504661.1 host CRON[5300]: (CRON) error (grandchild #5301 failed with exit status 5)\n" +
+        "1792504700.1 host CRON[5401]: (root) CMD (echo ') END (x)')\n" +
+        "1792504701.1 host CRON[5400]: (root) END (echo ') END (x)')\n" +
+        /* cronie: start and end, no result */
+        "1792504800.1 host CROND[5501]: (root) CMD (/usr/bin/true)\n" +
+        "1792504805.1 host CROND[5500]: (root) CMDEND (/usr/bin/true)\n" +
+        "1792504900.1 host CRON[5601]: (root) CMD (no end of the line\n" +
         "EOF\n", { mode: 0o755 });
     const r = spawnSync(sh, ["-c", LOG_SCRIPT], {
         env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", FAKE_ARGS: path.join(root, "args") },
@@ -361,16 +393,30 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest start of each command,
     });
     assert.strictEqual(r.status, 0, r.stderr.toString());
     assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), [
-        "1792503000 (www-data) CMD (php -f /var/www/cron.php)",
-        "1792503200 (root) CMD (echo \": (x) CMD (y)\")",
-        "1792503760 (root) CMD (/usr/local/bin/backup.sh)",
-        "1792503780 (root) CMD ([ -x /usr/bin/foo ] && foo)",
-        "1792503790 (root) CMD ([12]x)",
-        "1792507200 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
-    ], "one line for each command, whether cron logged a PID or not; brackets that are no PID stay");
+        "1792503200 - - (root) CMD (echo \": (x) CMD (y)\")",
+        "1792503600 - - (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+        "1792503760 1792503770 - (root) CMD (/usr/local/bin/backup.sh)",
+        "1792503780 - - (root) CMD ([ -x /usr/bin/foo ] && foo)",
+        "1792503790 - - (root) CMD ([12]x)",
+        "1792503800 1792503801 exit:3 (root) CMD (/usr/local/bin/fail.sh)",
+        "1792503900 - - (root) CMD (sleep 999)",
+        "1792504000 1792504002 signal:11 (www-data) CMD (php -f /var/www/cron.php)",
+        "1792504100 1792504101 - (root) CMD (cat > /tmp/x)",
+        "1792504260 1792504290 - (root) CMD (slow)",
+        "1792504360 - - (root) CMD (flaky)",
+        "1792504400 - exit:2 (root) CMD (a)",
+        "1792504500 - - (root) CMD (b)",
+        "1792504660 - - (root) CMD (c)",
+        "1792504700 1792504701 - (root) CMD (echo ') END (x)')",
+        "1792504800 1792504805 - (root) CMD (/usr/bin/true)",
+    ], "one line for each command, whether cron logged a PID or not; brackets that are no PID stay; a failure " +
+       "of a PID that started no job (what feeds the % input), of an older run, or before a newer start is not " +
+       "the newest run's; a PID used again keeps what the other job's run had; an end without PID belongs to " +
+       "the newest run (a guess only when runs overlap)");
     const log = C.parseCronLog(r.stdout.toString());
-    assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792507200000);
-    assert.strictEqual(C.lastStart(log, "root", "/usr/local/bin/backup.sh"), 1792503760000, "with the PID");
+    assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792503600000);
+    assert.deepStrictEqual(C.lastRun(log, "root", "/usr/local/bin/fail.sh"),
+                           { start: 1792503800000, end: 1792503801000, result: { exit: 3 } }, "with the PID");
     assert.strictEqual(C.lastStart(log, "root", "[ -x /usr/bin/foo ] && foo"), 1792503780000);
     /* only cron's own messages, by the fields journald sets: _UID 0 and _COMM cron or crond */
     assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => a.startsWith("_") || a.startsWith("-")),

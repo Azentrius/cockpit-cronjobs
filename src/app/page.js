@@ -174,14 +174,22 @@ function lastCell(user, e, i, editable, frozen) {
         if (!e.enabled) return h("span", { class: "cron-muted" }, "—");
         const can = editable && C.canCapture(info.command);
         const key = keyOf(user, "capture", i);
-        /* not recorded: when cron last started it, from its log */
-        const started = C.lastStart(state.cronLog, user, e.command);
+        const record = can ? h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", disabled: frozen,
+                                           "data-key": key, "aria-describedby": cmdId,
+                                           onclick: () => setCapture(user, i, true, key) }, T.recordLink) : null;
+        /* not recorded: its last run as far as cron's log tells */
+        const run = C.lastRun(state.cronLog, user, e.command);
+        const l = run ? cronLogLabel(run) : null;
+        if (l) {
+            return h("div", { class: "cron-cell" },
+                h("span", { title: T.cronLogTitle }, labelEl(l.kind, l.icon, l.text)),
+                h("span", { class: "az-cell-sub" }, cronLogWhen(run) + " · " + T.inCronLog),
+                record);
+        }
         return h("div", { class: "cron-cell" },
             h("span", { class: "cron-muted" }, T.notRecorded),
-            can ? h("button", { class: "az-btn az-btn--link cron-inline-link", type: "button", disabled: frozen,
-                                "data-key": key, "aria-describedby": cmdId,
-                                onclick: () => setCapture(user, i, true, key) }, T.recordLink) : null,
-            started !== null ? h("span", { class: "az-cell-sub", title: T.startedTitle }, T.startedAt(fmtShort(started))) : null);
+            record,
+            run ? h("span", { class: "az-cell-sub", title: T.startedTitle }, T.startedAt(fmtShort(run.start))) : null);
     }
     const job = runsOf(user, info.capture.id);
     if (!job) return h("span", { class: "cron-muted" }, "—");
@@ -479,16 +487,49 @@ function readOnlyTable(cols, rows) {
 
 function emptyState() { return h("p", { class: "cron-state" }, T.noEntries); }
 
-/* When cron last started command as user, from its log (state.cronLog); a dash when the
-   log could not be read. The log tells nothing about how the run ended. */
+/* How the newest run cron started of a job ended, from its log (C.cronLogOutcome), as a
+   label ({ kind, icon, text }); null when the log tells only that it started. */
+function cronLogLabel(run) {
+    const o = C.cronLogOutcome(run, state.basics.cronLogs);
+    if (o === "failed") return { kind: "danger", icon: "exclamation-circle", text: T.statusFailed(run.result.exit) };
+    if (o === "signal") return { kind: "danger", icon: "exclamation-circle", text: T.statusSignal(C.signalName(run.result.signal)) };
+    if (o === "ok") return { kind: "success", icon: "check-circle", text: T.statusOk };
+    if (o === "ended") return { kind: "info", icon: "info-circle", text: T.statusEnded };
+    if (o === "running") return { kind: "success", icon: "check-circle", text: T.statusRunning };
+    return null;
+}
+
+/* When that run started, and how long it took or has been going on. */
+function cronLogWhen(run) {
+    if (run.end !== null) return fmtShort(run.start) + " · " + fmtDuration(Math.max(0, run.end - run.start) / 1000);
+    if (C.cronLogOutcome(run, state.basics.cronLogs) === "running") {
+        return T.runningSince(clock(run.start), fmtDuration(Math.max(0, Date.now() - run.start) / 1000));
+    }
+    return fmtShort(run.start);
+}
+
+/* The newest run cron started of command as user, from its log (state.cronLog): how it
+   ended where the log tells, else when it started; a dash when the log could not be read. */
 function startedCell(user, command) {
     if (!state.cronLog || !user || !command) return h("span", { class: "cron-muted" }, "—");
-    const ms = C.lastStart(state.cronLog, user, command);
-    return ms === null ? h("span", { class: "cron-muted", title: T.startedTitle }, T.notInLog)
-        : h("span", { title: T.startedTitle }, fmtShort(ms));
+    const run = C.lastRun(state.cronLog, user, command);
+    if (!run) return h("span", { class: "cron-muted", title: T.startedTitle }, T.notInLog);
+    const l = cronLogLabel(run);
+    if (!l) return h("span", { title: T.startedTitle }, fmtShort(run.start));
+    return h("div", { class: "cron-cell" },
+        h("span", { title: T.cronLogTitle }, labelEl(l.kind, l.icon, l.text)),
+        h("span", { class: "az-cell-sub" }, cronLogWhen(run)));
+}
+
+/* A note in the System tab when Debian's cron logs no end or no failure of its jobs. */
+function renderCronLogHint() {
+    const logs = state.basics.cronLogs;
+    fill($("cronlog-hint"), state.basics.flavor === "debian" && logs && logs.start && !(logs.end && logs.failure)
+        ? alertEl("info", T.cronLogHintTitle, T.cronLogHintBody) : null);
 }
 
 function renderSystem() {
+    renderCronLogHint();
     const sys = state.sys;
     ["etc-card", "crond-card", "users-card", "periodic-card"].forEach(id => { $(id).hidden = !sys; });
     fill($("sys-alerts"), !sys && state.sysError !== null
@@ -496,15 +537,15 @@ function renderSystem() {
     if (!sys) return;
 
     fill($("etc-body"), sys.etc.length === 0 ? emptyState() : readOnlyTable(
-        [T.colSchedule, T.colUser, T.colStarted, T.colCommand],
+        [T.colSchedule, T.colUser, T.colLast, T.colCommand],
         sys.etc.map(j => h("tr", null,
             h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule, j.tz)),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
-            h("td", { class: "az-nowrap", "data-label": T.colStarted }, startedCell(j.user, j.command)),
+            h("td", { class: "az-nowrap", "data-label": T.colLast }, startedCell(j.user, j.command)),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
 
     fill($("crond-body"), sys.crond.length === 0 ? emptyState() : readOnlyTable(
-        [T.colFile, T.colSchedule, T.colUser, T.colStarted, T.colCommand],
+        [T.colFile, T.colSchedule, T.colUser, T.colLast, T.colCommand],
         sys.crond.map(j => h("tr", { class: j.ignored ? "is-off" : null },
             h("td", { "data-label": T.colFile },
                 h("div", { class: "cron-cell" },
@@ -516,7 +557,7 @@ function renderSystem() {
             h("td", { class: "az-nowrap", "data-label": T.colSchedule },
                 j.schedule ? scheduleCell(j.schedule, j.tz) : h("span", { class: "cron-muted" }, "—")),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user || h("span", { class: "cron-muted" }, "—")),
-            h("td", { class: "az-nowrap", "data-label": T.colStarted },
+            h("td", { class: "az-nowrap", "data-label": T.colLast },
                 j.ignored ? h("span", { class: "cron-muted" }, "—") : startedCell(j.user, j.command)),
             h("td", { "data-label": T.colCommand },
                 j.command ? h("span", { class: "az-mono" }, j.command) : h("span", { class: "cron-muted" }, "—"))))));
@@ -525,11 +566,11 @@ function renderSystem() {
     const readOnlyUsers = sys.users.filter(j => !state.users[j.user]);
     $("users-card").hidden = readOnlyUsers.length === 0;
     fill($("users-body"), readOnlyTable(
-        [T.colUser, T.colSchedule, T.colStarted, T.colCommand],
+        [T.colUser, T.colSchedule, T.colLast, T.colCommand],
         readOnlyUsers.map(j => h("tr", { class: j.enabled ? null : "is-off" },
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule }, scheduleCell(j.schedule, j.tz)),
-            h("td", { class: "az-nowrap", "data-label": T.colStarted },
+            h("td", { class: "az-nowrap", "data-label": T.colLast },
                 j.enabled ? startedCell(j.user, j.command) : h("span", { class: "cron-muted" }, "—")),
             h("td", { "data-label": T.colCommand }, h("span", { class: "az-mono" }, j.command))))));
 

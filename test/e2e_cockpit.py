@@ -399,19 +399,40 @@ with sync_playwright() as p:
     sh("rm -f /tmp/cj-e2e-root-cron /tmp/cj-e2e-root-out")
     clear_of_cron_check()
     sh("crontab -u root -", input=start + "* * * * * { " + WHO + "; } > /tmp/cj-e2e-root-cron\n"
-                                          "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n")
+                                          "0 5 1 1 * { " + WHO + "; } > /tmp/cj-e2e-root-out\n"
+                                          "* * * * * exit 3 # cj-e2e-root-fail\n")
     page.click("#reload")
     wait_idle(page)
     by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
     check(by_cron[0] == "root" and by_cron[1] == "/root" and by_cron[2].get("CJ_E2E_EXPORT") == "quoted value" and
           "USER" not in by_cron[2], "cron ran the job as root with /etc/environment: " + repr(by_cron))
-    # cron's log: the page finds that start of the job, which does not record its runs, by the
-    # command as Debian's cron logs it (in CI also with -L 15, which puts the job's PID before it)
+    # cron's log: the page finds that run of the jobs, which do not record their runs, by the
+    # command as Debian's cron logs it. In CI once with -L 15 (start, end, failure, the job's PID
+    # before the command): then how they ended; else only when they started, and a hint on -L.
+    cron_pid = sh("systemctl show -p MainPID --value cron").stdout.strip()
+    logs_all = bool(re.search(r"(^| )-L ?15( |$)", (read(f"/proc/{cron_pid}/cmdline") or "").replace("\0", " ")))
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        journal = sh("journalctl _COMM=cron --no-pager -q -o cat --since -3min").stdout
+        if "exit 3 # cj-e2e-root-fail)" in journal and (not logs_all or (
+                re.search(r"\) END \(\[\d+\] \{ id -un", journal) and "failed with exit status 3" in journal)):
+            break
+        time.sleep(2)
     page.click("#reload")
     wait_idle(page)
     started = row_of(page, "cj-e2e-root-cron").locator("td[data-last]").inner_text()
-    check("Nicht erfasst" in started and "gestartet" in started, "the last start from cron's log: " + repr(started) + "\n" +
-          sh("journalctl _COMM=cron --no-pager -q -o short-unix -n 5").stdout)
+    failed = row_of(page, "cj-e2e-root-fail").locator("td[data-last]").inner_text()
+    said = "\n" + sh("journalctl _COMM=cron --no-pager -q -o short-unix -n 8").stdout
+    page.click("#tab-system")
+    hint = page.inner_text("#cronlog-hint")
+    page.click("#tab-overview")
+    if logs_all:
+        check(started.startswith("OK") and "Log von cron" in started and "Fehler · Exit 3" in failed and not hint,
+              "cron at -L 15: how the runs ended, from its log: " + repr((started, failed, hint)) + said)
+    else:
+        check("Nicht erfasst" in started and "gestartet" in started and "gestartet" in failed and "Fehler" not in failed and
+              "-L 15" in hint, "cron as installed: the last start from its log, and a hint: " +
+              repr((started, failed, hint)) + said)
     who_row = row_of(page, "0 5 1 1 *")   # yearly: the conversion checks its next 5 runs too
     who_row.locator("[data-key^='run:']").click()
     check("Außerdem gesetzt:" in page.inner_text("#run-env") and "CJ_E2E_EXPORT" in page.inner_text("#run-env"),

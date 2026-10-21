@@ -125,6 +125,10 @@ page, and fewer things go wrong unnoticed.
 - ✅ **Missed runs:** a recorded job whose next run cron did not start shows as missed.
 - ✅ **Starts from cron's log:** when cron last started the jobs that do not record their runs, and
   those in `/etc/crontab` and `/etc/cron.d`.
+- **Results from cron's log** (after 2.9.0): how that run ended, where cron logs it: Debian's cron at
+  `-L 15` logs the end and failures (exit status, signal), cronie only the end; at Debian's default the
+  System tab says how to set it. Next: such failures in the status as well (item `failed`), so that
+  they reach the Status Board and the notifier.
 - ✅ **Record all:** recording for every job of a crontab in one step.
 - ✅ **Not overlapping:** a recorded job can be kept from starting while its previous run goes on
   (run recorder version 3).

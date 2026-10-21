@@ -643,20 +643,57 @@ t("cron's log: commands as cron writes them, the newest start of each", () => {
     assert.strictEqual(C.loggedCommand("date +\\%F > /tmp/x%input%more"), "date +%F > /tmp/x", "as cron runs it: before the first %");
     assert.strictEqual(C.loggedCommand("echo a\\\\b 'x'"), "echo a\\\\b 'x'", "other backslashes stay");
     const log = C.parseCronLog([
-        "1792500000 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
-        "1792503600 (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
-        "1792503000 (www-data) CMD (php -f /var/www/cron.php)",
-        "1792503200 (root) CMD (echo \": (x) CMD (y)\")",
-        "1792503300 (root) CMD (date +%F > /tmp/x)",
-        "1792503400 (root) MAIL (mailed 10 bytes)", "x (root) CMD (y)", "1792503500 (a b) CMD (y)", "",
+        "1792500000 - - (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+        "1792503600 1792503601 - (root) CMD (cd / && run-parts --report /etc/cron.hourly)",
+        "1792503000 1792503065 exit:2 (www-data) CMD (php -f /var/www/cron.php)",
+        "1792503200 - signal:9 (root) CMD (echo \": (x) CMD (y)\")",
+        "1792503300 - - (root) CMD (date +%F > /tmp/x)",
+        "1792503400 - - (root) MAIL (mailed 10 bytes)", "x - - (root) CMD (y)", "1792503500 - - (a b) CMD (y)",
+        "1792503500 (root) CMD (old format)", "1792503500 - exit:x (root) CMD (y)", "",
     ].join("\n"));
     assert.strictEqual(log.size, 4);
     assert.strictEqual(C.lastStart(log, "root", "cd / && run-parts --report /etc/cron.hourly"), 1792503600000, "the newest");
-    assert.strictEqual(C.lastStart(log, "www-data", "php -f /var/www/cron.php"), 1792503000000);
+    assert.deepStrictEqual(C.lastRun(log, "root", "cd / && run-parts --report /etc/cron.hourly"),
+                           { start: 1792503600000, end: 1792503601000, result: null }, "the newest, its end");
+    assert.deepStrictEqual(C.lastRun(log, "www-data", "php -f /var/www/cron.php"),
+                           { start: 1792503000000, end: 1792503065000, result: { exit: 2 } });
     assert.strictEqual(C.lastStart(log, "root", "php -f /var/www/cron.php"), null, "another user's start is not root's");
-    assert.strictEqual(C.lastStart(log, "root", "echo \": (x) CMD (y)\""), 1792503200000, "brackets in the command");
+    assert.deepStrictEqual(C.lastRun(log, "root", "echo \": (x) CMD (y)\""),
+                           { start: 1792503200000, end: null, result: { signal: 9 } }, "brackets in the command; a signal");
     assert.strictEqual(C.lastStart(log, "root", "date +\\%F > /tmp/x%in"), 1792503300000, "a job with %");
     assert.strictEqual(C.lastStart(null, "root", "x"), null, "no log");
+    assert.strictEqual(C.lastRun(null, "root", "x"), null, "no log");
+});
+t("cron's log: what cron logs, and what it says about a run", () => {
+    const L = (args, since) => C.cronLogs("debian", args, since);
+    assert.deepStrictEqual(L("/usr/sbin/cron -f -P", 5), { start: true, end: false, failure: false, since: 5 }, "-L 1 by default");
+    assert.deepStrictEqual(L("/usr/sbin/cron -f -P -L 15"), { start: true, end: true, failure: true, since: null });
+    assert.deepStrictEqual(L("/usr/sbin/cron -fL7"), { start: true, end: true, failure: true, since: null }, "joined to other flags");
+    assert.deepStrictEqual(L("/usr/sbin/cron -L 5"), { start: true, end: false, failure: true, since: null });
+    assert.deepStrictEqual(L("/usr/sbin/cron -L 15 -L 2"), { start: false, end: true, failure: false, since: null }, "the last counts");
+    assert.deepStrictEqual(L("/usr/sbin/cron -L x"), { start: false, end: false, failure: false, since: null }, "atoi: 0");
+    assert.deepStrictEqual(L("/usr/sbin/cron -x ext -f"), { start: true, end: false, failure: false, since: null }, "-x takes a value");
+    assert.deepStrictEqual(L("/usr/sbin/cron -f -- -L 15"), { start: true, end: false, failure: false, since: null }, "-- ends options");
+    assert.strictEqual(C.cronLogs("debian", "", 5), null, "cron does not run");
+    assert.deepStrictEqual(C.cronLogs("cronie", "/usr/sbin/crond -n", 5), { start: true, end: true, failure: false, since: 0 },
+                           "cronie: start and end of every run, never a result");
+
+    const o = (run, logs) => C.cronLogOutcome(Object.assign({ start: 1000, end: null, result: null }, run), logs);
+    const all = { start: true, end: true, failure: true, since: 500 };
+    assert.strictEqual(o({ result: { exit: 3 } }, null), "failed", "what the log says counts without knowing more");
+    assert.strictEqual(o({ end: 1005, result: { signal: 9 } }, null), "signal");
+    assert.strictEqual(o({ end: 1005 }, all), "ok", "ended, and cron logs failures: none");
+    assert.strictEqual(o({ end: 1005 }, Object.assign({}, all, { failure: false })), "ended");
+    assert.strictEqual(o({ end: 1005 }, Object.assign({}, all, { since: 2000 })), "ended", "started before cron did");
+    assert.strictEqual(o({ end: 1005 }, Object.assign({}, all, { since: null })), "ended", "cron's start not known");
+    assert.strictEqual(o({}, all), "running", "cron logs ends, none yet");
+    assert.strictEqual(o({}, Object.assign({}, all, { end: false })), "started", "cron logs no ends");
+    assert.strictEqual(o({}, Object.assign({}, all, { since: 2000 })), "started");
+    assert.strictEqual(o({}, null), "started");
+    assert.strictEqual(o({ end: 1005 }, C.cronLogs("cronie", "/usr/sbin/crond -n", null)), "ended", "cronie");
+    assert.strictEqual(o({}, C.cronLogs("cronie", "/usr/sbin/crond -n", null)), "running", "cronie");
+    assert.strictEqual(C.signalName(9), "SIGKILL");
+    assert.strictEqual(C.signalName(40), "signal 40");
 });
 t("record all: the jobs at the indexes recorded in one change, each with an ID of its own", () => {
     const W = C.WRAPPER_PATH;

@@ -369,26 +369,78 @@
        the shell (cronCommand), through mkprints. */
     const loggedCommand = command => mkprints(cronCommand(command).command);
 
-    /* The output of CRON_LOG_SCRIPT in app/system.js, "SECONDS (USER) CMD (COMMAND)" for the
-       newest start of each -> Map of "USER\0COMMAND" -> ms. Other lines are left out. */
+    /* The output of CRON_LOG_SCRIPT in app/system.js, one line for the newest start of each
+       command, "START END RESULT (USER) CMD (COMMAND)": seconds, END those of its end or "-",
+       RESULT "exit:N", "signal:N" or "-" -> Map of "USER\0COMMAND" -> { start, end, result }
+       (ms; end null when not logged; result { exit } or { signal }, null when not logged).
+       Other lines are left out. */
     function parseCronLog(text) {
         const out = new Map();
         String(text || "").split("\n").forEach(line => {
-            const m = /^(\d{1,12}) \(([^()\s]+)\) CMD \((.*)\)$/.exec(line);
+            const m = /^(\d{1,12}) (\d{1,12}|-) (exit:\d{1,3}|signal:\d{1,3}|-) \(([^()\s]+)\) CMD \((.*)\)$/.exec(line);
             if (!m) return;
-            const key = m[2] + "\0" + m[3];
-            const ms = Number(m[1]) * 1000;
-            if (!out.has(key) || out.get(key) < ms) out.set(key, ms);
+            const key = m[4] + "\0" + m[5];
+            const run = { start: Number(m[1]) * 1000, end: m[2] === "-" ? null : Number(m[2]) * 1000, result: null };
+            if (m[3] !== "-") run.result = m[3].startsWith("exit:") ? { exit: Number(m[3].slice(5)) } : { signal: Number(m[3].slice(7)) };
+            if (!out.has(key) || out.get(key).start < run.start) out.set(key, run);
         });
         return out;
     }
 
+    /* The newest run cron started of command for user, in log (parseCronLog), or null. */
+    function lastRun(log, user, command) {
+        if (!log || !user || !command) return null;
+        return log.get(user + "\0" + loggedCommand(command)) || null;
+    }
+
     /* When cron last started command for user, in log (parseCronLog), or null. */
     function lastStart(log, user, command) {
-        if (!log || !user || !command) return null;
-        const ms = log.get(user + "\0" + loggedCommand(command));
-        return ms === undefined ? null : ms;
+        const run = lastRun(log, user, command);
+        return run ? run.start : null;
     }
+
+    /* What cron logs about each job, from the running daemon's command line (args, as
+       BASICS_SCRIPT reads it) and when it started (since, ms): Debian's cron what its -L says,
+       the sum of 1 the start, 2 the end, 4 a failure (an exit status other than 0, or a
+       signal), 8 the job's PID; 1 without it, the last one counting (getopt "fPlL:nNx:", atoi).
+       cronie logs start and end of each job, whatever its options, and never a result.
+       -> { start, end, failure, since } or null when cron does not run. */
+    function cronLogs(flavor, args, since) {
+        if (!args) return null;
+        if (flavor === "cronie") return { start: true, end: true, failure: false, since: 0 };
+        const words = String(args).trim().split(/\s+/).slice(1);
+        let level = 1;
+        for (let k = 0; k < words.length; k++) {
+            const w = words[k];
+            if (w === "--") break;
+            if (!/^-[^-]/.test(w)) continue;
+            for (let j = 1; j < w.length; j++) {
+                if (w[j] !== "L" && w[j] !== "x") continue;
+                const value = j + 1 < w.length ? w.slice(j + 1) : words[++k] || "";
+                if (w[j] === "L") level = parseInt(value, 10) & 15;
+                break;
+            }
+        }
+        return { start: (level & 1) !== 0, end: (level & 2) !== 0, failure: (level & 4) !== 0,
+                 since: typeof since === "number" ? since : null };
+    }
+
+    /* How run (lastRun) ended, as far as cron's log tells: "failed" (an exit status), "signal",
+       "ok" (it ended, and cron logs failures), "ended", "running" (cron logs ends, none yet) or
+       "started" (nothing more is known). What cron logs now (logs, cronLogs) counts only for
+       runs it started since then; one started before may have been logged otherwise. */
+    function cronLogOutcome(run, logs) {
+        if (run.result) return run.result.exit !== undefined ? "failed" : "signal";
+        const known = !!logs && logs.since !== null && run.start >= logs.since;
+        if (run.end !== null) return known && logs.failure ? "ok" : "ended";
+        return known && logs.end ? "running" : "started";
+    }
+
+    const SIGNALS = { 1: "SIGHUP", 2: "SIGINT", 3: "SIGQUIT", 4: "SIGILL", 5: "SIGTRAP", 6: "SIGABRT", 7: "SIGBUS",
+                      8: "SIGFPE", 9: "SIGKILL", 10: "SIGUSR1", 11: "SIGSEGV", 12: "SIGUSR2", 13: "SIGPIPE",
+                      14: "SIGALRM", 15: "SIGTERM", 24: "SIGXCPU", 25: "SIGXFSZ" };
+    /* The name of signal n as Linux numbers them, or "signal n". */
+    const signalName = n => SIGNALS[n] || "signal " + n;
 
     /* "%" in a crontab command becomes a newline unless escaped as "\%". */
     function hasUnescapedPercent(command) {
@@ -1047,7 +1099,7 @@
         parseUserCrontab, serializeUserCrontab, roundTrips, normalizeText, templateEnd,
         setEnabled, setJob, newJob, rawLine, entryLine,
         parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
-        mkprints, loggedCommand, parseCronLog, lastStart,
+        mkprints, loggedCommand, parseCronLog, lastRun, lastStart, cronLogs, cronLogOutcome, signalName,
         parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, captureJobs, jobName, slug,
         cksum,
