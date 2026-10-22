@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.10.1 – 2026-10-22
 
 The hint on cron's log gives a line for systemd that works.
 
