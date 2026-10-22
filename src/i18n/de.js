@@ -124,7 +124,8 @@
         cronLogHintBody: "Für Jobs, die ihre Läufe nicht erfassen, kann die Seite deshalb nicht sagen, wie ein Lauf " +
                          "ausging. Mit der Option `-L 15` gestartet, loggt cron auch Ende und Fehlschläge jedes Jobs, " +
                          "und die Seite zeigt sie hier und in der Übersicht. Unter Ubuntu: `systemctl edit cron.service`, " +
-                         "unter `[Service]` die Zeile `Environment=EXTRA_OPTS=-L 15`, dann `systemctl restart cron`. " +
+                         "unter `[Service]` die Zeile `Environment=\"EXTRA_OPTS=-L 15\"` (mit den Anführungszeichen: " +
+                         "ohne sie setzt systemd nur `-L`, und cron startet nicht), dann `systemctl restart cron`. " +
                          "Unter Debian: `EXTRA_OPTS=\"-L 15\"` in `/etc/default/cron`, dann cron neu starten.",
         recordLink: "Läufe erfassen",
         noRunYet: "Noch kein Lauf",

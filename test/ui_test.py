@@ -683,7 +683,7 @@ with sync_playwright() as p:
           "cron.d: bytes as cron logs them; a start of another user is not root's: " + repr(crond))
     # Debian's cron as installed (-L 1) logs only starts: the System tab says how to have it log more
     hint = page.inner_text("#cronlog-hint")
-    check("cron loggt nur, wann Jobs starten" in hint and "Environment=EXTRA_OPTS=-L 15" in hint and
+    check("cron loggt nur, wann Jobs starten" in hint and 'Environment="EXTRA_OPTS=-L 15"' in hint and
           page.locator("#cronlog-hint code").count() >= 4, "a hint on -L: " + repr(hint))
     check(not page.problems, "no console problems (cron's log, starts): " + repr(page.problems))
     page.context.close()

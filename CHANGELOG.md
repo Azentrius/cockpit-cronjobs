@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+The hint on cron's log gives a line for systemd that works.
+
+- **The hint in the System tab** told Ubuntu users to add `Environment=EXTRA_OPTS=-L 15` to cron's unit.
+  systemd splits that at the space and sets only `EXTRA_OPTS=-L`, so cron does not start. It says
+  `Environment="EXTRA_OPTS=-L 15"` now, with a word on why the quotes matter; a test reads that line as
+  systemd does, in both languages.
+
 ## 2.10.0 – 2026-10-22
 
 Jobs that do not record their runs show how their last run ended, where cron logs it: on the page, in
