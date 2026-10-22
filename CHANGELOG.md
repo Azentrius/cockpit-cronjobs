@@ -1,25 +1,5 @@
 # Changelog
 
-## Unreleased
-
-Runs from cron's log are read again with the runs, a PID used again is no longer taken for an
-earlier run, and the status says nothing of failures it cannot assign to a job.
-
-- **Status without starts in cron's log:** with Debian's cron at `-L 4`, `6` or `12` (failures, but no
-  starts) the status counted no failure and said that cron's log showed none, although without its
-  start a failure belongs to no job. It reads cron's log now only when cron logs starts and failures
-  (`-L` with 1 and 4); otherwise it says, as before, that the results of jobs without recording are not
-  known. The System tab shows its note on `-L 15` then too.
-- **Runs from cron's log without reloading:** the page read cron's log only when it loaded, so a run it
-  showed as running stayed so until a reload. It reads the log again with the runs, at most once a
-  minute and when the page is shown again, and updates the crontabs, the latest results and the System
-  tab; an answer that comes back after a newer one was shown is dropped.
-- **A PID used again:** a failure or an end in cron's log counted for the start of its PID even after
-  that run had ended. When the process that feeds a job its input after `%` got the PID of an earlier
-  run and died of SIGPIPE, the page and the status took that earlier run for failed. A PID now
-  belongs to its run only until the run's end or another boot, and with `-L 8` only lines of the
-  process that logged the start count.
-
 ## 2.10.1 – 2026-10-22
 
 The hint on cron's log gives a line for systemd that works.
