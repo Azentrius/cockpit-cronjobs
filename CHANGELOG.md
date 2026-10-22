@@ -1,24 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.10.0 – 2026-10-22
 
-Jobs that do not record their runs show how their last run ended, where cron logs it, in the latest
-results and in the status too; the descriptions say what the page does since 2.8 and 2.9; the last
-start from cron's log is found however much cron logs.
+Jobs that do not record their runs show how their last run ended, where cron logs it: on the page, in
+the latest results and in the status; starts in cron's log are found however much cron logs and under
+load; the package descriptions say what the page does since 2.8.
 
-- **Failures from cron's log in the status:** when Debian's cron logs failures (`-L` with 4), the item
-  `failed` counts the jobs whose run cron logged as failed in the last 24 hours, read as the page reads
-  them: those of `/etc/crontab` and `/etc/cron.d` by their path, those of the crontabs of root and other
-  users only in number ("1 job without recording, from cron's log"), and only jobs that are still
-  there and do not record their runs. `ok` then says that cron's log shows no failed job, and
-  `unrecorded` that their failures show there. cron's log is read only then, from the last 24 hours.
-- **Latest results:** the runs from cron's log whose end it tells (failed, OK, running) are listed too,
-  marked as from cron's log, so the link of the status item leads to them.
-- **Starts that went missing from cron's log:** the page took only lines with `_COMM` cron or crond,
-  but cron logs a start from the job's process right before it becomes the shell, and journald reads
-  `_COMM` from `/proc` when it takes the message: under load it was `sh` already, and the start was not
-  found (seen with three jobs starting at once). Lines now count when root logged them (`_UID` 0, set
-  by journald) as `CRON` or `CROND`.
 - **Results from cron's log:** for a job that does not record its runs, and for those in `/etc/crontab`,
   `/etc/cron.d` and the crontabs the page only shows, the page reads from cron's log how the newest run
   ended, where cron logs it: Debian's cron with `-L 15` (or 2 and 4) logs the end and failures, with the
@@ -28,10 +15,23 @@ start from cron's log is found however much cron logs.
   started since then. At Debian's default (`-L 1`, starts only) the System tab says how to set the
   option. The column in the System tab is now "Last run". The end-to-end test runs a failing job under
   cron at `-L 15`.
+- **Latest results:** the runs from cron's log whose end it tells (failed, OK, running) are listed too,
+  marked as from cron's log, so the link of the status item leads to them.
+- **Failures from cron's log in the status:** when Debian's cron logs failures (`-L` with 4), the item
+  `failed` counts the jobs whose run cron logged as failed in the last 24 hours, read as the page reads
+  them: those of `/etc/crontab` and `/etc/cron.d` by their path, those of the crontabs of root and other
+  users only in number ("1 job without recording, from cron's log"), and only jobs that are still
+  there and do not record their runs. `ok` then says that cron's log shows no failed job, and
+  `unrecorded` that their failures show there. cron's log is read only then, from the last 24 hours.
 - **Last start with cron's PID:** Debian's cron started with `-L 8` or more (the job's PID in the log)
   logs a start as `(USER) CMD ([PID] COMMAND)`; the page found no start then. It leaves the PID out
   now, so such starts count, and those logged before and after a change of the option count as one
   command. The end-to-end test runs once with cron at `-L 15`.
+- **Starts that went missing from cron's log:** the page took only lines with `_COMM` cron or crond,
+  but cron logs a start from the job's process right before it becomes the shell, and journald reads
+  `_COMM` from `/proc` when it takes the message: under load it was `sh` already, and the start was not
+  found (seen with three jobs starting at once). Lines now count when root logged them (`_UID` 0, set
+  by journald) as `CRON` or `CROND`.
 - **Packages:** the description of the `.deb` and `.rpm` and the AppStream data (Cockpit's Applications
   page) name the crontabs of other users, missed runs, runs from cron's log and the status for the
   Azentrius Status Board.
