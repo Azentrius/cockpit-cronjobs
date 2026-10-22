@@ -10,7 +10,8 @@ Report them privately through GitHub instead:
 
 Please include:
 
-- what is affected (page, run recorder, systemd conversion, installer; version or commit),
+- what is affected (page, run recorder, systemd conversion, status helper, packages;
+  version or commit),
 - steps to reproduce,
 - the impact you expect.
 
@@ -43,6 +44,8 @@ timer. Reports are particularly welcome for:
   page or in the status helper (`cronjobs-status`),
 - user names, commands or output reaching the status files, which anyone can
   read,
-- a log line that passes for a start cron logged itself,
+- a log line that passes for a start, an end or a failure cron logged itself, or
+  that makes the page or the status count a failure for another job than the one
+  that failed,
 - release archives, packages or `SHA256SUMS` that do not match the tagged
   source.

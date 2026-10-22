@@ -1,6 +1,6 @@
 # Roadmap
 
-As of 2026-10-21. Each stage is cut so that it is useful on its own and brings its own tests. The
+As of 2026-10-23. Each stage is cut so that it is useful on its own and brings its own tests. The
 order is the recommendation; stages after 1.1 are proposals until they are decided.
 
 **Guardrails for every stage** (they keep applying):

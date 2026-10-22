@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Bug report
+description: Something in Cron Jobs does not work as described, or the page shows a job or a run wrongly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problems do not belong here.** Report them privately as described in
+        [SECURITY.md](https://github.com/Azentrius/cockpit-cronjobs/blob/main/SECURITY.md).
+
+        This issue is public. Crontabs and the output of jobs often hold passwords, tokens, host names
+        and paths: remove them and any other private data from everything you paste.
+  - type: input
+    id: version
+    attributes:
+      label: Cron Jobs version
+      description: >-
+        Shown at the bottom of the page ("Cron Jobs X.Y.Z"), or the output of `dpkg -s cockpit-cronjobs`
+        or `rpm -q cockpit-cronjobs`.
+      placeholder: "2.10.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: cockpit
+    attributes:
+      label: Cockpit version
+      description: In Cockpit under Help › About Web Console, or `cockpit-bridge --version`.
+    validations:
+      required: true
+  - type: input
+    id: cron
+    attributes:
+      label: cron and its options
+      description: >-
+        The cron package and version (`dpkg -s cron` or `rpm -q cronie`), and how it runs:
+        `systemctl status cron` or `systemctl status crond` shows the command line.
+      placeholder: "cron 3.0pl1-184ubuntu2, /usr/sbin/cron -f -P"
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: Which tab and card, and what the page showed or did.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: For a job that is shown wrongly, its line with the command replaced by something harmless.
+      placeholder: |
+        1. Add the line `*/5 * * * * /usr/local/bin/example.sh` to the root crontab
+        2. Turn on "Record result and output" for it
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: >-
+        For example the browser console, `journalctl -u cron -n 20` or
+        `/usr/lib/cockpit-cronjobs/cronjobs-status status`.
+        **Before pasting, remove passwords, tokens, host names, IP addresses and any other private data.**
+      render: shell
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Private data
+      options:
+        - label: >-
+            I have removed passwords, tokens and any other secrets or private data from everything above,
+            the crontab lines and the output of jobs included.
+          required: true

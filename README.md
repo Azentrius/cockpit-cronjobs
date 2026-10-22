@@ -4,7 +4,41 @@ A [Cockpit](https://cockpit-project.org) page for cron. It shows everything that
 server, lets you change the root crontab and those of other users safely, keeps the result of every run,
 starts jobs on demand and turns cron jobs into systemd timers.
 
-![Overview: the latest results, the next 24 hours and the root crontab](docs/overview.png)
+Every change shows first what it will do, writes the crontab only if it is still the one you see, after
+a backup, and leaves the lines you did not touch byte for byte. Jobs that do not record their runs, and
+those of `/etc/crontab` and `/etc/cron.d`, get what cron's own log tells about them. A status for the
+Azentrius Status Board says, without opening the page, when a job failed or cron is not running.
+
+| Light | Dark |
+|---|---|
+| ![Overview: the latest results, the next 24 hours and the root crontab](docs/overview.png) | ![The same page in the dark theme](docs/overview-dark.png) |
+
+| Run now | Recorded runs | Convert to systemd timer | Backups |
+|---|---|---|---|
+| ![Run now](docs/run-now.png) | ![Runs](docs/runs.png) | ![Convert](docs/convert.png) | ![Backups](docs/backups.png) |
+
+The screenshots show test data in a stand-in for Cockpit; they come from the CI artifact
+`docs-screenshots` (`test/docs_shots.py`).
+
+**Contents**
+
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Security model](#security-model)
+- [Requirements](#requirements)
+- [Install, update, uninstall](#install-update-uninstall)
+- [Recording runs](#recording-runs)
+- [Status for the Status Board](#status-for-the-status-board)
+- [Cron's environment](#crons-environment)
+- [Files](#files)
+- [Operation and troubleshooting](#operation-and-troubleshooting)
+- [Translations](#translations)
+- [Development](#development)
+- [Releasing](#releasing)
+- [Known limits](#known-limits)
+- [License](#license)
+
+---
 
 ## What it does
 
@@ -68,9 +102,51 @@ starts jobs on demand and turns cron jobs into systemd timers.
 - English and German, following Cockpit's language. Light and dark, following Cockpit's style. Usable on
   a phone.
 
-| Run now | Recorded runs | Convert to systemd timer | Backups |
-|---|---|---|---|
-| ![Run now](docs/run-now.png) | ![Runs](docs/runs.png) | ![Convert](docs/convert.png) | ![Backups](docs/backups.png) |
+## Architecture
+
+- **The page** (`src/`, installed as `/usr/share/cockpit/cronjobs`) is plain JavaScript without a build
+  step, in ES modules under `src/app/`. It runs in the browser and reaches the server only through
+  Cockpit's bridge: it reads with `cockpit.spawn` and `cockpit.file`, and everything that needs root
+  goes through Cockpit's administrative access. All scripts that run as root are fixed constants in
+  `src/app/system.js` (writing a crontab is always `SAVE_SCRIPT`); values reach them as arguments or
+  standard input.
+- **The run recorder** (`/usr/local/libexec/cockpit-cronjobs-run`, POSIX `sh`) is installed by the page
+  when the first job records its runs, and updated from the page when a newer version comes with it. Cron
+  starts it in place of the job (see [Recording runs](#recording-runs)).
+- **The status helper** (`/usr/lib/cockpit-cronjobs/cronjobs-status`, POSIX `sh`) and its timer come
+  with the packages. As root it writes the status for the Status Board every 15 minutes; anyone can read
+  it without root (see [Status for the Status Board](#status-for-the-status-board)).
+- **The menu icon** (`src/menu-status.js`) is loaded hidden after the login and reads only the status
+  files until the page is opened.
+- **State** lives in `/var/lib/cockpit-cronjobs`: backups, recorded runs, the status (see
+  [Files](#files)).
+
+Cron Jobs runs no daemon of its own and does not go to the network.
+
+## Security model
+
+- Everything that needs root goes through Cockpit's administrative access, like Cockpit's own pages.
+- Commands, names and texts are passed to programs as arguments, never pasted into shell code.
+- A crontab is replaced only if it is still exactly the version shown (checksum), under a lock, after a
+  verified backup. User names are checked in the page and again as root (letters, digits, `.`, `_`,
+  `-`, and a user the system knows); other names stay read-only.
+- A crontab that could not be written back exactly is opened read-only.
+- Restoring a backup writes it byte for byte through the same step, and shows first what it changes.
+- Converting to a timer refuses to go on if systemd would run the job at other times than cron, or reads
+  the command or its environment differently; if starting the timer fails, the cron line is switched on
+  again and the units are removed.
+- Back to cron only removes units that Cron Jobs wrote under that name (plain files, with the first line
+  and description it gives them), checked again as root right before; if the timer cannot be stopped,
+  the crontab is put back.
+- The status timer only reads: it writes nothing but its two status files. In another user's directory it
+  reads only what has the form of runs, as the page does (no links, regular files, under a time limit).
+- Runs from cron's log count only when journald says root logged them (`_UID` 0, which it sets itself)
+  as `CRON` or `CROND`; a line another user logs as `CRON` is left out. (Not by `_COMM`: journald reads
+  it from `/proc` when it takes the message, and the process that logs a start becomes the job's shell
+  right after.) A failure counts for the run whose process it names, and only for the newest run of
+  that job.
+- A job set not to overlap is checked and marked under the run recorder's lock, so of two starts at once
+  only one runs; the setting lies in the job's directory of runs and is written there as its owner.
 
 ## Requirements
 
@@ -88,7 +164,7 @@ field again; when it starts, jobs at a fixed time of the skipped hour run right 
 Changes need administrative access in Cockpit (“Limited access” turned off). Without it the page shows
 the system crontabs and timers, and nothing of other users' crontabs.
 
-## Installation
+## Install, update, uninstall
 
 **From the Azentrius package repository** (Debian, Ubuntu, Fedora, RHEL). Set up
 [packages.azentrius.com](https://packages.azentrius.com) once:
@@ -147,6 +223,24 @@ package, and one in `/usr/local` would hide it. Remove it first, then install th
 **Cron Jobs** appears in Cockpit's menu; if it does not show yet, log in to Cockpit again.
 
 For development, `make devel-install` links `src` to `~/.local/share/cockpit/cronjobs`.
+
+**Update.** Installed from the repository, Cron Jobs comes with the system's updates (Cockpit ›
+Software Updates, or `apt upgrade` / `dnf upgrade`). From the files of a release, install the new
+package the same way; from the archive, unpack it over the old directory. When the new version brings a
+newer run recorder, the page says so and updates it with one click.
+
+**Uninstall.**
+
+```sh
+sudo apt remove cockpit-cronjobs          # or: sudo dnf remove / sudo zypper remove cockpit-cronjobs
+sudo rm -rf /usr/share/cockpit/cronjobs   # installed from the archive
+sudo make uninstall                       # installed from the source
+# only when no job records its runs any more:
+sudo rm -f /usr/local/libexec/cockpit-cronjobs-run
+sudo rm -rf /var/lib/cockpit-cronjobs
+```
+
+Jobs converted to systemd timers stay timers: take them back to cron first, or keep their units.
 
 ## Recording runs
 
@@ -281,41 +375,35 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
 | `/var/lib/cockpit-cronjobs/converting/` | While a conversion is under way: which one wrote the units of a name (directory 700) |
 | `/var/lib/cockpit-cronjobs/.crontab.lock` | Lock while the crontab or the units of a conversion are written |
 
-## Uninstall
+## Operation and troubleshooting
 
-```sh
-sudo apt remove cockpit-cronjobs          # or: sudo dnf remove / sudo zypper remove cockpit-cronjobs
-sudo rm -rf /usr/share/cockpit/cronjobs   # installed from the archive
-sudo make uninstall                       # installed from the source
-# only when no job records its runs any more:
-sudo rm -f /usr/local/libexec/cockpit-cronjobs-run
-sudo rm -rf /var/lib/cockpit-cronjobs
-```
+- **Cron Jobs is not in the menu** after installing: log in to Cockpit again; Cockpit reads the pages at
+  the login.
+- **Nothing can be changed, other users' crontabs are missing:** turn on administrative access in
+  Cockpit (“Limited access” off).
+- **A crontab opens read-only:** it holds lines that would not survive being written back exactly, or
+  text that is not UTF-8. The card says which; fix the crontab on the console, then reload.
+- **“The run recorder is missing”** or **“can be updated”:** jobs that record their runs need
+  `/usr/local/libexec/cockpit-cronjobs-run`; the notice installs or updates it.
+- **How a run ended is not shown** for jobs that do not record their runs: Debian's and Ubuntu's cron log
+  only the start unless told otherwise, and the System tab says so. To have cron log the end and failures
+  as well, start it with `-L 15`. On Ubuntu, `sudo systemctl edit cron.service` and add
 
-## Safety
+  ```ini
+  [Service]
+  Environment="EXTRA_OPTS=-L 15"
+  ```
 
-- Everything that needs root goes through Cockpit's administrative access, like Cockpit's own pages.
-- Commands, names and texts are passed to programs as arguments, never pasted into shell code.
-- A crontab is replaced only if it is still exactly the version shown (checksum), under a lock, after a
-  verified backup. User names are checked in the page and again as root (letters, digits, `.`, `_`,
-  `-`, and a user the system knows); other names stay read-only.
-- A crontab that could not be written back exactly is opened read-only.
-- Restoring a backup writes it byte for byte through the same step, and shows first what it changes.
-- Converting to a timer refuses to go on if systemd would run the job at other times than cron, or reads
-  the command or its environment differently; if starting the timer fails, the cron line is switched on
-  again and the units are removed.
-- Back to cron only removes units that Cron Jobs wrote under that name (plain files, with the first line
-  and description it gives them), checked again as root right before; if the timer cannot be stopped,
-  the crontab is put back.
-- The status timer only reads: it writes nothing but its two status files. In another user's directory it
-  reads only what has the form of runs, as the page does (no links, regular files, under a time limit).
-- Runs from cron's log count only when journald says root logged them (`_UID` 0, which it sets itself)
-  as `CRON` or `CROND`; a line another user logs as `CRON` is left out. (Not by `_COMM`: journald reads
-  it from `/proc` when it takes the message, and the process that logs a start becomes the job's shell
-  right after.) A failure counts for the run whose process it names, and only for the newest run of
-  that job.
-- A job set not to overlap is checked and marked under the run recorder's lock, so of two starts at once
-  only one runs; the setting lies in the job's directory of runs and is written there as its owner.
+  with the quotes (without them systemd sets only `-L`, and cron does not start). On Debian set
+  `EXTRA_OPTS="-L 15"` in `/etc/default/cron`. Then `sudo systemctl restart cron`; jobs that run go on.
+  cronie logs the end of each job but never how it ended.
+- **The Status Board shows the status as old or missing:** the timer writes it every 15 minutes.
+  `systemctl status cockpit-cronjobs-status.timer` and `journalctl -u cockpit-cronjobs-status.service`
+  say why it did not; `sudo systemctl start cockpit-cronjobs-status.service` writes it at once.
+- **Leftover runs** of lines changed or removed outside the page are listed under the root crontab and
+  can be removed there.
+- **A converted job** keeps its history in the journal of its service; “Back to cron” in its menu
+  undoes the conversion.
 
 ## Translations
 
@@ -334,9 +422,10 @@ make docs-shots   # the screenshots of this README into docs/ (CI keeps them as 
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
 crontab, so only use it on a throwaway machine or container (see the top of the file). CI runs it on
 every push and pull request, on the runner's throwaway VM, twice: with the Cockpit of Ubuntu 24.04 and
-with the one from its backports (check `e2e`).
+cron as installed, and with the Cockpit of its backports and cron at `-L 15` (check `e2e`).
 
-What comes next is in [ROADMAP.md](ROADMAP.md).
+How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); what comes next is in
+[ROADMAP.md](ROADMAP.md).
 
 ## Releasing
 
@@ -352,6 +441,21 @@ What comes next is in [ROADMAP.md](ROADMAP.md).
 4. packages.azentrius.com takes the packages from the release within an hour
    ([Azentrius/packages](https://github.com/Azentrius/packages)). The `.deb` there is the release's byte
    for byte; the `.rpm` gets the repository's own signature, so only its signature header differs.
+
+## Known limits
+
+- `/etc/crontab` and `/etc/cron.d` belong to packages and configuration management: the page shows their
+  jobs and what cron's log tells about their runs, but does not change, record, run or convert them.
+- A command with an unescaped `%` cannot record its runs (cron passes the text after it as input).
+- How a run of a job without recording ended is known only where cron logs it: Debian's cron with `-L`
+  (2 and 4, see above). cronie logs the end but never the result. Without `-L 8` an end without a
+  failure is put to the newest start of its command, which is a guess when runs of one command overlap.
+- Missed runs are found for jobs that record their runs, and only on the page, not in the status.
+- The status names failed jobs of the crontabs that do not record their runs, and timers converted from
+  another user's crontab, only in number: their only names are a command or begin with the user's.
+- BusyBox cron (Alpine) is not supported. The packages are tested on Debian 13 and Fedora 43;
+  installing them on Ubuntu, RHEL or openSUSE is untested.
+- English and German only (see [Translations](#translations)).
 
 ## License
 

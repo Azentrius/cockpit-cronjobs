@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """End-to-end test against a real Cockpit, real crontab and a running cron daemon.
 
-DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
-/var/lib/cockpit-cronjobs. Only for a throwaway machine or container, e.g.:
+DESTRUCTIVE: replaces root's crontab, creates a user, writes to /usr/local/libexec,
+/var/lib/cockpit-cronjobs, /etc/cron.d and /etc/systemd/system, and stops and starts cron.
+Only for a throwaway machine or container, e.g.:
 
     apt install cockpit-ws cockpit-bridge cockpit-system cron
     ln -s "$PWD/src" /usr/share/cockpit/cronjobs
@@ -11,8 +12,8 @@ DESTRUCTIVE: replaces root's crontab and writes to /usr/local/libexec and
     CRONJOBS_E2E_DESTRUCTIVE=1 python3 test/e2e_cockpit.py
 
 Runs as root (the local session is root's). CI runs it the same way on the runner's
-throwaway VM, with the Cockpit of Ubuntu 24.04 and with the one from its backports
-(job e2e-cockpit in .github/workflows/test.yml)."""
+throwaway VM, with the Cockpit of Ubuntu 24.04 and cron as installed, and with the Cockpit
+of its backports and cron at -L 15 (job e2e-cockpit in .github/workflows/test.yml)."""
 import json, os, pwd, re, shutil, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
