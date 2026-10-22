@@ -78,8 +78,10 @@ page does with cron, systemd or the crontabs gets a step there.
   English; the only German is the translation and the tests that check it.
 - **Tests** for new behaviour; `make check`, `make check-ui` and `make lint` green.
 - **SPDX header** `SPDX-License-Identifier: Apache-2.0` in every new source file.
-- **Changelog.** User-visible changes get an entry under `## Unreleased` in `CHANGELOG.md`. Versions
-  and releases are made by the maintainer.
+- **Versions and changelog** are the maintainer's: the pull request that raises `const VERSION` in
+  `src/app.js` adds its section to `CHANGELOG.md` (the `test` check wants one for the current
+  version), and later pull requests before the release add to that section. Describe user-visible
+  changes in your pull request.
 - **No private data.** No secrets, tokens, passwords, host names, IP addresses, real crontabs or other
   real server data in issues, pull requests, tests or fixtures.
 
