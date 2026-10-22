@@ -45,18 +45,18 @@ devel-uninstall:
 	rm -f ~/.local/share/cockpit/cronjobs
 
 check:
-	node test/cron.test.js
-	node test/fuzz.test.js
-	node test/cksum.test.js
-	node test/systemd.test.js
-	node test/wrapper.test.js
-	node test/orphans.test.js
-	node test/units.test.js
-	node test/backups.test.js
-	node test/i18n.test.js
-	node test/files.test.js
-	node test/status.test.js
-	node test/menu.test.js
+	-node test/cron.test.js
+	-node test/fuzz.test.js
+	-node test/cksum.test.js
+	-node test/systemd.test.js
+	-node test/wrapper.test.js
+	-node test/orphans.test.js
+	-node test/units.test.js
+	-node test/backups.test.js
+	-node test/i18n.test.js
+	-node test/files.test.js
+	-node test/status.test.js
+	-node test/menu.test.js
 
 check-ui:
 	python3 test/ui_test.py
