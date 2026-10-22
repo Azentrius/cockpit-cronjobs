@@ -424,4 +424,49 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, i
                            ["--no-pager", "-q", "-o", "--since", "-35d", "_UID=0", "SYSLOG_IDENTIFIER=CRON", "SYSLOG_IDENTIFIER=CROND"]);
 });
 
+/* A PID used again after its run (by what feeds a job its input after %, which logs no start and
+   can die of SIGPIPE), or on another boot, says nothing about that run; nor does a failure that
+   another process than the one that started the run logs. */
+for (const sh of SHELLS) t(sh + ": cron's log: a PID used again is not the old run's", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-log-"));
+    fs.mkdirSync(path.join(root, "bin"));
+    fs.writeFileSync(path.join(root, "bin", "journalctl"),
+        "#!/bin/sh\ncat <<'EOF'\n" +
+        /* -L 15: A ends, B's feeder gets A's PID 201 and dies, B fails */
+        "1792600000.1 host CRON[200]: (root) CMD ([201] /opt/a.sh)\n" +
+        "1792600001.1 host CRON[200]: (root) END ([201] /opt/a.sh)\n" +
+        "1792600100.1 host CRON[300]: (root) CMD ([301] /opt/b.sh)\n" +
+        "1792600101.1 host CRON[300]: (CRON) error (grandchild #201 terminated by signal 13)\n" +
+        "1792600102.1 host CRON[300]: (CRON) error (grandchild #301 failed with exit status 2)\n" +
+        "1792600103.1 host CRON[300]: (root) END ([301] /opt/b.sh)\n" +
+        /* -L 7: no PIDs in the lines; C's start from 401 itself, its end from 400 */
+        "1792600200.1 host CRON[401]: (root) CMD (/opt/c.sh)\n" +
+        "1792600201.1 host CRON[400]: (root) END (/opt/c.sh)\n" +
+        "1792600300.1 host CRON[501]: (root) CMD (/opt/d.sh)\n" +
+        "1792600301.1 host CRON[500]: (CRON) error (grandchild #401 terminated by signal 13)\n" +
+        "1792600302.1 host CRON[500]: (root) END (/opt/d.sh)\n" +
+        /* -L 5: no ends; E's PID belongs to the boot before */
+        "1792600400.1 host CRON[601]: (root) CMD (/opt/e.sh)\n" +
+        "-- Boot 0123456789abcdef0123456789abcdef --\n" +
+        "1792600500.1 host CRON[701]: (root) CMD (/opt/f.sh)\n" +
+        "1792600501.1 host CRON[700]: (CRON) error (grandchild #601 failed with exit status 9)\n" +
+        /* -L 13: G still open, but the failure comes from H's process, not from G's */
+        "1792600600.1 host CRON[800]: (root) CMD ([801] /opt/g.sh)\n" +
+        "1792600700.1 host CRON[900]: (root) CMD ([901] /opt/h.sh)\n" +
+        "1792600701.1 host CRON[900]: (CRON) error (grandchild #801 terminated by signal 13)\n" +
+        "EOF\n", { mode: 0o755 });
+    const r = spawnSync(sh, ["-c", LOG_SCRIPT], { env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C" }, timeout: 30000 });
+    assert.strictEqual(r.status, 0, r.stderr.toString());
+    assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), [
+        "1792600000 1792600001 - (root) CMD (/opt/a.sh)",
+        "1792600100 1792600103 exit:2 (root) CMD (/opt/b.sh)",
+        "1792600200 1792600201 - (root) CMD (/opt/c.sh)",
+        "1792600300 1792600302 - (root) CMD (/opt/d.sh)",
+        "1792600400 - - (root) CMD (/opt/e.sh)",
+        "1792600500 - - (root) CMD (/opt/f.sh)",
+        "1792600600 - - (root) CMD (/opt/g.sh)",
+        "1792600700 - - (root) CMD (/opt/h.sh)",
+    ], "A, C, E and G keep what their own runs logged; B's own failure counts");
+});
+
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);

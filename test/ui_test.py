@@ -736,6 +736,62 @@ with sync_playwright() as p:
     check(not page.problems, "no console problems (cron's log, results): " + repr(page.problems))
     page.context.close()
 
+    # cron's log is read again with the runs, without reloading the page: how a run that went on
+    # ended (failed, OK), a newer run in place of the old one; an answer that comes back late from
+    # an older read does not replace a newer one
+    page = open_page(browser, "cronlog=15")
+    job = "test -x /opt/x && echo '<b>not bold</b>' > /dev/null"
+    hourly = "cd / && run-parts --report /etc/cron.hourly"
+
+    def log_is(entries):
+        page.evaluate("e => { window.__mock.cronLog = e; }", entries)
+
+    def last_of_job():
+        return row_of(page, "not bold").locator("td[data-last]").inner_text()
+
+    def refresh():
+        reads = mock(page, "cronLogReads")
+        page.evaluate("() => { window.__mock.hint(true); window.__mock.hint(false); }")
+        wait_js(page, f"window.__mock.cronLogReads > {reads}")
+        page.wait_for_timeout(200)
+
+    log_is([[120, "root", job], [300, "root", hourly]])
+    page.click("#reload")
+    wait_idle(page)
+    check(last_of_job().startswith("Läuft"), "a run that goes on: " + repr(last_of_job()))
+    log_is([[120, "root", job, 60, "exit:3"], [300, "root", hourly, 240, None]])
+    refresh()
+    check(last_of_job().startswith("Fehler · Exit 3") and "Fehler · Exit 3" in page.inner_text("#sum-body"),
+          "it failed, shown without reloading, on the crontab and in the latest results: " + repr(last_of_job()))
+    show_tab(page, "system")
+    hourly_cell = page.locator("#etc-body tbody tr", has_text="cron.hourly").locator("td").nth(2)
+    check(hourly_cell.inner_text().startswith("OK"), "the System tab too: " + repr(hourly_cell.inner_text()))
+    show_tab(page, "overview")
+    log_is([[20, "root", job], [300, "root", hourly, 240, None]])
+    refresh()
+    check(last_of_job().startswith("Läuft"), "a newer run in place of the failed one: " + repr(last_of_job()))
+    log_is([[20, "root", job, 10, None], [300, "root", hourly, 240, None]])
+    refresh()
+    check(last_of_job().startswith("OK"), "it ended without a failure: OK: " + repr(last_of_job()))
+    # an older read that answers late: the reload reads (and shows) exit 4 first
+    page.evaluate("() => { window.__mock.cronLogDelays = [1500, 0]; }")
+    log_is([[20, "root", job, 10, "exit:5"], [300, "root", hourly, 240, None]])
+    page.evaluate("() => { window.__mock.hint(true); window.__mock.hint(false); }")
+    log_is([[15, "root", job, 5, "exit:4"], [300, "root", hourly, 240, None]])
+    page.click("#reload")
+    wait_idle(page)
+    page.wait_for_timeout(1800)
+    check(last_of_job().startswith("Fehler · Exit 4") and mock(page, "cronLogDelays.length") == 0,
+          "the late answer of the older read is not shown: " + repr(last_of_job()))
+    check(not page.problems, "no console problems (cron's log, read again): " + repr(page.problems))
+    page.context.close()
+
+    # cron at -L 4: failures without starts belong to no job; the System tab says how to log more
+    page = open_page(browser, "cronlog=4")
+    show_tab(page, "system")
+    check("-L 15" in page.inner_text("#cronlog-hint"), "-L 4: the hint: " + repr(page.inner_text("#cronlog-hint")))
+    page.context.close()
+
     # cronie logs start and end, never a result, whatever its options: "ended", and no hint
     page = open_page(browser, "flavor=cronie")
     page.evaluate("""() => { window.__mock.cronLog.push([600, 'root', "test -x /opt/x && echo '<b>not bold</b>' > /dev/null", 590, null]); }""")

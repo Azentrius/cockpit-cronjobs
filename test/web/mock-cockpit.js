@@ -130,6 +130,8 @@
            "signal:N" or null], the newest start of each; null: unreadable */
         cronLog: [[1800, "root", "cd / && run-parts --report /etc/cron.hourly"]],
         cronLogReads: 0,
+        /* how long each next read of cron's log takes (ms), in order; then M.delay */
+        cronLogDelays: [],
         /* the cron daemon: its -L (null: none given) and how long ago it started */
         cronLevel: params.get("cronlog"),
         cronSinceAgo: 86400,
@@ -589,6 +591,13 @@
         };
         if (args[0] === "/bin/sh" && /setsid/.test(args[2] || "")) {
             setTimeout(() => startJob(args, opts, proc, api, () => input), M.delay);
+            return proc;
+        }
+        /* cron's log: what it holds when asked, answered after the next of M.cronLogDelays (else M.delay) */
+        if (/SYSLOG_IDENTIFIER=CRON /.test(args[2] || "")) {
+            let out = null, err = null;
+            try { out = handle(args, opts, input); } catch (ex) { err = ex; }
+            setTimeout(() => (err ? api.reject(err) : api.resolve(out)), M.cronLogDelays.length ? M.cronLogDelays.shift() : M.delay);
             return proc;
         }
         setTimeout(() => {
