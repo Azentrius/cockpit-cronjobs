@@ -22,6 +22,6 @@ Security problems: do not open a pull request, see SECURITY.md.
 - [ ] Crontabs are written only through `SAVE_SCRIPT`; lines that are not changed stay byte for byte
 - [ ] Root scripts take values as arguments or standard input, never pasted into shell code, and check them again
 - [ ] Changed formats (records of the run recorder, crontab markers, conversion note and units, the status) are read by older and newer versions; a change to `src/cockpit-cronjobs-run` raises `CRONJOBS_RUN_VERSION` and `WRAPPER_VERSION`
-- [ ] User-visible changes have an entry under `## Unreleased` in `CHANGELOG.md`
+- [ ] User-visible changes are described above (the maintainer adds them to the version's section in `CHANGELOG.md`)
 - [ ] No secrets, tokens or real server data (host names, IP addresses, real crontabs) in code, tests or this description
 - [ ] SPDX header on every new source file
