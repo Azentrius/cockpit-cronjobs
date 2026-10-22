@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Feature request
+description: Suggest an improvement for Cron Jobs, or another cron or system it should support.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the open issues and [ROADMAP.md](https://github.com/Azentrius/cockpit-cronjobs/blob/main/ROADMAP.md)
+        first. This issue is public: leave out host names, credentials, real crontabs and other private data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What do you do with cron today that the page does not help with, or what stops you?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the page show or do, and how should it behave like cron does?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you have considered.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you help?
+      options:
+        - "Yes, with a pull request"
+        - "Yes, by testing it on my server"
+        - "No"
+    validations:
+      required: false
