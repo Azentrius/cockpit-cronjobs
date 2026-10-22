@@ -72,6 +72,18 @@ t("code marks come in pairs", () => {
     }));
 });
 
+/* The line the hint on cron's log gives for systemd, read as systemd reads Environment=: words
+   split at spaces outside double quotes, the quotes removed. It must set EXTRA_OPTS to all of
+   "-L 15"; unquoted, systemd sets "-L" alone and cron does not start. */
+t("the hint's line for systemd sets the whole option", () => {
+    LANGS.forEach(l => {
+        const line = (texts[l].ui.cronLogHintBody.match(/`(Environment=[^`]*)`/) || [])[1];
+        assert.ok(line, l);
+        const words = (line.slice("Environment=".length).match(/(?:[^\s"]+|"[^"]*")+/g) || []).map(w => w.replace(/"/g, ""));
+        assert.deepStrictEqual(words, ["EXTRA_OPTS=-L 15"], l);
+    });
+});
+
 t("locales", () => {
     assert.strictEqual(texts.de.locale, "de-DE");
     assert.strictEqual(texts.en.locale, "en-US");
