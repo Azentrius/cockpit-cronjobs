@@ -421,7 +421,7 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, i
     /* only messages of root (_UID, which journald sets) as CRON or CROND; not by _COMM, which journald
        may read after the job's process became its shell */
     assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => /^[-_A-Z]/.test(a)),
-                           ["--no-pager", "-q", "-o", "--since", "-35d", "_UID=0", "SYSLOG_IDENTIFIER=CRON", "SYSLOG_IDENTIFIER=CROND"]);
+                           ["--no-pager", "-o", "--since", "-35d", "_UID=0", "SYSLOG_IDENTIFIER=CRON", "SYSLOG_IDENTIFIER=CROND"]);
 });
 
 /* A PID used again after its run (by what feeds a job its input after %, which logs no start and

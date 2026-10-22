@@ -325,12 +325,13 @@ for (const awk of AWKS.filter(a => a.bin)) {
             C.parseSystemCrontab(system).map(j => `U (${j.user}) CMD (${C.loggedCommand(j.command)})`));
     });
 
-    t(awk.name + ": whether cron logs failures, read as the page reads it (C.cronLogs)", () => {
+    t(awk.name + ": whether cron logs failures and starts, read as the page reads it (C.cronLogs)", () => {
         for (const args of ["/usr/sbin/cron -f -P", "/usr/sbin/cron -f -P -L 15", "/usr/sbin/cron -fL7", "/usr/sbin/cron -L 5",
                             "/usr/sbin/cron -L 15 -L 2", "/usr/sbin/cron -L x", "/usr/sbin/cron -x ext -L 4", "/usr/sbin/cron -f -- -L 15",
                             "/usr/sbin/cron -L -1", "/usr/sbin/cron -L 4abc", "/usr/sbin/cron -L", "/usr/sbin/cron -L 12", "/usr/sbin/cron -L 3"]) {
             const r = runAwk(awk, [awkProgram("LEVEL_AWK")], args + "\n");
-            assert.strictEqual(r.status === 0, C.cronLogs("debian", args, 0).failure, args);
+            const c = C.cronLogs("debian", args, 0);
+            assert.strictEqual(r.status === 0, c.start && c.failure, args + ": starts and failures, or no job a failure is of");
         }
     });
 }

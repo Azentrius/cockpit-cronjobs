@@ -14,7 +14,7 @@
 # cockpit-cronjobs-status.timer runs "write" every 15 minutes. It reads the crontabs of root and
 # of the other users and the recorded runs of their jobs (see cockpit-cronjobs-run), the runs of
 # the jobs converted from them to systemd timers (from the journal), whether the cron service
-# runs, and, when Debian's cron logs failed jobs (-L with 4), cron's log of the last 24 hours, and
+# runs, and, when Debian's cron logs failed jobs and their starts (-L with 4 and 1), cron's log of the last 24 hours, and
 # writes only numbers, states, job IDs, unit names and paths: no user names, no commands, no
 # output. A job counts as failed when one of its recorded runs in the last 24 hours ended with an
 # exit code other than 0 or was aborted, as on the page; a converted job when systemd says a run of
@@ -282,9 +282,25 @@ END {
 # each once, as JOBS_AWK names them: "(USER) CMD (COMMAND)" of a start whose failure "(CRON) error
 # (grandchild #PID failed with exit status N)" or "... terminated by signal N" names its PID, as the
 # page reads them (CRON_LOG_SCRIPT). PID is the job's: that of the start line, or "[PID]" before
-# the command in it (-L 8). A PID that started no job (the one that feeds the job what follows a %)
-# is left out, and so are jobs of the run recorder: their runs count from their records.
+# the command in it (-L 8); with that, the line must come from the process that logged the start.
+# A PID belongs to its run only while the run goes on: until its end (END, CMDEND) or another boot
+# ("-- Boot" between the lines), so a PID used again later (by what feeds a job what follows a %,
+# which logs no start and may die of SIGPIPE) is not the old run's. A PID that started no job is left
+# out, and so are jobs of the run recorder: their runs count from their records.
 FAILURES_AWK='
+# "(USER) CMD (COMMAND)" of message m, whose event is ev; n the PID before COMMAND, or ""; c COMMAND
+function job(m, ev,   j) {
+    j = index(m, " " ev " (") + length(ev) + 2
+    c = substr(m, j + 1, length(m) - j - 1)
+    n = ""
+    if (c ~ /^[[][0-9]+[]] /) { n = substr(c, 2, index(c, "]") - 2); c = substr(c, index(c, " ") + 1) }
+    return substr(m, 1, index(m, ")")) " CMD (" c ")"
+}
+function forget(x) { delete key[x]; delete par[x]; delete own[x] }
+/^-- / {
+    if ($0 ~ /Boot|Reboot/) { for (x in key) forget(x); for (x in mid) delete mid[x] }
+    next
+}
 {
     i = index($0, ": (")
     if (i == 0) next
@@ -293,27 +309,34 @@ FAILURES_AWK='
     if (!match(p, /[[][0-9]+[]]$/)) next
     p = substr(p, RSTART + 1, RLENGTH - 2)
     if (m ~ /^[(][^()]*[)] CMD [(].*[)]$/) {
-        j = index(m, " CMD (") + 5
-        c = substr(m, j + 1, length(m) - j - 1)
-        if (c ~ /^[[][0-9]+[]] /) {
-            p = substr(c, 2, index(c, "]") - 2)
-            c = substr(c, index(c, " ") + 1)
-        }
-        key[p] = substr(m, 1, index(m, ")")) " CMD (" c ")"
-        own[p] = match(c, /^\/[^ ]*\/cockpit-cronjobs-run/) && (substr(c, RLENGTH + 1, 1) == " " || substr(c, RLENGTH + 1, 1) == "^")
+        k = job(m, "CMD")
+        if (n == "") { n = p; par[n] = "" } else par[n] = p
+        key[n] = k
+        newest[k] = n
+        own[n] = match(c, /^\/[^ ]*\/cockpit-cronjobs-run/) && (substr(c, RLENGTH + 1, 1) == " " || substr(c, RLENGTH + 1, 1) == "^")
     } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
         split(m, w, " ")
         n = substr(w[4], 2)
-        if (!(n in key) || own[n] || (key[n] in seen)) next
+        if (!(n in key) || (par[n] != "" && par[n] != p)) next
+        mid[p] = n
+        if (own[n] || (key[n] in seen)) next
         seen[key[n]] = 1
         print key[n]
+    } else if (m ~ /^[(][^()]*[)] (END|CMDEND) [(].*[)]$/) {
+        ev = substr(m, index(m, ") ") + 2)
+        k = job(m, substr(ev, 1, index(ev, " ") - 1))
+        if (n == "" && (p in mid)) n = mid[p]
+        if (n == "" && (k in newest)) n = newest[k]
+        delete mid[p]
+        if ((n in key) && key[n] == k && (par[n] == "" || par[n] == p)) forget(n)
     }
 }
 '
 
-# Whether the -L of a cron command line (standard input, as BASICS_SCRIPT reads it) has 4: Debian's
-# cron then logs failed jobs. As C.cronLogs reads it: 1 without one, the last one counting (getopt
-# "fPlL:nNx:", atoi).
+# Whether the -L of a cron command line (standard input, as BASICS_SCRIPT reads it) has 4 and 1:
+# Debian's cron then logs failed jobs, and their starts, which say which job a failure is of (without
+# them a failure belongs to no job, and nothing can be said). As C.cronLogs reads it: 1 without one,
+# the last one counting (getopt "fPlL:nNx:", atoi).
 LEVEL_AWK='
 {
     level = 1
@@ -331,7 +354,7 @@ LEVEL_AWK='
         }
     }
     level = (level % 16 + 16) % 16
-    if (int(level / 4) % 2) exit 0
+    if (int(level / 4) % 2 && level % 2) exit 0
     exit 1
 }
 '
@@ -505,7 +528,7 @@ count() {
     done
 }
 
-# Whether Debian's cron logs failed jobs (LEVEL_AWK), from the command line of the running cron,
+# Whether Debian's cron logs failed jobs and their starts (LEVEL_AWK), from the command line of the running cron,
 # read as the page reads it (BASICS_SCRIPT); CRONJOBS_CRON_ARGS stands in for it in the tests.
 # cronie (crond) logs no failure.
 logs_failures() {
@@ -534,7 +557,7 @@ system_jobs() {
     done
 }
 
-# When cron logs failed jobs (logged=1): counts the jobs it logged a failure of since $since into
+# When cron logs failed jobs and their starts (logged=1): counts the jobs it logged a failure of since $since into
 # bad, writes the paths of those in /etc/crontab and /etc/cron.d to $tmp/failed and counts those of
 # the crontabs in unnamed. Only jobs that are there now count, and those that record their runs
 # count from their records (count).
@@ -544,7 +567,7 @@ count_log() {
     logs_failures && command -v journalctl > /dev/null 2>&1 || return 0
     logged=1
     system_jobs >> "$tmp/known"
-    journalctl --no-pager -q -o short-unix --since "@$since" _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND < /dev/null 2> /dev/null |
+    journalctl --no-pager -o short-unix --since "@$since" _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND < /dev/null 2> /dev/null |
         awk "$FAILURES_AWK" > "$tmp/logfailed"
     awk 'FILENAME == ARGV[1] {
              k = substr($0, index($0, " ") + 1)

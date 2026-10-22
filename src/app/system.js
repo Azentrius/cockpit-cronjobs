@@ -560,15 +560,18 @@ function removeRuns(user, id) {
    cronie "(USER) CMDEND (COMMAND)", all from the process that waits for the job. A failure
    belongs to the start of its PID; an end with a PID to that, one without to the start
    whose failure the same process logged, else to the newest start of its command (which
-   is a guess only when runs of one command overlap). A PID that started no job (the one
-   that feeds the job what follows a %) is left out. Only messages of root (_UID 0, which
+   is a guess only when runs of one command overlap). With -L 8 the start says which process
+   waits for the job, and a failure or end must come from that one. A PID belongs to its run
+   only while the run goes on: until its end, or another boot ("-- Boot" between the lines),
+   so a PID used again later (by what feeds a job what follows a %, which logs no start and
+   may die of SIGPIPE) is not the old run's. Only messages of root (_UID 0, which
    journald sets itself, so no other user can log a run for it) as CRON (Debian's cron) or
    CROND (cronie) count. Not by _COMM: journald reads that from /proc when it takes the
    message, and the job's process logs its start right before it becomes the shell. One line
    for each command, "START END RESULT (USER) CMD (COMMAND)": seconds, END and RESULT
    ("exit:N", "signal:N") "-" when not logged; nothing without journalctl. */
 const CRON_LOG_SCRIPT = `command -v journalctl > /dev/null 2>&1 || exit 0
-journalctl --no-pager -q -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND 2>/dev/null |
+journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND 2>/dev/null |
   awk '
   # "(USER) CMD (COMMAND)" of message m, whose event is ev; n the PID before COMMAND, or ""
   function job(m, ev,   j, c) {
@@ -577,6 +580,12 @@ journalctl --no-pager -q -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRO
     n = ""
     if (c ~ /^[[][0-9]+[]] /) { n = substr(c, 2, index(c, "]") - 2); c = substr(c, index(c, " ") + 1) }
     return substr(m, 1, index(m, ")")) " CMD (" c ")"
+  }
+  # a run that ended: its PID (and the process that waited for it) say nothing more
+  function forget(x) { delete key[x]; delete par[x] }
+  /^-- / {
+    if ($0 ~ /Boot|Reboot/) { for (x in key) forget(x); for (x in mid) delete mid[x] }
+    next
   }
   {
     i = index($0, ": (")
@@ -588,14 +597,14 @@ journalctl --no-pager -q -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRO
     split($1, t, ".")
     if (m ~ /^[(][^()]*[)] CMD [(].*[)]$/) {
       k = job(m, "CMD")
-      if (n == "") n = p
-      if ((k in last) && (last[k] in key) && key[last[k]] == k) delete key[last[k]]
+      if (n == "") { n = p; par[n] = "" } else par[n] = p
+      if ((k in last) && (last[k] in key) && key[last[k]] == k) forget(last[k])
       last[k] = n; when[k] = t[1]; key[n] = k
       delete fin[k]; delete res[k]
     } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
       split(m, w, " ")
       n = substr(w[4], 2)
-      if (!(n in key) || last[key[n]] != n) next
+      if (!(n in key) || (par[n] != "" && par[n] != p) || last[key[n]] != n) next
       if (w[5] == "failed") r = "exit:" w[9]
       else r = "signal:" w[8]
       sub(/[^0-9]+$/, "", r)
@@ -606,7 +615,10 @@ journalctl --no-pager -q -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRO
       if (n == "" && (p in mid)) n = mid[p]
       if (n == "" && (k in last)) n = last[k]
       delete mid[p]
-      if ((n in key) && key[n] == k && last[k] == n && !(k in fin)) fin[k] = t[1]
+      if ((n in key) && key[n] == k && (par[n] == "" || par[n] == p)) {
+        if (last[k] == n && !(k in fin)) fin[k] = t[1]
+        forget(n)
+      }
     }
   }
   END {
