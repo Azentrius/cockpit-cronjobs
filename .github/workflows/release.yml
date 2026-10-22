@@ -72,6 +72,8 @@ jobs:
 
       - name: Unit tests
         run: make check
+      - name: Package lists (giving up on a mirror that hangs)
+        run: sudo sh tools/apt-update.sh
       - name: Install Playwright
         run: |
           pip install -r test/requirements.txt
@@ -81,7 +83,6 @@ jobs:
 
       - name: Package (archive, .deb, .rpm)
         run: |
-          sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends rpm > /dev/null
           make package
           make packages
