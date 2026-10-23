@@ -509,6 +509,27 @@ for (const sh of SHELLS) {
             }
         });
 
+        t(name + "overlapping runs: an end that could be either's does not hide the newer one's failure", () => {
+            const fx = fixture();
+            fs.writeFileSync(path.join(fx.etc, "cron.d", "r"), "* * * * * root /usr/local/bin/review-job\n");
+            const cmd = (s, pid, text) => logLine(NOW - s, pid, `(root) ${text} (/usr/local/bin/review-job)`);
+            const fail = (s, by, pid) => logLine(NOW - s, by, `(CRON) error (grandchild #${pid} failed with exit status 3)`);
+            for (const [level, lines] of [
+                ["7", [cmd(600, 201, "CMD"), cmd(540, 301, "CMD"), cmd(530, 200, "END"), fail(520, 300, 301), cmd(519, 300, "END")]],
+                ["7", [cmd(600, 201, "CMD"), cmd(540, 301, "CMD"), fail(530, 300, 301), cmd(529, 300, "END"), cmd(520, 200, "END")]],
+                ["15", [logLine(NOW - 600, 200, "(root) CMD ([201] /usr/local/bin/review-job)"),
+                        logLine(NOW - 540, 300, "(root) CMD ([301] /usr/local/bin/review-job)"),
+                        logLine(NOW - 530, 200, "(root) END ([201] /usr/local/bin/review-job)"), fail(520, 300, 301),
+                        logLine(NOW - 519, 300, "(root) END ([301] /usr/local/bin/review-job)")]],
+            ]) {
+                fx.cronArgs = "/usr/sbin/cron -f -P -L " + level;
+                cronLog(fx, lines);
+                const { en } = written(sh, awk, fx);
+                assert.deepStrictEqual([en.state, item(en, "failed").value, item(en, "failed").detail], ["danger", "1", "/etc/cron.d/r"],
+                                       "-L " + level + ": " + lines.join(" | "));
+            }
+        });
+
         t(name + "cron logs no failures: its log is not read", () => {
             for (const args of ["/usr/sbin/cron -f -P", "/usr/sbin/cron -f -P -L 11", undefined]) {
                 const fx = fixture();
