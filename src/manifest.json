@@ -4,10 +4,13 @@
         "index": {
             "label": "Cron Jobs",
             "path": "index.html",
-            "order": 112,
+            "order": 105,
             "keywords": [
                 { "matches": ["cron", "crontab", "schedule", "scheduled", "job", "timer", "systemd timer",
-                              "zeitplan", "aufgabe", "geplante aufgaben"] }
+                              "zeitplan", "aufgabe", "geplante aufgaben", "azentrius"] }
+            ],
+            "docs": [
+                { "label": "Cron Jobs", "url": "https://github.com/Azentrius/cockpit-cronjobs#readme" }
             ]
         }
     },
