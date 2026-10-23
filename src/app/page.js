@@ -385,6 +385,14 @@ export function updateLastRuns() {
     renderNotices();
 }
 
+/* After cron's log was read again (refreshCronLog): the runs from it on the crontabs, in the
+   latest results and in the System tab. */
+export function updateCronLog() {
+    if (state.busy || loading) return;
+    updateLastRuns();
+    renderSystem();
+}
+
 /* After the timers' last runs were read again (refreshTimers). */
 export function updateTimerRuns() {
     if (state.busy || loading) return;
@@ -521,10 +529,11 @@ function startedCell(user, command) {
         h("span", { class: "az-cell-sub" }, cronLogWhen(run)));
 }
 
-/* A note in the System tab when Debian's cron logs no end or no failure of its jobs. */
+/* A note in the System tab when Debian's cron does not log the start, the end and the failures
+   of its jobs (without the starts, a failure belongs to no job). */
 function renderCronLogHint() {
     const logs = state.basics.cronLogs;
-    fill($("cronlog-hint"), state.basics.flavor === "debian" && logs && logs.start && !(logs.end && logs.failure)
+    fill($("cronlog-hint"), state.basics.flavor === "debian" && logs && !(logs.start && logs.end && logs.failure)
         ? alertEl("info", T.cronLogHintTitle, T.cronLogHintBody) : null);
 }
 

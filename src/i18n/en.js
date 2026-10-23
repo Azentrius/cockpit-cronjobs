@@ -122,9 +122,9 @@
                       "there only when cron logs it.",
         cronLogTitle: "From cron's log in the journal of the last 35 days; the job does not record its runs.",
         inCronLog: "cron's log",
-        cronLogHintTitle: "cron logs only when jobs start",
-        cronLogHintBody: "So for jobs that do not record their runs, the page cannot tell how a run ended. Started with " +
-                         "the option `-L 15`, cron also logs the end and failures of every job, and the page shows them " +
+        cronLogHintTitle: "How jobs end is not in cron's log",
+        cronLogHintBody: "For jobs that do not record their runs, the page therefore cannot tell how a run ended. Started " +
+                         "with the option `-L 15`, cron logs the start, the end and failures of every job, and the page shows them " +
                          "here and on the overview. On Ubuntu: `systemctl edit cron.service`, under `[Service]` the " +
                          "line `Environment=\"EXTRA_OPTS=-L 15\"` (with the quotes: without them systemd sets only " +
                          "`-L`, and cron does not start), then `systemctl restart cron`. On Debian: " +

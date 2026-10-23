@@ -70,7 +70,7 @@ done
 echo "\${unit:--} $since" >> "$FAKE_JOURNAL/calls"
 if [ -z "$unit" ]; then
     [ -f "$FAKE_JOURNAL/cron.log" ] || exit 0
-    awk -v since="$since" '$1 + 0 >= since + 0' "$FAKE_JOURNAL/cron.log"
+    awk -v since="$since" '$1 == "--" || $1 + 0 >= since + 0' "$FAKE_JOURNAL/cron.log"
     exit 0
 fi
 f=$FAKE_JOURNAL/$unit.json
@@ -325,12 +325,13 @@ for (const awk of AWKS.filter(a => a.bin)) {
             C.parseSystemCrontab(system).map(j => `U (${j.user}) CMD (${C.loggedCommand(j.command)})`));
     });
 
-    t(awk.name + ": whether cron logs failures, read as the page reads it (C.cronLogs)", () => {
+    t(awk.name + ": whether cron logs failures and starts, read as the page reads it (C.cronLogs)", () => {
         for (const args of ["/usr/sbin/cron -f -P", "/usr/sbin/cron -f -P -L 15", "/usr/sbin/cron -fL7", "/usr/sbin/cron -L 5",
                             "/usr/sbin/cron -L 15 -L 2", "/usr/sbin/cron -L x", "/usr/sbin/cron -x ext -L 4", "/usr/sbin/cron -f -- -L 15",
                             "/usr/sbin/cron -L -1", "/usr/sbin/cron -L 4abc", "/usr/sbin/cron -L", "/usr/sbin/cron -L 12", "/usr/sbin/cron -L 3"]) {
             const r = runAwk(awk, [awkProgram("LEVEL_AWK")], args + "\n");
-            assert.strictEqual(r.status === 0, C.cronLogs("debian", args, 0).failure, args);
+            const c = C.cronLogs("debian", args, 0);
+            assert.strictEqual(r.status === 0, c.start && c.failure, args + ": starts and failures, or no job a failure is of");
         }
     });
 }
@@ -439,6 +440,73 @@ for (const sh of SHELLS) {
             d = written(sh, awk, fx);
             assert.strictEqual(item(d.en, "failed").detail,
                                "Recorded jobs: 1, timers converted from cron: 1; none failed, and cron's log shows no failed job.");
+        });
+
+        t(name + "failures without starts in cron's log (-L 4, 6, 12) belong to no job: nothing is said of them", () => {
+            for (const level of ["4", "6", "12"]) {
+                const fx = fixture();
+                fx.cronArgs = "/usr/sbin/cron -f -P -L " + level;
+                crontab(fx, "root", "*/5 * * * * /usr/local/bin/backup.sh\n");
+                cronLog(fx, [logLine(NOW - 599, 100, "(CRON) error (grandchild #101 failed with exit status 3)"),
+                             logLine(NOW - 598, 100, "(root) END (/usr/local/bin/backup.sh)")]);
+                let d = written(sh, awk, fx);
+                assert.deepStrictEqual([d.en.state, item(d.en, "failed").state, item(d.en, "failed").detail],
+                                       ["none", "none", "No job records its runs."], "-L " + level);
+                assert.strictEqual(d.en.summary, "No job records its runs, so their results are not known.", "-L " + level);
+                assert.strictEqual(item(d.en, "unrecorded").detail,
+                                   "1 of 1 jobs in the crontabs of root and other users; their results are not known.", "-L " + level);
+                crontab(fx, "root", `*/5 * * * * /usr/local/bin/backup.sh\n* * * * * ${wrapped("rec-0001", "x")}\n`);
+                runs(fx, "root", "rec-0001", [rec(NOW - 60, 0)]);
+                d = written(sh, awk, fx);
+                assert.deepStrictEqual([item(d.en, "failed").state, item(d.en, "failed").detail], ["ok", "Recorded jobs: 1, none failed."],
+                                       "-L " + level + ": the recorded job counts as before");
+                assert.strictEqual(d.en.summary, "No recorded job failed in the last 24 hours.", "-L " + level);
+                assert.deepStrictEqual(journalCalls(fx).filter(c => c.startsWith("- ")), [], "-L " + level + ": the log is not read");
+            }
+        });
+
+        t(name + "failures with starts in cron's log (-L 5, 15) count", () => {
+            for (const [level, start] of [["5", logLine(NOW - 600, 101, "(root) CMD (/usr/local/bin/backup.sh)")],
+                                          ["15", logLine(NOW - 600, 100, "(root) CMD ([101] /usr/local/bin/backup.sh)")]]) {
+                const fx = fixture();
+                fx.cronArgs = "/usr/sbin/cron -f -P -L " + level;
+                crontab(fx, "root", "*/5 * * * * /usr/local/bin/backup.sh\n");
+                cronLog(fx, [start, logLine(NOW - 599, 100, "(CRON) error (grandchild #101 failed with exit status 3)")]);
+                const { en } = written(sh, awk, fx);
+                assert.deepStrictEqual([en.state, item(en, "failed").value, item(en, "failed").detail],
+                                       ["danger", "1", "1 job without recording, from cron's log"], "-L " + level);
+            }
+        });
+
+        t(name + "a PID used again after its run is not that run's: what feeds a % that dies, another boot", () => {
+            const fx = fixture();
+            fs.writeFileSync(path.join(fx.etc, "cron.d", "a"), "0 1 * * * root /opt/a.sh\n");
+            fs.writeFileSync(path.join(fx.etc, "cron.d", "b"), "0 2 * * * root /opt/b.sh%input\n");
+            const failsB = [logLine(NOW - 598, 300, "(CRON) error (grandchild #301 failed with exit status 2)")];
+            for (const [level, lines] of [
+                /* A ends; later the process that feeds B its input after % gets A's PID 201 and dies of SIGPIPE */
+                ["15", [logLine(NOW - 900, 200, "(root) CMD ([201] /opt/a.sh)"), logLine(NOW - 899, 200, "(root) END ([201] /opt/a.sh)"),
+                        logLine(NOW - 600, 300, "(root) CMD ([301] /opt/b.sh)"),
+                        logLine(NOW - 599, 300, "(CRON) error (grandchild #201 terminated by signal 13)")].concat(failsB)],
+                /* the same without PIDs in the lines: A's start came from 201 itself, its end from 200 */
+                ["7", [logLine(NOW - 900, 201, "(root) CMD (/opt/a.sh)"), logLine(NOW - 899, 200, "(root) END (/opt/a.sh)"),
+                       logLine(NOW - 600, 301, "(root) CMD (/opt/b.sh)"),
+                       logLine(NOW - 599, 300, "(CRON) error (grandchild #201 terminated by signal 13)")].concat(failsB)],
+                /* no ends logged: A's PID belongs to the boot before */
+                ["5", [logLine(NOW - 900, 201, "(root) CMD (/opt/a.sh)"), "-- Boot 0123456789abcdef0123456789abcdef --",
+                       logLine(NOW - 600, 301, "(root) CMD (/opt/b.sh)"),
+                       logLine(NOW - 599, 300, "(CRON) error (grandchild #201 terminated by signal 13)")].concat(failsB)],
+                /* -L 13 (PIDs, no ends): A still open, but the failure comes from B's process, not from A's */
+                ["13", [logLine(NOW - 900, 200, "(root) CMD ([201] /opt/a.sh)"),
+                        logLine(NOW - 600, 300, "(root) CMD ([301] /opt/b.sh)"),
+                        logLine(NOW - 599, 300, "(CRON) error (grandchild #201 terminated by signal 13)")].concat(failsB)],
+            ]) {
+                fx.cronArgs = "/usr/sbin/cron -f -P -L " + level;
+                cronLog(fx, lines);
+                const { en } = written(sh, awk, fx);
+                assert.deepStrictEqual([item(en, "failed").value, item(en, "failed").detail], ["1", "/etc/cron.d/b"],
+                                       "-L " + level + ": A ran fine, B failed");
+            }
         });
 
         t(name + "cron logs no failures: its log is not read", () => {

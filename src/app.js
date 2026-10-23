@@ -29,7 +29,7 @@
  */
 
 import { $, fill, icon, rich, state, T } from "./app/core.js";
-import { crontabOf, jobAt, loading, refreshRuns, refreshTimers, requestLoad, watchSuperuser } from "./app/crontab.js";
+import { crontabOf, jobAt, loading, refreshCronLog, refreshRuns, refreshTimers, requestLoad, watchSuperuser } from "./app/crontab.js";
 import { clearAlerts, updateNextRuns } from "./app/page.js";
 import {
     closeDialog, confirmDelete, confirmOk, dialog, form, openCaptureAll, openCaptureOff, openEdit, submitEdit, updateForm,
@@ -118,7 +118,7 @@ function init() {
     $("back-close").addEventListener("click", () => closeDialog());
 
     /* Back on the page: everything again after a minute, unless a dialog is open; else
-       only the runs and the timers' results (and with them an open runs dialog). */
+       only the runs, the timers' results (and with them an open runs dialog) and cron's log. */
     const onVisible = () => {
         const hidden = cockpit.hidden !== undefined ? cockpit.hidden : document.hidden;
         if (hidden || state.busy) return;
@@ -126,6 +126,7 @@ function init() {
         else {
             refreshRuns();
             refreshTimers();
+            refreshCronLog(true);
         }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -137,6 +138,7 @@ function init() {
         if (!hidden && !state.busy && !loading) {
             refreshRuns();
             refreshTimers();
+            refreshCronLog(false);
         }
     }, 30000);
 

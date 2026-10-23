@@ -10,7 +10,7 @@ import {
     ensureUserRuns, ensureWrapper, errText, isDenied, readBasics, readCronLog, readCrontab, readHomes, readRuns, readSystem,
     readTimerRuns, readTimers, removeRunsIfUnused, saveCrontab,
 } from "./system.js";
-import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateLastRuns, updateTimerRuns } from "./page.js";
+import { closeMenu, renderAll, renderCrontabs, restoreFocus, showAlert, updateCronLog, updateLastRuns, updateTimerRuns } from "./page.js";
 import { dialog } from "./dialogs.js";
 import { refreshJournal, renderOrphansDialog, renderRunsDialog } from "./runs.js";
 
@@ -159,6 +159,8 @@ async function load() {
         state.tz = basics.tz || "UTC";
         state.basics = basics;
     }
+    const logSeq = ++cronLogSeq;
+    cronLogReadAt = Date.now();
     const [root, sys, runs, timers, cronLog] = await Promise.allSettled([
         state.basics.crontab ? readCrontab("root") : Promise.reject({ problem: "not-found" }),
         readSystem(state.basics.flavor),
@@ -166,7 +168,10 @@ async function load() {
         state.basics.systemd ? readTimers() : Promise.resolve(null),
         readCronLog(),
     ]);
-    state.cronLog = cronLog.status === "fulfilled" ? cronLog.value : null;
+    if (logSeq > cronLogShown) {
+        state.cronLog = cronLog.status === "fulfilled" ? cronLog.value : null;
+        cronLogShown = logSeq;
+    }
     if (root.status === "fulfilled") setCrontab("root", root.value);
     else if (isDenied(root.reason)) state.root = { status: "denied", user: "root" };
     else if (root.reason && root.reason.problem === "not-found") state.root = { status: "missing", user: "root" };
@@ -222,6 +227,30 @@ export function refreshRuns() {
         updateLastRuns();
         if (dialog && dialog.kind === "runs") renderRunsDialog();
         if (dialog && dialog.kind === "orphans") renderOrphansDialog();
+    });
+}
+
+/* cron's log again, so that how its runs ended shows without reloading: with the runs, but at
+   most once a minute (it reads the journal of 35 days), and at once when forced (the page is shown
+   again). Every read, a reload's too, gets a number: an answer that comes back after a newer one
+   was shown is dropped. A read that fails keeps what was read before. */
+const CRON_LOG_EVERY = 60000;
+let cronLogSeq = 0;
+let cronLogShown = 0;
+let cronLogReadAt = 0;
+let cronLogLoading = false;
+export function refreshCronLog(force) {
+    if (cronLogLoading || !state.loadedAt || (!force && Date.now() - cronLogReadAt < CRON_LOG_EVERY)) return Promise.resolve();
+    cronLogLoading = true;
+    cronLogReadAt = Date.now();
+    const seq = ++cronLogSeq;
+    return readCronLog().then(log => {
+        if (seq <= cronLogShown) return;   /* a newer read was shown already */
+        state.cronLog = log;
+        cronLogShown = seq;
+    }, () => { /* the next reload says what is wrong */ }).finally(() => {
+        cronLogLoading = false;
+        updateCronLog();
     });
 }
 

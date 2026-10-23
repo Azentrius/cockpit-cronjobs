@@ -143,8 +143,9 @@ Cron Jobs runs no daemon of its own and does not go to the network.
 - Runs from cron's log count only when journald says root logged them (`_UID` 0, which it sets itself)
   as `CRON` or `CROND`; a line another user logs as `CRON` is left out. (Not by `_COMM`: journald reads
   it from `/proc` when it takes the message, and the process that logs a start becomes the job's shell
-  right after.) A failure counts for the run whose process it names, and only for the newest run of
-  that job.
+  right after.) A failure counts for the run whose process it names, only while that run goes on
+  (until its end or another boot; with `-L 8` only from the process that logged its start), and on the
+  page only for the newest run of that job.
 - A job set not to overlap is checked and marked under the run recorder's lock, so of two starts at once
   only one runs; the setting lies in the job's directory of runs and is written there as its owner.
 
@@ -313,7 +314,7 @@ English for any other language). Without the file it reports `none` and why.
 The crontabs of root and the other users count: the jobs there are the ones the page can record,
 read as the page reads them, and the jobs converted from them, whose runs come from the journal of
 their service as on the page. A converted job counts only while both units are the ones the
-conversion wrote, checked as back to cron checks them. When Debian's cron logs failures (`-L` with 4,
+conversion wrote, checked as back to cron checks them. When Debian's cron logs starts and failures (`-L` with 1 and 4,
 read from its command line as the page reads it), its log of the last 24 hours counts as well, read
 as on the page: a failure belongs to the job whose start names the same process, and counts when that
 job is still in one of those crontabs, `/etc/crontab` or `/etc/cron.d` and does not record its runs
@@ -448,8 +449,10 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
   jobs and what cron's log tells about their runs, but does not change, record, run or convert them.
 - A command with an unescaped `%` cannot record its runs (cron passes the text after it as input).
 - How a run of a job without recording ended is known only where cron logs it: Debian's cron with `-L`
-  (2 and 4, see above). cronie logs the end but never the result. Without `-L 8` an end without a
-  failure is put to the newest start of its command, which is a guess when runs of one command overlap.
+  (1, 2 and 4, see above). cronie logs the end but never the result. Without `-L 8` an end without a
+  failure is put to the newest start of its command, which is a guess when runs of one command overlap;
+  without ends and PIDs (`-L 5`) a failure after the PID was used again in the same boot cannot be told
+  apart from one of the run that had it before.
 - Missed runs are found for jobs that record their runs, and only on the page, not in the status.
 - The status names failed jobs of the crontabs that do not record their runs, and timers converted from
   another user's crontab, only in number: their only names are a command or begin with the user's.

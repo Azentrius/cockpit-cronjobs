@@ -120,9 +120,9 @@
                       "ausging, steht dort nur, wenn cron es loggt.",
         cronLogTitle: "Aus dem Log von cron im Journal der letzten 35 Tage; der Job erfasst seine Läufe nicht.",
         inCronLog: "Log von cron",
-        cronLogHintTitle: "cron loggt nur, wann Jobs starten",
+        cronLogHintTitle: "Wie Jobs enden, steht nicht im Log von cron",
         cronLogHintBody: "Für Jobs, die ihre Läufe nicht erfassen, kann die Seite deshalb nicht sagen, wie ein Lauf " +
-                         "ausging. Mit der Option `-L 15` gestartet, loggt cron auch Ende und Fehlschläge jedes Jobs, " +
+                         "ausging. Mit der Option `-L 15` gestartet, loggt cron Start, Ende und Fehlschläge jedes Jobs, " +
                          "und die Seite zeigt sie hier und in der Übersicht. Unter Ubuntu: `systemctl edit cron.service`, " +
                          "unter `[Service]` die Zeile `Environment=\"EXTRA_OPTS=-L 15\"` (mit den Anführungszeichen: " +
                          "ohne sie setzt systemd nur `-L`, und cron startet nicht), dann `systemctl restart cron`. " +
