@@ -583,8 +583,30 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
   }
   # a run that ended: its PID (and the process that waited for it) say nothing more
   function forget(x) { delete key[x]; delete par[x] }
+  # open[k]: the runs of command k that may still go on (" PID PID ", at most 20); amb[k] of them
+  # ended with an end that did not say which (overlapping runs, no PIDs in the lines)
+  function opened(k, x,   a, z) {
+    open[k] = ((k in open) ? open[k] : " ") x " "
+    if (split(open[k], a, " ") > 20) { z = a[1]; sub(" " z " ", " ", open[k]); if (key[z] == k) forget(z) }
+  }
+  function close1(k, x, t) {
+    sub(" " x " ", " ", open[k])
+    if ((x in key) && key[x] == k) forget(x)
+    if (x == last[k] && !(k in fin)) fin[k] = t
+  }
+  # run x of k ended; when only runs that ended without saying which are left, they all ended
+  function ended(k, x, t,   a, i, c) {
+    close1(k, x, t)
+    c = split(open[k], a, " ")
+    if (c > 0 && c <= amb[k]) { for (i = 1; i <= c; i++) close1(k, a[i], t); amb[k] = 0 }
+  }
   /^-- / {
-    if ($0 ~ /Boot|Reboot/) { for (x in key) forget(x); for (x in mid) delete mid[x] }
+    if ($0 ~ /Boot|Reboot/) {
+      for (x in key) forget(x)
+      for (x in mid) delete mid[x]
+      for (x in open) delete open[x]
+      for (x in amb) delete amb[x]
+    }
     next
   }
   {
@@ -598,9 +620,9 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
     if (m ~ /^[(][^()]*[)] CMD [(].*[)]$/) {
       k = job(m, "CMD")
       if (n == "") { n = p; par[n] = "" } else par[n] = p
-      if ((k in last) && (last[k] in key) && key[last[k]] == k) forget(last[k])
       last[k] = n; when[k] = t[1]; key[n] = k
       delete fin[k]; delete res[k]
+      opened(k, n)
     } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
       split(m, w, " ")
       n = substr(w[4], 2)
@@ -613,11 +635,14 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
       ev = substr(m, index(m, ") ") + 2)
       k = job(m, substr(ev, 1, index(ev, " ") - 1))
       if (n == "" && (p in mid)) n = mid[p]
-      if (n == "" && (k in last)) n = last[k]
       delete mid[p]
-      if ((n in key) && key[n] == k && (par[n] == "" || par[n] == p)) {
-        if (last[k] == n && !(k in fin)) fin[k] = t[1]
-        forget(n)
+      if (n != "") {
+        if ((n in key) && key[n] == k && (par[n] == "" || par[n] == p)) ended(k, n, t[1])
+      } else if (k in open) {
+        c = split(open[k], a, " ")
+        if (c - amb[k] == 1 && amb[k] == 0) ended(k, a[1], t[1])
+        else if (c - amb[k] == 1) { for (i = 1; i <= c; i++) close1(k, a[i], t[1]); amb[k] = 0 }
+        else if (c - amb[k] > 1) amb[k]++
       }
     }
   }
@@ -625,6 +650,7 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
     for (k in last) {
       e = "-"; r = "-"
       if (k in fin) e = fin[k]
+      else if (amb[k] > 0 && index(open[k], " " last[k] " ")) e = "?"
       if (k in res) r = res[k]
       print when[k] " " e " " r " " k
     }

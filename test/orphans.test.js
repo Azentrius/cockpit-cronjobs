@@ -402,7 +402,7 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, i
         "1792503900 - - (root) CMD (sleep 999)",
         "1792504000 1792504002 signal:11 (www-data) CMD (php -f /var/www/cron.php)",
         "1792504100 1792504101 - (root) CMD (cat > /tmp/x)",
-        "1792504260 1792504290 - (root) CMD (slow)",
+        "1792504260 ? - (root) CMD (slow)",
         "1792504360 - - (root) CMD (flaky)",
         "1792504400 - exit:2 (root) CMD (a)",
         "1792504500 - - (root) CMD (b)",
@@ -467,6 +467,36 @@ for (const sh of SHELLS) t(sh + ": cron's log: a PID used again is not the old r
         "1792600600 - - (root) CMD (/opt/g.sh)",
         "1792600700 - - (root) CMD (/opt/h.sh)",
     ], "A, C, E and G keep what their own runs logged; B's own failure counts");
+});
+
+/* Overlapping runs of one command, ends without PIDs (-L 7): an end that could be either run's must
+   not close the newer one, whose own failure comes later; the other order too; -L 15 as control. */
+for (const sh of SHELLS) t(sh + ": cron's log: overlapping runs, an end that could be either's", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-log-"));
+    fs.mkdirSync(path.join(root, "bin"));
+    fs.writeFileSync(path.join(root, "bin", "journalctl"), "#!/bin/sh\ncat <<'EOF'\n" +
+        "1792710000.1 host CRON[201]: (root) CMD (/opt/r.sh)\n1792710060.1 host CRON[301]: (root) CMD (/opt/r.sh)\n" +
+        "1792710070.1 host CRON[200]: (root) END (/opt/r.sh)\n" +
+        "1792710080.1 host CRON[300]: (CRON) error (grandchild #301 failed with exit status 3)\n" +
+        "1792710081.1 host CRON[300]: (root) END (/opt/r.sh)\n" +
+        "1792711000.1 host CRON[401]: (root) CMD (/opt/v.sh)\n1792711060.1 host CRON[501]: (root) CMD (/opt/v.sh)\n" +
+        "1792711070.1 host CRON[500]: (CRON) error (grandchild #501 failed with exit status 3)\n" +
+        "1792711071.1 host CRON[500]: (root) END (/opt/v.sh)\n1792711080.1 host CRON[400]: (root) END (/opt/v.sh)\n" +
+        "1792712000.1 host CRON[600]: (root) CMD ([601] /opt/q.sh)\n1792712060.1 host CRON[700]: (root) CMD ([701] /opt/q.sh)\n" +
+        "1792712070.1 host CRON[600]: (root) END ([601] /opt/q.sh)\n" +
+        "1792712080.1 host CRON[700]: (CRON) error (grandchild #701 failed with exit status 3)\n" +
+        "1792712081.1 host CRON[700]: (root) END ([701] /opt/q.sh)\n" +
+        "1792713000.1 host CRON[801]: (root) CMD (/opt/u.sh)\n1792713060.1 host CRON[901]: (root) CMD (/opt/u.sh)\n" +
+        "1792713070.1 host CRON[800]: (root) END (/opt/u.sh)\n" +
+        "EOF\n", { mode: 0o755 });
+    const r = spawnSync(sh, ["-c", LOG_SCRIPT], { env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C" }, timeout: 30000 });
+    assert.strictEqual(r.status, 0, r.stderr.toString());
+    assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), [
+        "1792710060 1792710081 exit:3 (root) CMD (/opt/r.sh)",
+        "1792711060 1792711071 exit:3 (root) CMD (/opt/v.sh)",
+        "1792712060 1792712081 exit:3 (root) CMD (/opt/q.sh)",
+        "1792713060 ? - (root) CMD (/opt/u.sh)",
+    ], "the newer run keeps its own failure; an end that could be either's leaves the newer one's end unknown");
 });
 
 console.log(`${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
