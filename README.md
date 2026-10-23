@@ -138,8 +138,10 @@ Cron Jobs runs no daemon of its own and does not go to the network.
 - Back to cron only removes units that Cron Jobs wrote under that name (plain files, with the first line
   and description it gives them), checked again as root right before; if the timer cannot be stopped,
   the crontab is put back.
-- The status timer only reads: it writes nothing but its two status files. In another user's directory it
-  reads only what has the form of runs, as the page does (no links, regular files, under a time limit).
+- The status timer only reads, apart from its own state: it writes its two status files (each through a
+  temporary file beside it), and it creates `/var/lib/cockpit-cronjobs` when it is missing and sets that
+  directory to mode 711, as the page does. In another user's directory it reads only what has the form
+  of runs, as the page does (no links, regular files, under a time limit).
 - Runs from cron's log count only when journald says root logged them (`_UID` 0, which it sets itself)
   as `CRON` or `CROND`; a line another user logs as `CRON` is left out. (Not by `_COMM`: journald reads
   it from `/proc` when it takes the message, and the process that logs a start becomes the job's shell
@@ -151,7 +153,8 @@ Cron Jobs runs no daemon of its own and does not go to the network.
 
 ## Requirements
 
-- Cockpit 314 or newer (tested with 314, the one of Ubuntu 24.04, and 362 from its backports)
+- Cockpit (tested with 314, the one of Ubuntu 24.04, and 362 from its backports; older versions are not
+  tested, and neither the packages nor the page check the version)
 - cron: `cron` on Debian and Ubuntu, or `cronie` (Fedora, RHEL and its rebuilds, Arch, openSUSE)
 - coreutils, util-linux (`flock`, `setsid`), `sed`, `grep`, `awk`: present on any normal installation
 - systemd, optionally: for the timers, the timeline entries of timers, the conversion and the status for
@@ -433,7 +436,9 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
 1. Set the new version in `src/app.js` (`const VERSION`) and add a section for it to `CHANGELOG.md`.
 2. Merge to `main`.
 3. On GitHub: Actions › **release** › Run workflow (branch `main`). The workflow checks that the version
-   is new and matches `src/app.js`, runs all tests, builds `cockpit-cronjobs-VERSION.tar.gz`
+   is new and matches `src/app.js`, runs the unit and browser tests (`make check`, `make check-ui`; the
+   lint, the package installs and the end-to-end test run only in the `test` workflow, on every push and
+   pull request), builds `cockpit-cronjobs-VERSION.tar.gz`
    (`make package`) and the `.deb` and `.rpm` (`make packages`), all reproducible, with `SHA256SUMS`,
    and creates the tag `vVERSION` with a release whose notes come from `CHANGELOG.md`. It also signs a
    build provenance for each file; `gh attestation verify <file> --repo Azentrius/cockpit-cronjobs`
