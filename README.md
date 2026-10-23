@@ -184,8 +184,9 @@ sudo rpm --import https://packages.azentrius.com/azentrius.asc
 sudo dnf install https://packages.azentrius.com/azentrius-repository.rpm
 ```
 
-RHEL and its derivatives use the same `dnf` set-up, but it is tested on Fedora only. The repository
-has no set-up for openSUSE: there, install the `.rpm` of a release (below).
+RHEL and its derivatives use the same `dnf` set-up; it is tested on Fedora and on Rocky Linux and
+AlmaLinux 9 and 10, not on RHEL itself. The repository has no set-up for openSUSE: there, install
+the `.rpm` of a release (below).
 
 Then install **Cron Jobs** in Cockpit under **Applications** (with administrative access), or on the
 console with `sudo apt install cockpit-cronjobs` or `sudo dnf install cockpit-cronjobs`. The system's
@@ -208,8 +209,9 @@ sudo zypper install --allow-unsigned-rpm ./cockpit-cronjobs-X.Y.Z-1.noarch.rpm  
 
 The `.rpm` of a release carries no package signature (the repository signs its own copy): `zypper`
 needs `--allow-unsigned-rpm`, and the two checks above take the place of the signature. The tests
-install the `.deb` on Debian 13 and the `.rpm` on Fedora 43; installing the packages on Ubuntu,
-RHEL or openSUSE is untested.
+install the `.deb` on Debian 13 and the `.rpm` on Fedora 43 and on the RHEL rebuilds Rocky Linux and
+AlmaLinux 9 and 10 (job `install`); installing the packages on Ubuntu, RHEL itself or openSUSE is
+untested.
 
 On other systems the archive `cockpit-cronjobs-X.Y.Z.tar.gz` of a release holds the page:
 `sudo tar -xzf cockpit-cronjobs-X.Y.Z.tar.gz -C /usr/share/cockpit`. It brings no status for the Status
@@ -462,8 +464,8 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
 - Missed runs are found for jobs that record their runs, and only on the page, not in the status.
 - The status names failed jobs of the crontabs that do not record their runs, and timers converted from
   another user's crontab, only in number: their only names are a command or begin with the user's.
-- BusyBox cron (Alpine) is not supported. The packages are tested on Debian 13 and Fedora 43;
-  installing them on Ubuntu, RHEL or openSUSE is untested.
+- BusyBox cron (Alpine) is not supported. The packages are tested on Debian 13, Fedora 43, Rocky
+  Linux and AlmaLinux 9 and 10; installing them on Ubuntu, RHEL itself or openSUSE is untested.
 - English and German only (see [Translations](#translations)).
 
 ## License
