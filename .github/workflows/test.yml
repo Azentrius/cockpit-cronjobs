@@ -70,10 +70,21 @@ jobs:
             s=/usr/lib/cockpit-cronjobs/cronjobs-status
             $s write
             $s status --lang en | grep -q "\"state\":\"ok\""'
-      - name: Check tools (pinned in test/requirements.txt) and the browser
+      - name: Check tools (pinned in test/requirements.txt)
+        run: pip install -r test/requirements.txt
+      # Only the browser, from Playwright's CDN (seconds). Its system packages (--with-deps: fonts,
+      # xvfb) come by apt from the Ubuntu mirror, which once took twelve minutes for them and cut
+      # this job off at its time limit (PR #85). The runner image brings what Chromium needs (it
+      # has Google Chrome); the browser tests show if anything is missing. Each try gets four
+      # minutes, a hung one a second try.
+      - name: Browser (Chromium from Playwright's CDN, two tries)
+        timeout-minutes: 10
         run: |
-          pip install -r test/requirements.txt
-          python -m playwright install --with-deps chromium
+          for try in 1 2; do
+            timeout --kill-after=10s 4m python -m playwright install chromium && exit 0
+            echo "::warning::playwright install failed or hung (try $try)"
+          done
+          exit 1
       - name: Lint (shellcheck, ruff)
         run: make lint
       - name: Browser tests
@@ -192,11 +203,19 @@ jobs:
           sudo install -m 644 status/cockpit-cronjobs-status.service status/cockpit-cronjobs-status.timer /usr/lib/systemd/system/
           sudo systemctl daemon-reload
           dpkg-query -W cockpit-ws cockpit-bridge cron
-      - name: Check tools (pinned in test/requirements.txt) and the browser
+      - name: Check tools (pinned in test/requirements.txt)
         run: |
           pip install -r test/requirements.txt
-          python -m playwright install --with-deps chromium
           echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
+      # Only the browser, two tries of four minutes (see the job test).
+      - name: Browser (Chromium from Playwright's CDN, two tries)
+        timeout-minutes: 10
+        run: |
+          for try in 1 2; do
+            timeout --kill-after=10s 4m python -m playwright install chromium && exit 0
+            echo "::warning::playwright install failed or hung (try $try)"
+          done
+          exit 1
       - name: Start Cockpit as root, without login
         run: |
           sudo /usr/lib/cockpit/cockpit-ws --no-tls --port 9091 --address 127.0.0.1 --local-session=cockpit-bridge \

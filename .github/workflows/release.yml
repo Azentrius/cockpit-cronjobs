@@ -75,9 +75,17 @@ jobs:
       - name: Package lists (giving up on a mirror that hangs)
         run: sudo sh tools/apt-update.sh
       - name: Install Playwright
+        run: pip install -r test/requirements.txt
+      # Only the browser, two tries of four minutes, as in the test workflow: the system packages
+      # of --with-deps come from the Ubuntu mirror, which once hung for twelve minutes.
+      - name: Browser (Chromium from Playwright's CDN, two tries)
+        timeout-minutes: 10
         run: |
-          pip install -r test/requirements.txt
-          python -m playwright install --with-deps chromium
+          for try in 1 2; do
+            timeout --kill-after=10s 4m python -m playwright install chromium && exit 0
+            echo "::warning::playwright install failed or hung (try $try)"
+          done
+          exit 1
       - name: Browser tests
         run: make check-ui
 
