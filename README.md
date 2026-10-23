@@ -449,8 +449,9 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
   jobs and what cron's log tells about their runs, but does not change, record, run or convert them.
 - A command with an unescaped `%` cannot record its runs (cron passes the text after it as input).
 - How a run of a job without recording ended is known only where cron logs it: Debian's cron with `-L`
-  (1, 2 and 4, see above). cronie logs the end but never the result. Without `-L 8` an end without a
-  failure is put to the newest start of its command, which is a guess when runs of one command overlap;
+  (1, 2 and 4, see above). cronie logs the end but never the result. Without `-L 8`, when runs of one
+  command overlap, an end that names no run leaves open which one ended: the page then shows only when
+  the newest started, until its own end or failure comes or all of them ended;
   without ends and PIDs (`-L 5`) a failure after the PID was used again in the same boot cannot be told
   apart from one of the run that had it before.
 - Missed runs are found for jobs that record their runs, and only on the page, not in the status.

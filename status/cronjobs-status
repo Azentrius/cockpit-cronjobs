@@ -297,8 +297,28 @@ function job(m, ev,   j) {
     return substr(m, 1, index(m, ")")) " CMD (" c ")"
 }
 function forget(x) { delete key[x]; delete par[x]; delete own[x] }
+# open[k]: the runs of command k that may still go on (" PID PID ", at most 20); amb[k] of them ended
+# with an end that did not say which (overlapping runs, no PIDs in the lines), as the page reads them
+function opened(k, x,   a, z) {
+    open[k] = ((k in open) ? open[k] : " ") x " "
+    if (split(open[k], a, " ") > 20) { z = a[1]; sub(" " z " ", " ", open[k]); if (key[z] == k) forget(z) }
+}
+function close1(k, x) {
+    sub(" " x " ", " ", open[k])
+    if ((x in key) && key[x] == k) forget(x)
+}
+function ended(k, x,   a, i, c) {
+    close1(k, x)
+    c = split(open[k], a, " ")
+    if (c > 0 && c <= amb[k]) { for (i = 1; i <= c; i++) close1(k, a[i]); amb[k] = 0 }
+}
 /^-- / {
-    if ($0 ~ /Boot|Reboot/) { for (x in key) forget(x); for (x in mid) delete mid[x] }
+    if ($0 ~ /Boot|Reboot/) {
+        for (x in key) forget(x)
+        for (x in mid) delete mid[x]
+        for (x in open) delete open[x]
+        for (x in amb) delete amb[x]
+    }
     next
 }
 {
@@ -312,7 +332,7 @@ function forget(x) { delete key[x]; delete par[x]; delete own[x] }
         k = job(m, "CMD")
         if (n == "") { n = p; par[n] = "" } else par[n] = p
         key[n] = k
-        newest[k] = n
+        opened(k, n)
         own[n] = match(c, /^\/[^ ]*\/cockpit-cronjobs-run/) && (substr(c, RLENGTH + 1, 1) == " " || substr(c, RLENGTH + 1, 1) == "^")
     } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
         split(m, w, " ")
@@ -326,9 +346,15 @@ function forget(x) { delete key[x]; delete par[x]; delete own[x] }
         ev = substr(m, index(m, ") ") + 2)
         k = job(m, substr(ev, 1, index(ev, " ") - 1))
         if (n == "" && (p in mid)) n = mid[p]
-        if (n == "" && (k in newest)) n = newest[k]
         delete mid[p]
-        if ((n in key) && key[n] == k && (par[n] == "" || par[n] == p)) forget(n)
+        if (n != "") {
+            if ((n in key) && key[n] == k && (par[n] == "" || par[n] == p)) ended(k, n)
+        } else if (k in open) {
+            c = split(open[k], a, " ")
+            if (c - amb[k] == 1 && amb[k] == 0) ended(k, a[1])
+            else if (c - amb[k] == 1) { for (i = 1; i <= c; i++) close1(k, a[i]); amb[k] = 0 }
+            else if (c - amb[k] > 1) amb[k]++
+        }
     }
 }
 '

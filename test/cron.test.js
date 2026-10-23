@@ -687,6 +687,8 @@ t("cron's log: what cron logs, and what it says about a run", () => {
     assert.strictEqual(o({ end: 1005 }, Object.assign({}, all, { since: 2000 })), "ended", "started before cron did");
     assert.strictEqual(o({ end: 1005 }, Object.assign({}, all, { since: null })), "ended", "cron's start not known");
     assert.strictEqual(o({}, all), "running", "cron logs ends, none yet");
+    assert.strictEqual(o({ endUnknown: true }, all), "started", "an end that may have been another run's: no guess");
+    assert.deepStrictEqual(C.parseCronLog("5 ? - (root) CMD (x)").get("root\0x"), { start: 5000, end: null, result: null, endUnknown: true });
     assert.strictEqual(o({}, Object.assign({}, all, { end: false })), "started", "cron logs no ends");
     assert.strictEqual(o({}, Object.assign({}, all, { since: 2000 })), "started");
     assert.strictEqual(o({}, null), "started");

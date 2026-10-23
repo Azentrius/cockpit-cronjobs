@@ -377,10 +377,12 @@
     function parseCronLog(text) {
         const out = new Map();
         String(text || "").split("\n").forEach(line => {
-            const m = /^(\d{1,12}) (\d{1,12}|-) (exit:\d{1,3}|signal:\d{1,3}|-) \(([^()\s]+)\) CMD \((.*)\)$/.exec(line);
+            const m = /^(\d{1,12}) (\d{1,12}|-|\?) (exit:\d{1,3}|signal:\d{1,3}|-) \(([^()\s]+)\) CMD \((.*)\)$/.exec(line);
             if (!m) return;
             const key = m[4] + "\0" + m[5];
-            const run = { start: Number(m[1]) * 1000, end: m[2] === "-" ? null : Number(m[2]) * 1000, result: null };
+            const run = { start: Number(m[1]) * 1000, end: /^\d/.test(m[2]) ? Number(m[2]) * 1000 : null, result: null };
+            /* "?": an end came while runs of the command overlapped, and whose it was is not known */
+            if (m[2] === "?") run.endUnknown = true;
             if (m[3] !== "-") run.result = m[3].startsWith("exit:") ? { exit: Number(m[3].slice(5)) } : { signal: Number(m[3].slice(7)) };
             if (!out.has(key) || out.get(key).start < run.start) out.set(key, run);
         });
@@ -431,6 +433,7 @@
        runs it started since then; one started before may have been logged otherwise. */
     function cronLogOutcome(run, logs) {
         if (run.result) return run.result.exit !== undefined ? "failed" : "signal";
+        if (run.endUnknown) return "started";   /* it may have ended or go on: no guess */
         const known = !!logs && logs.since !== null && run.start >= logs.since;
         if (run.end !== null) return known && logs.failure ? "ok" : "ended";
         return known && logs.end ? "running" : "started";

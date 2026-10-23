@@ -402,7 +402,7 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, i
         "1792503900 - - (root) CMD (sleep 999)",
         "1792504000 1792504002 signal:11 (www-data) CMD (php -f /var/www/cron.php)",
         "1792504100 1792504101 - (root) CMD (cat > /tmp/x)",
-        "1792504260 1792504290 - (root) CMD (slow)",
+        "1792504260 ? - (root) CMD (slow)",
         "1792504360 - - (root) CMD (flaky)",
         "1792504400 - exit:2 (root) CMD (a)",
         "1792504500 - - (root) CMD (b)",
