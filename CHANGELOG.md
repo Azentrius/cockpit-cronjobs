@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.10.2 – 2026-10-23
+
+Runs from cron's log are read again with the runs and stay with their own processes: a PID used again
+or an end of an overlapping run no longer changes another run's result, and the status says nothing of
+failures it cannot assign to a job; the README and the repository files are laid out like those of the
+other Azentrius add-ons.
+
+- **Status without starts in cron's log:** with Debian's cron at `-L 4`, `6` or `12` (failures, but no
+  starts) the status counted no failure and said that cron's log showed none, although without its
+  start a failure belongs to no job. It reads cron's log now only when cron logs starts and failures
+  (`-L` with 1 and 4); otherwise it says, as before, that the results of jobs without recording are not
+  known. The System tab shows its note on `-L 15` then too.
+- **Runs from cron's log without reloading:** the page read cron's log only when it loaded, so a run it
+  showed as running stayed so until a reload. It reads the log again with the runs, at most once a
+  minute and when the page is shown again, and updates the crontabs, the latest results and the System
+  tab; an answer that comes back after a newer one was shown is dropped.
+- **A PID used again:** a failure or an end in cron's log counted for the start of its PID even after
+  that run had ended. When the process that feeds a job its input after `%` got the PID of an earlier
+  run and died of SIGPIPE, the page and the status took that earlier run for failed. A PID now
+  belongs to its run only until the run's end or another boot, and with `-L 8` only lines of the
+  process that logged the start count.
+- **Overlapping runs:** when runs of one command overlapped and cron logs ends without PIDs (`-L 7`),
+  an end of the older run hid the newer run's later failure: the page showed OK and the status counted
+  nothing. Such an end now leaves open which run ended. The newer run's failure counts, and until its
+  own end comes the page shows only its start.
+- **README:** laid out like the other Azentrius add-ons, with a table of contents and the new sections
+  Architecture, Operation and troubleshooting (among them cron's `-L 15` on Ubuntu and Debian) and
+  Known limits; updating and uninstalling are described. `SECURITY.md` names the status helper and the
+  packages.
+- **Contributing:** `CONTRIBUTING.md`, templates for bug reports and feature requests (blank issues
+  off, private vulnerability reporting linked) and for pull requests.
+
 ## 2.10.1 – 2026-10-22
 
 The hint on cron's log gives a line for systemd that works.
