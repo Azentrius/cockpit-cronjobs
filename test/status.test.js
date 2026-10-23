@@ -190,6 +190,15 @@ t("the manifest names the helper for the Status Board", () => {
     assert.ok(m.azentrius.status[0].startsWith("/usr/lib/cockpit-") && !m.azentrius.status[0].includes(".."));
 });
 
+t("the menu entry sits with the other Azentrius add-ons and links the README", () => {
+    const entry = JSON.parse(fs.readFileSync(path.join(SRC, "manifest.json"), "utf8")).menu.index;
+    // One block at the end of System, after Services (100): Status Board 101 to Host Settings 106.
+    assert.strictEqual(entry.order, 105);
+    assert.ok(entry.keywords.some(k => k.matches.includes("azentrius")), "found by searching for azentrius");
+    // Shown in Cockpit's Help menu; the product name is not translated.
+    assert.deepStrictEqual(entry.docs, [{ label: "Cron Jobs", url: "https://github.com/Azentrius/cockpit-cronjobs#readme" }]);
+});
+
 t("the helper is POSIX sh, executable", () => {
     assert.ok(fs.readFileSync(STATUS, "utf8").startsWith("#!/bin/sh\n"));
     assert.ok(fs.statSync(STATUS).mode & 0o111, "executable");
