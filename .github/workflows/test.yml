@@ -248,7 +248,8 @@ jobs:
   # The same end-to-end test with cronie and the .rpm in a Rocky Linux VM with SELinux enforcing
   # (tools/vm.sh: the pinned cloud image under KVM on this runner). The test runs as root in the
   # machine against its Cockpit (port 9091, forwarded here); the browser stays on this runner,
-  # behind a Playwright server the test reaches at 10.0.2.2. The job fails on every SELinux denial
+  # behind a Playwright server bound to 127.0.0.1 that an SSH tunnel brings into the machine (the
+  # server takes no other Host header). The job fails on every SELinux denial
   # between the mark after the set-up and the end of the test. A pilot: not yet part of e2e.
   e2e-el:
     name: e2e (${{ matrix.os }}, cronie, SELinux enforcing)
@@ -330,16 +331,20 @@ jobs:
           for _ in $(seq 1 50); do curl -fsS -o /dev/null "$url" && break; sleep 1; done
           curl -fsS -o /dev/null "$url"
           nohup python -m playwright run-server --port 3333 --host 127.0.0.1 > "$RUNNER_TEMP/playwright-server.log" 2>&1 &
-          for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/3333) 2> /dev/null && exit 0; sleep 0.2; done
-          cat "$RUNNER_TEMP/playwright-server.log"
-          exit 1
+          up=0
+          for _ in $(seq 1 50); do
+            if (exec 3<>/dev/tcp/127.0.0.1/3333) 2> /dev/null; then up=1; break; fi
+            sleep 0.2
+          done
+          if [ "$up" != 1 ]; then cat "$RUNNER_TEMP/playwright-server.log"; exit 1; fi
+          sh tools/vm.sh back 3333
       - name: The SELinux check catches a denial on purpose; then the mark in the audit log
         run: |
           sh tools/vm.sh avc-selftest
           sh tools/vm.sh avc-mark
       - name: End-to-end test in the machine (as root)
         run: |
-          sh tools/vm.sh root sh -c "'cd /root/cj && PLAYWRIGHT_WS=ws://10.0.2.2:3333/ CRONJOBS_E2E_DESTRUCTIVE=1 venv/bin/python test/e2e_cockpit.py'"
+          sh tools/vm.sh root sh -c "'cd /root/cj && PLAYWRIGHT_WS=ws://127.0.0.1:3333/ CRONJOBS_E2E_DESTRUCTIVE=1 venv/bin/python test/e2e_cockpit.py'"
       - name: No SELinux denials during the test
         run: sh tools/vm.sh avc-check
       - name: Logs

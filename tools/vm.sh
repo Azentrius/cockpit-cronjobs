@@ -7,6 +7,7 @@
 #   sh tools/vm.sh start rocky-9|rocky-10   boot the pinned cloud image, wait for SSH and cloud-init
 #   sh tools/vm.sh image rocky-9|rocky-10   the pinned image's file name (the key of the CI cache)
 #   sh tools/vm.sh root COMMAND...          run a command as root in the machine (one shell line)
+#   sh tools/vm.sh back PORT...             make ports of 127.0.0.1 here reachable at 127.0.0.1 there
 #   sh tools/vm.sh copy DIR FILE...         copy files from here into a folder of the machine
 #   sh tools/vm.sh fetch DIR PATH...        copy files or folders of the machine to here
 #   sh tools/vm.sh avc-mark                 print the SELinux denials so far, then mark the audit log
@@ -24,7 +25,9 @@ cache=${VM_CACHE:-$HOME/.cache/azentrius-vm}
 dir=${VM_DIR:-${RUNNER_TEMP:-/tmp}/azentrius-vm}
 port=${VM_SSH_PORT:-2222}
 # More TCP ports of the machine, reachable at the same port on 127.0.0.1 here (e.g. "9091" for a
-# Cockpit the browser on the runner opens). The machine reaches this side at 10.0.2.2.
+# Cockpit the browser on the runner opens). The other way round, `back` tunnels ports over SSH:
+# 10.0.2.2 would reach this side too, but a server bound to 127.0.0.1 that checks the Host header
+# against DNS rebinding (Playwright's does) refuses that name.
 forward=${VM_PORTS:-}
 cfg=$dir/ssh_config
 mark=/var/tmp/azentrius-vm.avc-mark
@@ -164,6 +167,18 @@ case ${1:-} in
     start) shift; start "$@" ;;
     image) shift; image "${1:?image: rocky-9 or rocky-10}"; echo "$name" ;;
     root) shift; [ $# -gt 0 ] || die "root: no command"; guest sudo "$@" ;;
+    back)
+        shift; [ $# -ge 1 ] || die "back: PORT..."
+        for p in "$@"; do
+            case $p in ''|*[!0-9]*) die "back: not a port: $p" ;; esac
+            # -f: in the background once the tunnel stands; it ends with the machine. Its own
+            # messages go to a file, so that no output of this step stays open.
+            if ! ssh -F "$cfg" -f -N -o ExitOnForwardFailure=yes -E "$dir/back-$p.log" \
+                    -R "127.0.0.1:$p:127.0.0.1:$p" vm < /dev/null > /dev/null; then
+                cat "$dir/back-$p.log" >&2 || true
+                die "back: no tunnel for port $p"
+            fi
+        done ;;
     copy)
         shift; [ $# -ge 2 ] || die "copy: DIR FILE..."
         to=$1; shift
@@ -185,5 +200,5 @@ case ${1:-} in
         cp "$dir/console.log" "$to/" 2> /dev/null || true
         guest sudo journalctl -b --no-pager > "$to/journal.txt" 2>&1 || true
         guest sudo cat /var/log/audit/audit.log > "$to/audit.log" 2>&1 || true ;;
-    *) sed -n '7,15p' "$0" >&2; exit 64 ;;
+    *) sed -n '7,16p' "$0" >&2; exit 64 ;;
 esac
