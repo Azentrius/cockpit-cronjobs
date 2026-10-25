@@ -628,9 +628,16 @@ with sync_playwright() as p:
     check(fails and fails == list(range(len(fails))), "failures first: " + repr(rows))
     page.locator("#sum-card").scroll_into_view_if_needed()
     page.screenshot(path=os.path.join(SHOTS, "e2e-summary.png"))
-    # the timer's runs, from the journal: failed, with what it wrote
-    page.click(f"[data-key='sum-timer:{fail_timer}.timer']")
-    wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1", timeout=30)
+    # the timer's runs, from the journal: failed, with what it wrote. systemd tells of the failure
+    # and the service's output reaches journald on its own stream, so a dialog opened right after
+    # the failure may find the run without its output yet: then it is opened again, a while later.
+    for _ in range(6):
+        page.click(f"[data-key='sum-timer:{fail_timer}.timer']")
+        wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1", timeout=30)
+        if page.locator("#runs-body [data-key^='out:']").count():
+            break
+        page.click("#runs-close-btn")
+        time.sleep(5)
     jrows = page.locator("#runs-body tbody tr").all_inner_texts()
     check(jrows and all("Fehler · Exit 1" in x for x in jrows), "the timer's runs from the journal: " + repr(jrows))
     page.locator("#runs-body [data-key^='out:']").first.click()
