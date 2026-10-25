@@ -289,12 +289,18 @@
          cronie: name; the file it opens (a link is followed, the link itself is not
            checked) must be a regular file, have mode bits (mode & 07533) == 0400
            (readable by its owner, not executable, no setuid/setgid/sticky, not
-           writable or executable by group or others), and belong to root.
+           writable or executable by group or others), and belong to root (check_open);
+           with SELinux enforcing, its context must then be an entry point of the
+           job's domain (get_security_context in security.c, "Unauthorized SELinux
+           context"), taken here as: its type is that of the files of /etc/cron.d.
        entry: { name, link: { uid } for a symbolic link, else null,
-                target: { regular, mode, uid, nlink } of what open() gets, or null when
-                it cannot be opened (a link to nothing) }
-       Reasons: name, linkOwner, broken, owner, notFile, writable, mode, links. */
-    function cronDSkip(entry, debian) {
+                target: { regular, mode, uid, nlink, type } of what open() gets, or null
+                when it cannot be opened (a link to nothing); type: its SELinux type, or
+                null when not read }
+       selinux: with cronie and SELinux enforcing, the type of the files of /etc/cron.d,
+                else null (then contexts do not count, nor does a type that is not known).
+       Reasons: name, linkOwner, broken, owner, notFile, writable, mode, links, selinux. */
+    function cronDSkip(entry, debian, selinux) {
         if (!cronDNameValid(entry.name, debian)) return "name";
         const t = entry.target;
         if (debian) {
@@ -310,6 +316,7 @@
         if (!t.regular) return "notFile";
         if ((t.mode & 0o7533) !== 0o400) return t.mode & 0o022 ? "writable" : "mode";
         if (t.uid !== 0) return "owner";
+        if (selinux && t.type && t.type !== selinux) return "selinux";
         return null;
     }
 

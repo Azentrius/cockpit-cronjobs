@@ -329,6 +329,60 @@ t("locked", () => {
     }
 });
 
+/* SYSTEM_SCRIPT, the entries of /etc/cron.d: with cronie ($1) and SELinux enforcing (getenforce)
+   the type of /etc/cron.d and of what each entry opens, the third field of its context (from a
+   stand-in for stat -L -c %C, keyed by the name; "?" and exit 1 without one, as stat does where
+   there is no context); else neither. A type it cannot tell is left empty. */
+const LIST_SCRIPT = new Function("return `" + constant(/const SYSTEM_SCRIPT = `([\s\S]*?)`;/.exec(APP), "SYSTEM_SCRIPT") + "`;")();
+function crondTypes(sh, flavor, enforce) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-crond-"));
+    ["bin", "ctx", "etc/cron.d", "etc/other"].forEach(d => fs.mkdirSync(path.join(root, d), { recursive: true }));
+    fs.writeFileSync(path.join(root, "bin", "stat"),
+        "#!/bin/sh\n" +
+        "if [ \"$3\" = %C ]; then\n" +
+        "  f=$FAKE_CTX/${4##*/}\n" +
+        "  if [ -f \"$f\" ]; then cat \"$f\"; exit 0; fi\n" +
+        "  echo '?'; exit 1\n" +
+        "fi\n" +
+        "for s in /usr/bin/stat /bin/stat; do [ -x \"$s\" ] && exec \"$s\" \"$@\"; done\n" +
+        "exit 127\n", { mode: 0o755 });
+    /* null: as if there were no getenforce (no output, exit 127), whatever this machine has */
+    fs.writeFileSync(path.join(root, "bin", "getenforce"), enforce ? "#!/bin/sh\necho " + enforce + "\n" : "#!/bin/sh\nexit 127\n",
+                     { mode: 0o755 });
+    Object.entries({ "cron.d": "system_u:object_r:system_cron_spool_t:s0", ok: "unconfined_u:object_r:system_cron_spool_t:s0",
+                     link: "unconfined_u:object_r:etc_t:s0-s0:c0.c1023", short: "user_u:object_r:admin_home_t",
+                     empty: "", odd: "a:b:c-d:s0" })
+        .forEach(([name, context]) => fs.writeFileSync(path.join(root, "ctx", name), context ? context + "\n" : ""));
+    ["ok", "short", "empty", "odd", "none"].forEach(name => fs.writeFileSync(path.join(root, "etc/cron.d", name), "0 5 1 1 * root true\n"));
+    fs.writeFileSync(path.join(root, "etc/other/target"), "0 5 1 1 * root true\n");
+    fs.symlinkSync(path.join(root, "etc/other/target"), path.join(root, "etc/cron.d/link"));
+    fs.symlinkSync(path.join(root, "etc/other/missing"), path.join(root, "etc/cron.d/broken"));
+    const text = LIST_SCRIPT.replace(/(^|[\s=])\/(etc|var\/spool)\//gm, "$1" + root + "/$2/");
+    assert.ok(!/(^|[\s=])\/(etc|var\/spool)\//m.test(text), "every path moved");
+    const r = spawnSync(sh, ["-c", text, "cockpit-cronjobs", flavor],
+                        { env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C", FAKE_CTX: path.join(root, "ctx") }, timeout: 30000 });
+    fs.rmSync(root, { recursive: true, force: true });
+    assert.strictEqual(r.status, 0, r.stderr.toString());
+    const out = { selinux: null, types: {} };
+    r.stdout.toString().split("\x1e").forEach(chunk => {
+        const d = /^d:[0-9a-f]*:\d*:[0-9a-f]*:\d*:\d*:(\w*):([^\n]*)\n/.exec(chunk);
+        if (d) out.types[d[2]] = d[1];
+        if (chunk.startsWith("selinux\n")) out.selinux = chunk.slice(8);
+    });
+    return out;
+}
+const UNKNOWN = { ok: "", short: "", empty: "", odd: "", none: "", link: "", broken: "" };
+for (const sh of SHELLS) t(sh + ": /etc/cron.d with cronie and SELinux enforcing: the types", () => {
+    assert.deepStrictEqual(crondTypes(sh, "cronie", "Enforcing"), { selinux: "system_cron_spool_t\n", types: {
+        ok: "system_cron_spool_t", short: "admin_home_t", link: "etc_t", empty: "", odd: "", none: "", broken: "" } });
+});
+for (const sh of SHELLS) t(sh + ": /etc/cron.d without SELinux enforcing or with Debian's cron: no types", () => {
+    assert.deepStrictEqual(crondTypes(sh, "cronie", "Permissive"), { selinux: null, types: UNKNOWN }, "permissive");
+    assert.deepStrictEqual(crondTypes(sh, "cronie", "Disabled"), { selinux: null, types: UNKNOWN }, "disabled");
+    assert.deepStrictEqual(crondTypes(sh, "cronie", null), { selinux: null, types: UNKNOWN }, "no getenforce");
+    assert.deepStrictEqual(crondTypes(sh, "debian", "Enforcing"), { selinux: null, types: UNKNOWN }, "Debian's cron");
+});
+
 /* CRON_LOG_SCRIPT: the newest run cron started of each command, with its end and result as
    far as cron logged them, from a stand-in for journalctl that prints what journalctl -o
    short-unix prints (in the journal's order) and notes how it was called. The lines are those

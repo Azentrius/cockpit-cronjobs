@@ -196,6 +196,10 @@
             mode: "cron skips this file because of its permissions: it must be readable by its owner and not executable, " +
                   "without setuid, setgid or sticky bit.",
             links: "cron skips this file because it has more than one hard link.",
+            selinux: (type, want) => `cron skips this file under SELinux because of its context: its type \`${type}\` ` +
+                                     `(for a link, that of its target) is not \`${want}\`, the type of the files in ` +
+                                     "`/etc/cron.d`. For a file in `/etc/cron.d`, `restorecon` sets the right type; for a link, " +
+                                     `place the file itself in \`/etc/cron.d\` or give its target that type with \`chcon -t ${want}\`.`,
         },
         usersTitle: "Other users",
         usersDesc: "Crontabs of other users that this page can only show.",

@@ -552,6 +552,13 @@ function renderCronLogHint() {
         ? alertEl("info", T.cronLogHintTitle, T.cronLogHintBody) : null);
 }
 
+/* Why cron skips an entry of /etc/cron.d (a rich text); for SELinux it names the entry's
+   type and that of the files of /etc/cron.d. */
+function ignoredWhy(sys, j) {
+    const why = T.ignoredWhy[j.ignored];
+    return typeof why === "function" ? why(codeSafe(j.selinuxType), codeSafe(sys.selinux)) : why;
+}
+
 function renderSystem() {
     renderCronLogHint();
     const sys = state.sys;
@@ -575,9 +582,9 @@ function renderSystem() {
                 h("div", { class: "cron-cell" },
                     h("div", { class: "cron-title-row" },
                         h("span", { class: "az-mono" }, j.file),
-                        j.ignored ? h("span", { class: "az-label az-label--warning", title: T.ignoredWhy[j.ignored] },
+                        j.ignored ? h("span", { class: "az-label az-label--warning", title: ignoredWhy(sys, j).replace(/`/g, "") },
                             icon("exclamation-triangle"), T.ignored) : null),
-                    j.ignored ? h("span", { class: "az-cell-sub cron-ignored-why" }, T.ignoredWhy[j.ignored]) : null)),
+                    j.ignored ? h("span", { class: "az-cell-sub cron-ignored-why" }, rich(ignoredWhy(sys, j))) : null)),
             h("td", { class: "az-nowrap", "data-label": T.colSchedule },
                 j.schedule ? scheduleCell(j.schedule, j.tz) : h("span", { class: "cron-muted" }, "—")),
             h("td", { class: "az-nowrap", "data-label": T.colUser }, j.user || h("span", { class: "cron-muted" }, "—")),
