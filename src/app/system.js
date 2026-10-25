@@ -564,14 +564,18 @@ function removeRuns(user, id) {
    waits for the job, and a failure or end must come from that one. A PID belongs to its run
    only while the run goes on: until its end, or another boot ("-- Boot" between the lines),
    so a PID used again later (by what feeds a job what follows a %, which logs no start and
-   may die of SIGPIPE) is not the old run's. Only messages of root (_UID 0, which
-   journald sets itself, so no other user can log a run for it) as CRON (Debian's cron) or
-   CROND (cronie) count. Not by _COMM: journald reads that from /proc when it takes the
-   message, and the job's process logs its start right before it becomes the shell. One line
-   for each command, "START END RESULT (USER) CMD (COMMAND)": seconds, END and RESULT
-   ("exit:N", "signal:N") "-" when not logged; nothing without journalctl. */
+   may die of SIGPIPE) is not the old run's. When PAM does not let cronie start a job (a line
+   of /etc/environment pam_env cannot read, for one), it logs "(USER) FAILED to authorize user
+   with PAM (REASON)", as crond: the process that would start the job, before it calls itself
+   CROND. A start of a job of USER after that says PAM lets it start them again. Only messages
+   of root (_UID 0, which journald sets itself, so no other user can log a run for it) as CRON
+   (Debian's cron), CROND or crond (cronie) count. Not by _COMM: journald reads that from /proc
+   when it takes the message, and the job's process logs its start right before it becomes the
+   shell. One line for each command, "START END RESULT (USER) CMD (COMMAND)": seconds, END and
+   RESULT ("exit:N", "signal:N") "-" when not logged; and one for each user whose newest refusal
+   no start of theirs followed, "PAM TIME (USER) (REASON)"; nothing without journalctl. */
 const CRON_LOG_SCRIPT = `command -v journalctl > /dev/null 2>&1 || exit 0
-journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND 2>/dev/null |
+journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND SYSLOG_IDENTIFIER=crond 2>/dev/null |
   awk '
   # "(USER) CMD (COMMAND)" of message m, whose event is ev; n the PID before COMMAND, or ""
   function job(m, ev,   j, c) {
@@ -600,6 +604,8 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
     c = split(open[k], a, " ")
     if (c > 0 && c <= amb[k]) { for (i = 1; i <= c; i++) close1(k, a[i], t); amb[k] = 0 }
   }
+  # refused[USER]: when PAM last refused a job of USER, with no start of theirs since; why[USER] its reason
+  BEGIN { pam = ") FAILED to authorize user with PAM (" }
   /^-- / {
     if ($0 ~ /Boot|Reboot/) {
       for (x in key) forget(x)
@@ -623,6 +629,11 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
       last[k] = n; when[k] = t[1]; key[n] = k
       delete fin[k]; delete res[k]
       opened(k, n)
+      delete refused[substr(m, 2, index(m, ")") - 2)]
+    } else if (m ~ /^[(][^()]*[)] FAILED to authorize user with PAM [(].*[)]$/) {
+      u = substr(m, 2, index(m, ")") - 2)
+      refused[u] = t[1]
+      why[u] = substr(m, index(m, pam) + length(pam), length(m) - index(m, pam) - length(pam))
     } else if (m ~ /^[(]CRON[)] error [(]grandchild #[0-9]+ (failed with exit status|terminated by signal) [0-9]+/) {
       split(m, w, " ")
       n = substr(w[4], 2)
@@ -654,12 +665,17 @@ journalctl --no-pager -o short-unix --since -35d _UID=0 SYSLOG_IDENTIFIER=CRON S
       if (k in res) r = res[k]
       print when[k] " " e " " r " " k
     }
+    for (u in refused) print "PAM " refused[u] " (" u ") (" why[u] ")"
   }'
 `;
 
+/* -> { runs: C.parseCronLog, refused: C.parsePamRefusals } */
 export function readCronLog() {
     return spawn(["sh", "-c", CRON_LOG_SCRIPT], Object.assign({}, SPAWN_ROOT, { binary: true }))
-        .then(out => C.parseCronLog(decode(out)));
+        .then(out => {
+            const text = decode(out);
+            return { runs: C.parseCronLog(text), refused: C.parsePamRefusals(text) };
+        });
 }
 
 /* Sets ($2 on) or clears ($2 off) the file no-overlap in a job's directory of runs ($1),

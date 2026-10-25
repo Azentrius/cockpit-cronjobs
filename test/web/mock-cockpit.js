@@ -129,6 +129,9 @@
         /* cron's log: [seconds ago, user, command as cron logs it, end (seconds ago) or null, "exit:N",
            "signal:N" or null], the newest start of each; null: unreadable */
         cronLog: [[1800, "root", "cd / && run-parts --report /etc/cron.hourly"]],
+        /* in that log, the users whose jobs PAM refused (cronie), no job of theirs started since:
+           [seconds ago, user, PAM's reason as cron logs it] */
+        cronRefused: [],
         cronLogReads: 0,
         /* how long each next read of cron's log takes (ms), in order; then M.delay */
         cronLogDelays: [],
@@ -359,12 +362,14 @@
             const bytes = new TextEncoder().encode(M.root);
             return opts.binary ? (M.latin1 ? bytes.map(b => b === 0x01 ? 0xE9 : b) : bytes) : M.root;
         }
-        /* cron's log in the journal (CRON_LOG_SCRIPT): the newest run of each command */
+        /* cron's log in the journal (CRON_LOG_SCRIPT): the newest run of each command, then whose
+           jobs PAM refuses */
         if (/SYSLOG_IDENTIFIER=CRON /.test(script)) {
             M.cronLogReads++;
             if (M.cronLog === null) fail({ exit_status: 1, problem: null, message: "journal unreadable" });
             return M.cronLog.map(([ago, user, command, endAgo, result]) =>
-                `${now() - ago} ${endAgo === undefined || endAgo === null ? "-" : now() - endAgo} ${result || "-"} (${user}) CMD (${command})\n`).join("");
+                `${now() - ago} ${endAgo === undefined || endAgo === null ? "-" : now() - endAgo} ${result || "-"} (${user}) CMD (${command})\n`).join("") +
+                M.cronRefused.map(([ago, user, reason]) => `PAM ${now() - ago} (${user}) (${reason})\n`).join("");
         }
         /* Whether a job may overlap its previous run (NO_OVERLAP_SCRIPT): the directory, on or off */
         if (/: > "\$1\/no-overlap"/.test(script)) {

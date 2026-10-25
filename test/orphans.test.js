@@ -418,10 +418,55 @@ for (const sh of SHELLS) t(sh + ": cron's log: the newest run of each command, i
     assert.deepStrictEqual(C.lastRun(log, "root", "/usr/local/bin/fail.sh"),
                            { start: 1792503800000, end: 1792503801000, result: { exit: 3 } }, "with the PID");
     assert.strictEqual(C.lastStart(log, "root", "[ -x /usr/bin/foo ] && foo"), 1792503780000);
-    /* only messages of root (_UID, which journald sets) as CRON or CROND; not by _COMM, which journald
-       may read after the job's process became its shell */
+    /* only messages of root (_UID, which journald sets) as CRON, CROND or crond; not by _COMM, which
+       journald may read after the job's process became its shell */
     assert.deepStrictEqual(fs.readFileSync(path.join(root, "args"), "utf8").trim().split(" ").filter(a => /^[-_A-Z]/.test(a)),
-                           ["--no-pager", "-o", "--since", "-35d", "_UID=0", "SYSLOG_IDENTIFIER=CRON", "SYSLOG_IDENTIFIER=CROND"]);
+                           ["--no-pager", "-o", "--since", "-35d", "_UID=0", "SYSLOG_IDENTIFIER=CRON", "SYSLOG_IDENTIFIER=CROND",
+                            "SYSLOG_IDENTIFIER=crond"]);
+    assert.deepStrictEqual(C.parsePamRefusals(r.stdout.toString()), [], "no refusal in that log");
+});
+
+/* cronie 1.7.0 with Linux-PAM that reads /etc/environment with libeconf (Rocky Linux 10): a line
+   pam_env cannot read makes PAM refuse every job, logged as crond (the process that would start the
+   job, before it calls itself CROND). A user's refusal counts until a job of theirs starts; another
+   boot changes nothing; the lines around it are read as before. */
+for (const sh of SHELLS) t(sh + ": cron's log: whose jobs PAM refused, until a job of theirs starts", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-log-"));
+    fs.mkdirSync(path.join(root, "bin"));
+    const refuse = (sec, pid, user, reason) =>
+        `${sec}.5 host crond[${pid}]: pam_env(crond:setcred): Unable to read configuration file /etc//environment line 3: Missing delimiter\n` +
+        `${sec}.5 host crond[${pid}]: (${user}) PAM ERROR (${reason})\n` +
+        `${sec}.5 host crond[${pid}]: (${user}) FAILED to authorize user with PAM (${reason})\n`;
+    fs.writeFileSync(path.join(root, "bin", "journalctl"), "#!/bin/sh\ncat <<'EOF'\n" +
+        "1792800000.1 host crond[700]: (CRON) STARTUP (1.7.0)\n" +
+        "1792800060.1 host CROND[7001]: (root) CMD (/usr/bin/true)\n" +
+        "1792800061.1 host CROND[7000]: (root) CMDEND (/usr/bin/true)\n" +
+        refuse(1792800120, 7040, "root", "Critical error - immediate abort") +
+        refuse(1792800120, 7041, "alice", "Critical error - immediate abort") +
+        /* www-data: refused, then a job of theirs starts again */
+        refuse(1792800180, 7050, "www-data", "Critical error - immediate abort") +
+        "1792800240.1 host CROND[7061]: (www-data) CMD (php -f /var/www/cron.php)\n" +
+        "-- Boot 0123456789abcdef0123456789abcdef --\n" +
+        /* root: refused again, for another reason; alice's refusal stays over the boot */
+        refuse(1792800300, 7070, "root", "Permission denied") +
+        /* a start whose command looks like a refusal is a start; a refusal without a reason is none */
+        "1792800360.1 host CROND[7081]: (bob) CMD (echo ') FAILED to authorize user with PAM (x)')\n" +
+        "1792800420.1 host crond[7090]: (carol) FAILED to authorize user with PAM\n" +
+        "EOF\n", { mode: 0o755 });
+    const r = spawnSync(sh, ["-c", LOG_SCRIPT], { env: { PATH: path.join(root, "bin") + ":/usr/bin:/bin", LC_ALL: "C" }, timeout: 30000 });
+    assert.strictEqual(r.status, 0, r.stderr.toString());
+    assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), [
+        "1792800060 1792800061 - (root) CMD (/usr/bin/true)",
+        "1792800240 - - (www-data) CMD (php -f /var/www/cron.php)",
+        "1792800360 - - (bob) CMD (echo ') FAILED to authorize user with PAM (x)')",
+        "PAM 1792800120 (alice) (Critical error - immediate abort)",
+        "PAM 1792800300 (root) (Permission denied)",
+    ], "the newest refusal of each user no start of theirs followed, with PAM's reason; the runs as before");
+    assert.deepStrictEqual(C.parsePamRefusals(r.stdout.toString()), [
+        { user: "root", at: 1792800300000, reason: "Permission denied" },
+        { user: "alice", at: 1792800120000, reason: "Critical error - immediate abort" },
+    ]);
+    assert.strictEqual(C.parseCronLog(r.stdout.toString()).size, 3, "the PAM lines are no runs");
 });
 
 /* A PID used again after its run (by what feeds a job its input after %, which logs no start and

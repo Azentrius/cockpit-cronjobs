@@ -84,6 +84,21 @@ t("the hint's line for systemd sets the whole option", () => {
     });
 });
 
+/* The notice that PAM refuses cron's jobs: the users with PAM's reasons and when go in unchanged,
+   and it says where to look (crond's journal) and what is a common cause, as code. */
+t("the notice on PAM refusing jobs names who, why, when and where to look", () => {
+    LANGS.forEach(l => {
+        const ui = texts[l].ui;
+        const who = ui.pamRefusedUser("root", "Critical error - immediate abort");
+        assert.strictEqual(who, "root (Critical error - immediate abort)", l);
+        const body = ui.pamRefusedBody(who + " " + ui.pamRefusedMore(3), "WHEN");
+        assert.ok(body.includes(who + " ") && body.includes("WHEN"), l + ": " + body);
+        assert.ok(body.includes("`journalctl -t crond`") && body.includes("`/etc/environment`") && body.includes("`export`"), l);
+        assert.ok(ui.pamRefusedMore(3).includes("3") && ui.pamRefusedMore(1).includes("1") &&
+                  ui.pamRefusedMore(1) !== ui.pamRefusedMore(3).replace("3", "1"), l + ": one and more");
+    });
+});
+
 t("locales", () => {
     assert.strictEqual(texts.de.locale, "de-DE");
     assert.strictEqual(texts.en.locale, "en-US");

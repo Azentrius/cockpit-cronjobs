@@ -389,6 +389,27 @@
         return out;
     }
 
+    /* The lines "PAM TIME (USER) (REASON)" of CRON_LOG_SCRIPT: the users whose jobs PAM refused
+       (cronie logs "(USER) FAILED to authorize user with PAM (REASON)") and of whom no job started
+       after the newest refusal, TIME its seconds -> [{ user, at (ms), reason }], root first, then by
+       name. Names and reasons come from the log: names of up to 64 characters, reasons cut to
+       REASON_MAX. Other lines are left out. */
+    const REASON_MAX = 120;
+    function parsePamRefusals(text) {
+        const byUser = new Map();
+        String(text || "").split("\n").forEach(line => {
+            const m = /^PAM (\d{1,12}) \(([^()\s]{1,64})\) \((.*)\)$/.exec(line);
+            if (!m) return;
+            const chars = Array.from(m[3]);
+            const reason = chars.length > REASON_MAX ? chars.slice(0, REASON_MAX - 1).join("") + "…" : m[3];
+            const at = Number(m[1]) * 1000;
+            if (!byUser.has(m[2]) || byUser.get(m[2]).at < at) byUser.set(m[2], { user: m[2], at, reason });
+        });
+        const rank = u => u === "root" ? 0 : 1;
+        return Array.from(byUser.values())
+            .sort((a, b) => rank(a.user) - rank(b.user) || (a.user < b.user ? -1 : a.user > b.user ? 1 : 0));
+    }
+
     /* The newest run cron started of command for user, in log (parseCronLog), or null. */
     function lastRun(log, user, command) {
         if (!log || !user || !command) return null;
@@ -1102,7 +1123,7 @@
         parseUserCrontab, serializeUserCrontab, roundTrips, normalizeText, templateEnd,
         setEnabled, setJob, newJob, rawLine, entryLine,
         parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
-        mkprints, loggedCommand, parseCronLog, lastRun, lastStart, cronLogs, cronLogOutcome, signalName,
+        mkprints, loggedCommand, parseCronLog, parsePamRefusals, lastRun, lastStart, cronLogs, cronLogOutcome, signalName,
         parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, captureJobs, jobName, slug,
         cksum,

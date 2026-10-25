@@ -223,5 +223,6 @@ export const state = {
     runs: { status: "none", byId: {} },     /* none | ok | denied | error; rootVersion: see setCrontab */
     timers: { status: "none", list: [] },   /* none | ok | error */
     cronLog: null,   /* the newest run cron started of each command (C.parseCronLog), null when not read */
+    cronRefused: [],   /* the users whose jobs PAM refuses, by cron's log (C.parsePamRefusals) */
     suAtLoad: undefined,
 };

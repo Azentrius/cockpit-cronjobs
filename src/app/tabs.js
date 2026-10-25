@@ -51,7 +51,7 @@ export function hiddenBesidesTabs(el) {
    tab, then a part of it, by the element to scroll to.
      #/overview/results   the latest results, failures first   (failed)
      #/overview/crontab   the root crontab, the other users' after it   (unrecorded)
-     #/overview/notices   the notices, such as "cron is not running"   (cron)
+     #/overview/notices   the notices, such as "cron is not running" or that PAM refuses its jobs   (cron)
    and #/overview/next, #/system/users and every tab by its name. Cockpit keeps a loaded page
    and, when the board jumps to it again, only changes its address (locationchanged). So every
    address shows its tab at once and scrolls to its part once, when the page has loaded and is
