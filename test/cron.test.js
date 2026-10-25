@@ -557,21 +557,64 @@ t("env files read the way pam_env reads them", () => {
 t("cron's environment model: Debian, Ubuntu (-P), cronie", () => {
     const files = { "/etc/environment": "PATH=\"/usr/local/sbin:/usr/bin:/snap/bin\"\nhttp_proxy=http://p:1\n",
                     "/etc/default/locale": "LANG=de_DE.UTF-8\n" };
-    const debian = C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f", pam: PAM_DEBIAN, files });
+    /* what systemd gives services, as `systemctl show-environment` prints it on Rocky Linux 9 */
+    const managerEnv = { LANG: "en_US.UTF-8", PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin" };
+    const debian = C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f", pam: PAM_DEBIAN, files, managerEnv, systemd: true });
     assert.deepStrictEqual(debian, { pam: { PATH: "/usr/local/sbin:/usr/bin:/snap/bin", http_proxy: "http://p:1", LANG: "de_DE.UTF-8" },
-                                     path: "/usr/bin:/bin", user: false });
+                                     passed: {}, path: "/usr/bin:/bin", user: false, logind: false },
+                           "Debian's cron passes on nothing of its own, and its PAM service opens no logind session");
     const ubuntu = C.cronEnvModel({ flavor: "debian", pam: PAM_DEBIAN, files,
                                     args: "{ path=/usr/sbin/cron ; argv[]=/usr/sbin/cron -f -P $EXTRA_OPTS ; ignore_errors=no }" });
     assert.strictEqual(ubuntu.path, null, "-P in the unit: no default");
     assert.strictEqual(C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -fP" }).path, null, "-fP");
     assert.strictEqual(C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f -L 15" }).path, "/usr/bin:/bin");
     const cronie = C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n", pam: PAM_CRONIE, files });
-    assert.deepStrictEqual(cronie, { pam: { PATH: "/usr/local/sbin:/usr/bin:/snap/bin", http_proxy: "http://p:1" },
-                                     path: "/usr/bin:/bin:/usr/sbin:/sbin", user: true });
-    assert.strictEqual(C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n -P", managerPath: "/x:/y" }).path, "/x:/y",
+    assert.deepStrictEqual(cronie, { pam: { PATH: "/usr/local/sbin:/usr/bin:/snap/bin", http_proxy: "http://p:1" }, passed: {},
+                                     path: "/usr/bin:/bin:/usr/sbin:/sbin", user: true, logind: false });
+    assert.strictEqual(C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n -P", managerEnv: { PATH: "/x:/y" } }).path, "/x:/y",
                        "cronie -P: its own PATH");
     assert.deepStrictEqual(C.cronEnvModel({ flavor: "debian", pam: { cron: "session required pam_env.so readenv=0" }, files }).pam, {},
                            "readenv=0");
+});
+t("cronie's default PATH by its version", () => {
+    assert.strictEqual(C.croniePath("1.5.7"), "/usr/bin:/bin", "Rocky Linux 9: _PATH_DEFPATH");
+    assert.strictEqual(C.croniePath("1.5.2"), "/usr/bin:/bin");
+    assert.strictEqual(C.croniePath("1.6.1"), "/usr/bin:/bin", "the change came after 1.6.1");
+    assert.strictEqual(C.croniePath("1.7.0"), "/usr/bin:/bin:/usr/sbin:/sbin", "Rocky Linux 10: _PATH_STDPATH");
+    assert.strictEqual(C.croniePath("1.7.2"), "/usr/bin:/bin:/usr/sbin:/sbin");
+    assert.strictEqual(C.croniePath("1.10.0"), "/usr/bin:/bin:/usr/sbin:/sbin");
+    assert.strictEqual(C.croniePath("2.0"), "/usr/bin:/bin:/usr/sbin:/sbin");
+    assert.strictEqual(C.croniePath(""), "/usr/bin:/bin:/usr/sbin:/sbin", "not known: the newer");
+    assert.strictEqual(C.croniePath("1.5x"), "/usr/bin:/bin:/usr/sbin:/sbin", "not a version: the newer");
+    const model = v => C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n", version: v });
+    assert.strictEqual(model("1.5.7").path, "/usr/bin:/bin");
+    assert.strictEqual(model("1.7.0").path, "/usr/bin:/bin:/usr/sbin:/sbin");
+    assert.strictEqual(C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f", version: "1.7.0" }).path, "/usr/bin:/bin",
+                       "Debian's cron has its own");
+});
+t("cronie passes on the locale of its own environment, which systemd gives it", () => {
+    const managerEnv = { LANG: "en_US.UTF-8", LC_TIME: "de_DE.UTF-8", LANGUAGE: "en_US:en", PATH: "/usr/local/bin:/usr/bin",
+                         RANDOM_DELAY: "5", FOO: "bar", LC_FAKE: "x" };
+    assert.deepStrictEqual(C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n", managerEnv }).passed,
+                           { LANG: "en_US.UTF-8", LC_TIME: "de_DE.UTF-8", LANGUAGE: "en_US:en", RANDOM_DELAY: "5" },
+                           "the names of env_set_from_environ, nothing else");
+    assert.deepStrictEqual(C.cronEnvModel({ flavor: "debian", args: "/usr/sbin/cron -f", managerEnv }).passed, {});
+    assert.deepStrictEqual(C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n" }).passed, {}, "without systemd: not known");
+});
+t("a logind session for every job: pam_systemd in the session stack of cron's PAM service, with systemd", () => {
+    const logind = (pam, flavor, systemd) => C.cronEnvModel({ flavor: flavor || "cronie", pam, systemd: systemd !== false }).logind;
+    assert.strictEqual(logind(PAM_CRONIE), true, "password-auth: -session optional pam_systemd.so");
+    assert.strictEqual(logind(PAM_CRONIE, "cronie", false), false, "no systemd: pam_systemd opens nothing");
+    assert.strictEqual(logind(PAM_DEBIAN, "debian"), false, "Debian: common-session-noninteractive has none");
+    assert.strictEqual(logind({ cron: "@include common-session\n", "common-session": "session optional pam_systemd.so\n" }, "debian"),
+                       true, "Debian's cron with common-session opens one too");
+    assert.strictEqual(logind({ crond: "auth include system-auth\n", "system-auth": "-session optional pam_systemd.so\n" }), false,
+                       "included for auth only: not in the session stack");
+    assert.strictEqual(logind({ crond: "session substack system-auth\n",
+                                "system-auth": "-session optional /usr/lib64/security/pam_systemd.so\n" }), true, "a path, a substack");
+    assert.strictEqual(logind({ crond: "session optional pam_systemd_home.so\n# session optional pam_systemd.so\n" }), false,
+                       "another module, a comment");
+    assert.strictEqual(logind(PAM_CRONIE, "debian"), false, "Debian's cron reads cron, not crond");
 });
 t("the environment of a job: PAM's, overridden by the crontab's and cron's own", () => {
     const model = { pam: { PATH: "/from/pam", LANG: "C.UTF-8", SHELL: "/bin/zsh", LOGNAME: "x", http_proxy: "p" }, path: null, user: false };
@@ -585,6 +628,12 @@ t("the environment of a job: PAM's, overridden by the crontab's and cron's own",
                            { SHELL: "/bin/sh", HOME: "/root", PATH: "/usr/bin:/bin", LOGNAME: "root" }, "no model: Debian's cron");
     assert.strictEqual(C.jobEnvironment({}, null, "nobody").HOME, "/", "no home known: /");
     assert.strictEqual(C.jobEnvironment({ HOME: "/srv" }, "/var/www", "www-data").HOME, "/srv", "the crontab's HOME wins");
+    const cronie = { pam: { LANG: "C.UTF-8", LC_ALL: "C", X: "pam" }, passed: { LANG: "en_US.UTF-8", LC_TIME: "de_DE.UTF-8" },
+                     path: "/usr/bin:/bin", user: true };
+    assert.deepStrictEqual(C.jobEnvironment({ LC_TIME: "C" }, "/home/u", "u", cronie),
+                           { LANG: "en_US.UTF-8", LC_ALL: "C", X: "pam", LC_TIME: "C", SHELL: "/bin/sh", HOME: "/home/u",
+                             PATH: "/usr/bin:/bin", LOGNAME: "u", USER: "u" },
+                           "cronie's own locale over PAM's, the crontab's over both (build_env, load_user)");
 });
 
 /* ---------- recording wrapper lines ---------- */
