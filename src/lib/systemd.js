@@ -181,11 +181,12 @@
 
     /* Output of `LC_ALL=C systemd-analyze calendar --iterations=N SPEC` -> instants (ms).
        Each run is printed in local time; when the local zone is not UTC a "(in UTC)"
-       line follows, otherwise the local time is UTC already. */
+       line follows, otherwise the local time is UTC already. The runs after the next are
+       "Iteration #N" or, up to systemd 252, "Iter. #N". */
     function parseAnalyzeCalendar(text) {
         const out = [];
         String(text || "").split("\n").forEach(line => {
-            let m = /^\s*(?:Next elapse|Iteration #\d+):\s+\S+\s+(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\b/.exec(line);
+            let m = /^\s*(?:Next elapse|Iter(?:ation|\.) #\d+):\s+\S+\s+(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\b/.exec(line);
             if (m) { out.push(utcOf(m)); return; }
             m = /^\s*\(in UTC\):\s+\S+\s+(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d) UTC\s*$/.exec(line);
             if (m && out.length) out[out.length - 1] = utcOf(m);
