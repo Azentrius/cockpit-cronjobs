@@ -467,6 +467,18 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
 - Missed runs are found for jobs that record their runs, and only on the page, not in the status.
 - The status names failed jobs of the crontabs that do not record their runs, and timers converted from
   another user's crontab, only in number: their only names are a command or begin with the user's.
+- On the RHEL rebuilds, which the end-to-end test covers in Rocky Linux 9 and 10 with SELinux
+  enforcing, the page does not know everything yet:
+  - With SELinux, cronie skips a file of `/etc/cron.d` whose context its job may not enter, such as a
+    link to a file elsewhere in `/etc` (`etc_t`); crond logs "Unauthorized SELinux context" for it, but
+    the page shows the file as read.
+  - The environment of run now and of a converted job differs from cron's: cronie opens a logind
+    session for every job (`XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and more,
+    from `pam_systemd`), and its `PATH` and `LANG` are not the ones the page gives.
+  - Where Linux-PAM reads `/etc/environment` with libeconf (Rocky Linux 10), `export` is not allowed,
+    single quotes stay and the space before a `#` goes; a line pam_env cannot read makes PAM refuse
+    every cron job (crond logs "FAILED to authorize user with PAM"), and the page does not warn about
+    that.
 - BusyBox cron (Alpine) is not supported. The packages are tested on Debian 13, Fedora 43, Rocky
   Linux and AlmaLinux 9 and 10; installing them on Ubuntu, RHEL itself or openSUSE is untested.
 - English and German only (see [Translations](#translations)).
