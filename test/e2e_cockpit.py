@@ -13,12 +13,21 @@ Only for a throwaway machine or container, e.g.:
 
 Runs as root (the local session is root's). CI runs it the same way on the runner's
 throwaway VM, with the Cockpit of Ubuntu 24.04 and cron as installed, and with the Cockpit
-of its backports and cron at -L 15 (job e2e-cockpit in .github/workflows/test.yml)."""
+of its backports and cron at -L 15 (job e2e-cockpit in .github/workflows/test.yml); and with
+cronie and the package in Rocky Linux 9 and 10 VMs with SELinux enforcing (job e2e-el), where
+the browser stays on the runner: PLAYWRIGHT_WS names its Playwright server."""
 import json, os, pwd, re, shutil, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
 if os.environ.get("CRONJOBS_E2E_DESTRUCTIVE") != "1":
     sys.exit("refusing to run: set CRONJOBS_E2E_DESTRUCTIVE=1 on a throwaway machine")
+
+# Debian's cron or cronie (Fedora, RHEL and its rebuilds), told apart as the page does
+# (BASICS_SCRIPT in src/app/system.js), and the unit that runs it.
+CRONIE = os.access("/usr/sbin/crond", os.X_OK) or not os.path.exists("/etc/debian_version")
+CRON_UNIT = "crond" if CRONIE else "cron"
+# Both log the jobs they start: Debian's cron as CRON, cronie as CROND.
+CRON_IDS = "SYSLOG_IDENTIFIER=CRON SYSLOG_IDENTIFIER=CROND"
 
 URL = os.environ.get("COCKPIT_URL", "http://127.0.0.1:9091/cockpit/@localhost/cronjobs/index.html")
 WRAP = "/usr/local/libexec/cockpit-cronjobs-run"
@@ -135,20 +144,23 @@ sh(f"crontab -u {USER} -", input=USER_TAB)
 if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
     sys.exit("cron is not running")
 
-# One entry in /etc/cron.d per rule of Debian's cron (see C.cronDSkip), created now so
+# One entry in /etc/cron.d per rule of the cron that runs (see C.cronDSkip), created now so
 # that cron has read them by the end: name -> (reason the page gives, what cron logs).
+# Debian's cron checks a link's owner, then the target's owner, type, write bits and hard
+# links; cronie follows a link unchecked, then wants a regular file of root's with
+# (mode & 07533) == 0400 (check_open in its database.c), so it skips an executable one too.
 CROND_DIR = "/etc/cron.d"
 CROND_SRC = "/etc/cj-e2e"
 CROND = {
     "cj-e2e-ok": (None, None),
-    "cj-e2e-exec": (None, None),
+    "cj-e2e-exec": ("mode", "BAD FILE MODE") if CRONIE else (None, None),
     "cj-e2e-link": (None, None),
-    "cj-e2e-linkuser": ("linkOwner", "WRONG SYMLINK OWNER"),
-    "cj-e2e-broken": ("broken", "CAN'T OPEN SYMLINK"),
+    "cj-e2e-linkuser": (None, None) if CRONIE else ("linkOwner", "WRONG SYMLINK OWNER"),
+    "cj-e2e-broken": ("broken", "CAN'T OPEN") if CRONIE else ("broken", "CAN'T OPEN SYMLINK"),
     "cj-e2e-owner": ("owner", "WRONG FILE OWNER"),
-    "cj-e2e-dir": ("notFile", "NOT A REGULAR FILE"),
-    "cj-e2e-writable": ("writable", "INSECURE MODE"),
-    "cj-e2e-hard": ("links", "NUMBER OF HARD LINKS > 1"),
+    "cj-e2e-dir": ("notFile", "NOT REGULAR") if CRONIE else ("notFile", "NOT A REGULAR FILE"),
+    "cj-e2e-writable": ("writable", "BAD FILE MODE") if CRONIE else ("writable", "INSECURE MODE"),
+    "cj-e2e-hard": (None, None) if CRONIE else ("links", "NUMBER OF HARD LINKS > 1"),
 }
 crond_since = int(time.time())
 sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
@@ -177,7 +189,9 @@ crond_file(f"{CROND_DIR}/cj-e2e-hard")
 os.link(f"{CROND_DIR}/cj-e2e-hard", f"{CROND_SRC}/hard")
 
 with sync_playwright() as p:
-    browser = p.chromium.launch()
+    # In a VM the browser runs on the CI runner (python -m playwright run-server), the test here.
+    ws = os.environ.get("PLAYWRIGHT_WS")
+    browser = p.chromium.connect(ws) if ws else p.chromium.launch()
     ctx = browser.new_context(viewport={"width": 1280, "height": 900})
     ctx.add_cookies([{"name": "CockpitLang", "value": "de-de", "url": URL}])
     page = ctx.new_page()
@@ -395,7 +409,7 @@ with sync_playwright() as p:
 
     # cron's environment, all of it: the same command from cron, with run now and as a converted
     # unit sees the same user, directory and variables (PAM's from /etc/environment and the
-    # locale, the crontab's, cron's own; no USER from Debian's cron)
+    # locale, the crontab's, cron's own; USER from cronie, none from Debian's cron)
     start = crontab()
     sh("rm -f /tmp/cj-e2e-root-cron /tmp/cj-e2e-root-out")
     clear_of_cron_check()
@@ -411,18 +425,24 @@ with sync_playwright() as p:
     wait_idle(page)
     by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
     check(by_cron[0] == "root" and by_cron[1] == "/root" and by_cron[2].get("CJ_E2E_EXPORT") == "quoted value" and
-          "USER" not in by_cron[2], "cron ran the job as root with /etc/environment: " + repr(by_cron))
+          by_cron[2].get("USER") == ("root" if CRONIE else None), "cron ran the job as root with /etc/environment: " + repr(by_cron))
     # cron's log: the page finds that run of the jobs, which do not record their runs, by the
-    # command as Debian's cron logs it. In CI once with -L 15 (start, end, failure, the job's PID
-    # before the command): then how they ended; else only when they started, and a hint on -L.
-    cron_pid = sh("systemctl show -p MainPID --value cron").stdout.strip()
-    logs_all = bool(re.search(r"(^| )-L ?15( |$)", (read(f"/proc/{cron_pid}/cmdline") or "").replace("\0", " ")))
+    # command as cron logs it. Debian's cron in CI once with -L 15 (start, end, failure, the job's
+    # PID before the command): then how they ended; else only when they started, and a hint on -L.
+    # cronie logs every start and end (CMDEND), never a result: they ended, no more, and no hint.
+    cron_pid = sh(f"systemctl show -p MainPID --value {CRON_UNIT}").stdout.strip()
+    logs_all = not CRONIE and bool(re.search(r"(^| )-L ?15( |$)", (read(f"/proc/{cron_pid}/cmdline") or "").replace("\0", " ")))
     deadline = time.time() + 30
     while time.time() < deadline:
-        journal = sh("journalctl SYSLOG_IDENTIFIER=CRON --no-pager -q -o cat --since -3min").stdout
-        if "exit 3 # cj-e2e-root-fail)" in journal and "exit 5 # cj-e2e-crond-fail)" in journal and (not logs_all or (
-                re.search(r"\) END \(\[\d+\] \{ id -un", journal) and "failed with exit status 3" in journal and
-                "failed with exit status 5" in journal)):
+        journal = sh(f"journalctl {CRON_IDS} --no-pager -q -o cat --since -3min").stdout
+        done = "exit 3 # cj-e2e-root-fail)" in journal and "exit 5 # cj-e2e-crond-fail)" in journal
+        if CRONIE:
+            done = (done and "CMDEND (exit 3 # cj-e2e-root-fail)" in journal and "CMDEND (exit 5 # cj-e2e-crond-fail)" in journal and
+                    re.search(r"\) CMDEND \(\{ id -un", journal))
+        elif logs_all:
+            done = (done and re.search(r"\) END \(\[\d+\] \{ id -un", journal) and "failed with exit status 3" in journal and
+                    "failed with exit status 5" in journal)
+        if done:
             break
         time.sleep(2)
     page.click("#reload")
@@ -430,7 +450,7 @@ with sync_playwright() as p:
     started = row_of(page, "cj-e2e-root-cron").locator("td[data-last]").inner_text()
     failed = row_of(page, "cj-e2e-root-fail").locator("td[data-last]").inner_text()
     sums = page.locator("#sum-body tbody tr").all_inner_texts() if page.locator("#sum-card").is_visible() else []
-    said = "\n" + sh("journalctl SYSLOG_IDENTIFIER=CRON --no-pager -q -o short-unix -n 12").stdout
+    said = "\n" + sh(f"journalctl {CRON_IDS} --no-pager -q -o short-unix -n 12").stdout
     page.click("#tab-system")
     hint = page.inner_text("#cronlog-hint")
     crond_row = page.locator("#crond-body tbody tr", has_text="cj-e2e-crondfail").inner_text()
@@ -442,6 +462,11 @@ with sync_playwright() as p:
         check(any("cj-e2e-root-fail" in x and "Fehler · Exit 3" in x and "root-Crontab · Log von cron" in x for x in sums) and
               any("cj-e2e-crond-fail" in x and "Fehler · Exit 5" in x and "/etc/cron.d/cj-e2e-crondfail · Log von cron" in x for x in sums),
               "cron at -L 15: the failures in the latest results: " + repr(sums))
+    elif CRONIE:
+        check("Beendet" in started and "Beendet" in failed and "Fehler" not in failed and "Beendet" in crond_row and
+              "Fehler" not in crond_row and not hint.strip(),
+              "cronie: every run ended, from its log, but not how; no hint on -L: " + repr((started, failed, crond_row, hint)) + said)
+        check(not any("Log von cron" in x for x in sums), "cronie: nothing from its log in the latest results: " + repr(sums))
     else:
         check("Nicht erfasst" in started and "gestartet" in started and "gestartet" in failed and "Fehler" not in failed and
               "Fehler" not in crond_row and "-L 15" in hint, "cron as installed: the last start from its log, and a hint: " +
@@ -642,21 +667,21 @@ with sync_playwright() as p:
               f"the status ({lang}) as a user without rights: " + out)
 
     # cron stopped: the status says so, as a danger since the crontabs have jobs, and so does the page
-    sh("systemctl stop cron")
+    sh(f"systemctl stop {CRON_UNIT}")
     sh("systemctl start cockpit-cronjobs-status.service")
     rc, doc, out = status_as_nobody("en")
     cron_item = status_item(doc, "cron")
     check(doc.get("state") == "danger" and cron_item.get("state") == "danger" and cron_item.get("value") == "stopped" and
-          cron_item.get("detail") == "cron.service is not running, so no cron job starts." and
+          cron_item.get("detail") == f"{CRON_UNIT}.service is not running, so no cron job starts." and
           doc.get("summary", "").startswith("The cron service is not running, so no cron job starts."),
           "the status with cron stopped: " + out)
     page.click("#reload")
     wait_idle(page)
     check("Der cron-Dienst läuft nicht" in page.inner_text("#notices"), "the page with cron stopped: " + page.inner_text("#notices"))
-    sh("systemctl start cron")
+    sh(f"systemctl start {CRON_UNIT}")
     sh("systemctl start cockpit-cronjobs-status.service")
     rc, doc, out = status_as_nobody("en")
-    check(sh("systemctl is-active cron").stdout.strip() == "active" and status_item(doc, "cron").get("state") == "ok",
+    check(sh(f"systemctl is-active {CRON_UNIT}").stdout.strip() == "active" and status_item(doc, "cron").get("state") == "ok",
           "cron running again: " + out)
 
     sh(f"systemctl stop {fail_timer}.timer; systemctl reset-failed {fail_timer}.service {fail_timer}.timer")
@@ -894,7 +919,8 @@ with sync_playwright() as p:
     page.click("#reload")
     wait_idle(page)
     why_text = {"linkOwner": "Link ist, der nicht root gehört", "broken": "Link ins Leere", "owner": "weil sie nicht root gehört",
-                "notFile": "keine normale Datei", "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink"}
+                "notFile": "keine normale Datei", "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink",
+                "mode": "wegen ihrer Rechte"}
     shown = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
         tr.querySelector('.az-mono').textContent, (tr.querySelector('.cron-ignored-why') || {}).textContent || null]))""")
     for name, (reason, _) in CROND.items():
@@ -910,9 +936,12 @@ with sync_playwright() as p:
         return [line for line in log.split("\n") if path.search(line)]
 
     def cron_log():
-        return sh(f"journalctl -u cron --no-pager -o cat --since @{crond_since}").stdout
+        return sh(f"journalctl -u {CRON_UNIT} --no-pager -o cat --since @{crond_since}").stdout
 
     expected = [(name, msg) for name, (_, msg) in CROND.items() if msg]
+    # What else makes cron skip a file: with SELinux, cronie also wants the file's context to be an
+    # entry point of the job's domain (get_security_context in its security.c).
+    skips = [m for _, m in expected] + (["FAILED"] if CRONIE else [])
     deadline = time.time() + 75
     log = cron_log()
     while time.time() < deadline and not all(any(msg in line for line in cron_says(name, log)) for name, msg in expected):
@@ -923,7 +952,7 @@ with sync_playwright() as p:
         if msg:
             check(any(msg in line for line in said), f"cron logs {msg!r} for {name}: {said!r}")
         else:
-            check(not any(m in line for line in said for _, m in expected), f"cron reads {name}: {said!r}")
+            check(not any(m in line for line in said for m in skips), f"cron reads {name}: {said!r}")
     sh(f"rm -rf {CROND_SRC} {CROND_DIR}/cj-e2e-*")
     sh(f"crontab -r -u {USER}; userdel -r {USER}; rm -f /tmp/cj-e2e-whoami")
     if etc_env_before is None:

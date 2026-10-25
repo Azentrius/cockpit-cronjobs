@@ -428,7 +428,10 @@ make docs-shots   # the screenshots of this README into docs/ (CI keeps them as 
 `test/e2e_cockpit.py` runs the main flows against a real Cockpit with real cron. It replaces root's
 crontab, so only use it on a throwaway machine or container (see the top of the file). CI runs it on
 every push and pull request, on the runner's throwaway VM, twice: with the Cockpit of Ubuntu 24.04 and
-cron as installed, and with the Cockpit of its backports and cron at `-L 15` (check `e2e`).
+cron as installed, and with the Cockpit of its backports and cron at `-L 15` (check `e2e`). It also
+runs with cronie and the `.rpm` in Rocky Linux 9 and 10 VMs with SELinux enforcing (job `e2e-el`,
+`tools/vm.sh`, not yet a required check): the test as root in the machine, the browser on the runner,
+and the job fails on any SELinux denial during the test.
 
 How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); what comes next is in
 [ROADMAP.md](ROADMAP.md).
