@@ -350,20 +350,28 @@ good: `sudo systemctl mask --now cockpit-cronjobs-status.timer`.
 ## Cron's environment
 
 Run now and a conversion to a systemd timer give a job the environment cron gives it on this server.
-Cron builds it in three layers, and the page reads each one from the server:
+Cron builds it in layers, and the page reads each one from the server:
 
 1. What PAM sets for cron's service (`/etc/pam.d/cron`, with cronie `/etc/pam.d/crond`): through
    `pam_env`, the variables of `/etc/environment` and, on Debian and Ubuntu, `LANG` and the like from
    `/etc/default/locale`.
-2. The crontab's own variables above the job, `MAILTO` included.
-3. Cron's own: `SHELL` (`/bin/sh`) and `HOME` unless the crontab sets them, and `LOGNAME`. `PATH` unless
+2. With cronie, `LANG`, the `LC_` variables and `LANGUAGE` of its own environment, which systemd gives
+   it from `/etc/locale.conf` (the page reads them with `systemctl show-environment`). Debian's cron
+   passes on nothing of its own.
+3. The crontab's own variables above the job, `MAILTO` included.
+4. Cron's own: `SHELL` (`/bin/sh`) and `HOME` unless the crontab sets them, and `LOGNAME`. `PATH` unless
    the crontab sets it: `/usr/bin:/bin` with Debian's cron, none with Ubuntu's, which starts cron with `-P`
-   (so `PATH` comes from `/etc/environment`), `/usr/bin:/bin:/usr/sbin:/sbin` with cronie, which sets
-   `USER` as well.
+   (so `PATH` comes from `/etc/environment`); with cronie `/usr/bin:/bin:/usr/sbin:/sbin` since 1.7.0 and
+   `/usr/bin:/bin` before (Rocky Linux 9 has 1.5.7; the page asks `crond -V`). cronie sets `USER` as well.
 
 A converted unit lists these variables with `Environment=` and removes with `UnsetEnvironment=` what
 systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. What is in
 `/etc/environment` when you convert is copied into the unit. `/etc/security/pam_env.conf` is not read.
+
+Where cron's PAM service has `pam_systemd` in its session stack (Fedora and the RHEL family, through
+`password-auth`), cron opens a logind session for every job, and the job gets its variables:
+`XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and the like. Run now and a timer open
+no such session; the page does not make those variables up, and says so in both dialogs.
 
 ## Files
 
@@ -475,9 +483,9 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
     The page marks a file whose type (for a link, that of its target) is not the type of `/etc/cron.d`
     itself, but it does not ask the policy: a file of another type the policy lets cron's jobs enter is
     marked as skipped, and when `/etc/cron.d` itself is labelled wrongly, the page does not see it.
-  - The environment of run now and of a converted job differs from cron's: cronie opens a logind
-    session for every job (`XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and more,
-    from `pam_systemd`), and its `PATH` and `LANG` are not the ones the page gives.
+  - cronie opens a logind session for every job (`pam_systemd` in `password-auth`), so its jobs have
+    `XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and the like; run now and a
+    converted job do not, as the page says in both dialogs (see [Cron's environment](#crons-environment)).
   - Where Linux-PAM reads `/etc/environment` with libeconf (Rocky Linux 10), `export` is not allowed,
     single quotes stay and the space before a `#` goes; a line pam_env cannot read makes PAM refuse
     every cron job (crond logs "FAILED to authorize user with PAM"), and the page does not warn about

@@ -126,10 +126,13 @@ function renderRunDialog() {
     $("run-cmd").textContent = r.shown;
     const env = r.env;
     const others = Object.keys(env).filter(k => !["PATH", "HOME", "SHELL", "LOGNAME", "USER", "CRONJOBS_TRIGGER"].includes(k));
+    /* cron's logind session (C.cronEnvModel) is not something run now can give */
+    const logind = !!(state.basics.cronEnv && state.basics.cronEnv.logind);
     fill($("run-env"), rich(env.PATH !== undefined
         ? T.runEnv(codeSafe("PATH=" + env.PATH), codeSafe("HOME=" + env.HOME), codeSafe(env.SHELL))
         : T.runEnvNoPath(codeSafe("HOME=" + env.HOME), codeSafe(env.SHELL))),
         others.length ? [" ", rich(T.runEnvOthers(joinList(others.map(k => "`" + codeSafe(k) + "`"))))] : null,
+        logind ? [" ", rich(T.runLogind)] : null,
         r.capture ? [" ", rich(T.runRecorded)] : null,
         r.cron.stdin !== null ? [" ", rich(T.runStdin)] : null);
     $("run-keep").hidden = !confirm && !running;

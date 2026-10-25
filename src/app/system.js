@@ -212,7 +212,8 @@ export function readHomes(names) {
 /* Host name, time zone as cron sees it, what is installed, and how cron gives its jobs
    their environment (C.cronEnvModel): the cron daemon's command line (running, with the
    time it started, which also says what it logs, C.cronLogs; else its unit's ExecStart),
-   the environment systemd gives services, the PAM service files
+   cronie's version (`crond -V`, SUSE's `cron -V`: its default PATH depends on it; it only
+   prints that), the environment systemd gives services, the PAM service files
    of cron (Debian) and crond (cronie) with what they include, and the env files those
    or pam_env read. File contents lose RS (\\036). All of it is readable without root. */
 const BASICS_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
@@ -273,6 +274,10 @@ if [ -n "$p" ] && [ -r "/proc/$p/cmdline" ]; then
   a=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
   case $a in ''|*[!0-9]*) ;; *) echo "since $(( $(date +%s) - a ))" ;; esac
 fi
+if [ -x /usr/sbin/crond ]; then b=/usr/sbin/crond; elif [ ! -f /etc/debian_version ]; then b=/usr/sbin/cron; else b=; fi
+if [ -n "$b" ] && [ -x "$b" ]; then
+  "$b" -V < /dev/null 2>/dev/null | sed -n '1s/^cronie \\([0-9][0-9.]*\\).*/version \\1/p'
+fi
 if has_systemd; then
   for u in cron.service crond.service cronie.service; do
     if [ "$(systemctl show -p LoadState --value "$u" 2>/dev/null)" = loaded ]; then
@@ -307,7 +312,7 @@ export function readBasics() {
         const out = decode(raw);
         const res = { host: "", tz: null, mta: null, crontab: true, flavor: "debian", systemd: false,
                       cron: null, wrapper: null, cronEnv: null, managerEnv: {}, cronLogs: null };
-        const daemon = { run: "", unit: "", since: "" };
+        const daemon = { run: "", unit: "", since: "", version: "" };
         const pam = {};
         const files = {};
         sections(out).forEach(({ name, body }) => {
@@ -316,7 +321,7 @@ export function readBasics() {
             else if (name.startsWith("env:")) files[name.slice(4)] = body;
             else if (name === "crond") {
                 body.split("\n").forEach(line => {
-                    const m = /^(run|unit|since) (.*)$/.exec(line);
+                    const m = /^(run|unit|since|version) (.*)$/.exec(line);
                     if (m) daemon[m[1]] = m[2].trim();
                 });
             } else if (name === "manager") {
@@ -335,8 +340,8 @@ export function readBasics() {
                 res.cron = { unit: unit === "-" ? null : unit, active: st === "active" };
             } else if (name === "wrapper") res.wrapper = first === "missing" ? "missing" : (parseInt(first, 10) || 0);
         });
-        res.cronEnv = C.cronEnvModel({ flavor: res.flavor, args: daemon.run || daemon.unit, pam, files,
-                                       managerPath: res.managerEnv.PATH || null });
+        res.cronEnv = C.cronEnvModel({ flavor: res.flavor, args: daemon.run || daemon.unit, version: daemon.version,
+                                       pam, files, managerEnv: res.managerEnv, systemd: res.systemd });
         res.cronLogs = C.cronLogs(res.flavor, daemon.run, /^\d{1,12}$/.test(daemon.since) ? Number(daemon.since) * 1000 : null);
         return res;
     });

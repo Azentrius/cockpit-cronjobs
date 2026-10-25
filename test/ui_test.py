@@ -1503,9 +1503,19 @@ with sync_playwright() as p:
     text, env, problems = run_env("cronenv=nopath")
     check("keinen PATH setzt" in text and not any(e.startswith("PATH=") for e in env) and not problems,
           "cron -P without a PATH anywhere: none: " + text + " " + repr(env))
+    check("logind" not in text, "Debian's cron opens no logind session: " + text)
+    # cronie: its PATH by its version, USER, and LANG from its own environment (systemd's); its
+    # PAM service opens a logind session for every job, which the dialog names
     text, env, problems = run_env("flavor=cronie")
     check("PATH=/usr/bin:/bin:/usr/sbin:/sbin" in env and "USER=root" in env and "http_proxy=http://proxy.example:3128" in env and
-          not any(e.startswith("LANG=") for e in env) and not problems, "cronie: its PATH, USER, PAM's variables: " + repr(env))
+          "LANG=C.UTF-8" in env and not any(e.startswith("XDG_") for e in env) and not problems,
+          "cronie: its PATH, USER, LANG, PAM's variables: " + repr(env))
+    check("logind-Sitzung" in text and "XDG_SESSION_ID" in text, "cronie: the logind session named: " + text)
+    text, env, problems = run_env("flavor=cronie&cronie=1.5.7")
+    check("PATH=/usr/bin:/bin" in env and "PATH=/usr/bin:/bin" in text and not problems, "cronie 1.5.7: its older PATH: " + repr(env))
+    text, env, problems = run_env("flavor=cronie&systemd=no")
+    check(not any(e.startswith("LANG=") for e in env) and "logind" not in text and not problems,
+          "cronie without systemd: no LANG known, no logind session: " + text + " " + repr(env))
 
     # rare schedules are checked over their next 5 runs too, however far ahead those are
     page = open_page(browser)
@@ -1529,6 +1539,7 @@ with sync_playwright() as p:
     check(page.inner_text("#conv-cron") == "30 1 * * 0" and "OnCalendar=Sun *-*-* 01:30:00" in page.inner_text("#conv-cal"), "calendar shown")
     wait_js(page, "!document.querySelector('#conv-check').innerText.includes('wird mit')")
     check("die nächsten 5 Läufe stimmen überein" in page.inner_text("#conv-check"), "verified with systemd-analyze")
+    check(page.locator("#conv-logind").is_hidden(), "Debian's cron opens no logind session: nothing to say about it")
     # the name's error only once the field is left
     page.fill("#conv-name", "bad name")
     check("Nur Buchstaben" not in page.inner_text("#conv-name-help") and page.get_attribute("#conv-name", "aria-invalid") == "false",
@@ -1804,6 +1815,11 @@ with sync_playwright() as p:
     wait_js(page, "!document.querySelector('#conv-check').innerText.includes('wird mit')")
     check("OnCalendar=*-*-* 03:00:00 America/New_York" in page.inner_text("#conv-cal"), "calendar in CRON_TZ")
     check("stimmen überein" in page.inner_text("#conv-check"), "verified in CRON_TZ")
+    check(page.locator("#conv-logind").is_visible() and "logind-Sitzung" in page.inner_text("#conv-logind"),
+          "cronie: the conversion names cron's logind session")
+    page.click("#conv-units-toggle")
+    check('Environment="LANG=C.UTF-8"' in page.inner_text("#conv-service"), "cronie: LANG as cronie passes it on: " +
+          page.inner_text("#conv-service"))
     page.click("#conv-cancel")
     reload_with_root(page, "RANDOM_DELAY=10\n0 3 * * * /usr/local/bin/x\n")
     row(page, 0).locator("[data-key^=more]").click()

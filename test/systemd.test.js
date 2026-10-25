@@ -242,6 +242,11 @@ t("service environment: what cron gives, without what systemd gives the same way
     const job = C.jobEnvironment({}, null, "root", debian);
     assert.deepStrictEqual(SD.serviceEnvironment(job, {}, { LANG: "en_US.UTF-8", PATH: "/usr/bin", LANGUAGE: "en" }).unset, ["USER", "LANGUAGE"],
                            "systemd's own variables that cron does not give are unset; those cron gives are set");
+    const manager = { LANG: "en_US.UTF-8", PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin" };
+    const rocky = C.cronEnvModel({ flavor: "cronie", args: "/usr/sbin/crond -n", version: "1.5.7", managerEnv: manager, systemd: true });
+    assert.deepStrictEqual(SD.serviceEnvironment(C.jobEnvironment({}, null, "root", rocky), {}, manager),
+                           { env: { LANG: "en_US.UTF-8", PATH: "/usr/bin:/bin", SHELL: "/bin/sh" }, unset: [] },
+                           "cronie 1.5.7: its PATH, and the LANG it passes on from systemd's environment, set as cron gives them");
 });
 t("service unit", () => {
     const { env, unset } = serviceEnv({ MAILTO: "", PATH: "/usr/local/bin:/usr/bin:/bin", SHELL: "/bin/bash" });

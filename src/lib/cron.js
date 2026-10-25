@@ -525,16 +525,18 @@
         return out;
     }
 
-    /* The arguments of the pam_env.so lines of PAM service name (files: { NAME: text }
-       of the service and what it includes), for the types in order. */
-    function pamEnvModules(files, name, types) {
+    /* The arguments of the lines of PAM service name (files: { NAME: text } of the
+       service and what it includes) that load module (default pam_env.so), for the
+       types in order. Jumps ("[success=1 …]") are not followed. */
+    function pamEnvModules(files, name, types, module) {
         const out = [];
+        const base = module || "pam_env.so";
         const walk = (file, type, depth) => {
             if (depth > 8 || !has(files, file)) return;
             pamLines(files[file]).forEach(l => {
                 if (l.include) {
                     if (l.type === null || l.type === type) walk(l.include, type, depth + 1);
-                } else if (l.type === type && /(^|\/)pam_env\.so$/.test(l.module)) {
+                } else if (l.type === type && (l.module === base || l.module.endsWith("/" + base))) {
                     out.push(l.args);
                 }
             });
@@ -605,36 +607,76 @@
         return env;
     }
 
+    /* cronie's default PATH, for a job whose crontab sets none (load_entry in src/entry.c;
+       with -P the PATH cronie was started with, the default when it has none). It comes
+       from glibc's <paths.h>: up to cronie 1.6.1 _PATH_DEFPATH, "/usr/bin:/bin" (tag
+       cronie-1.5.7, src/pathnames.h; Rocky Linux 9 has 1.5.7); since 1.7.0 _PATH_STDPATH,
+       "/usr/bin:/bin:/usr/sbin:/sbin" (commit 7575e75 "Using _PATH_STDPATH instead of
+       _PATH_DEFPATH", tag cronie-1.7.0). version as `crond -V` names it ("1.5.7"); one
+       not known counts as new. */
     const CRONIE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+    const CRONIE_OLD_PATH = "/usr/bin:/bin";
+    function croniePath(version) {
+        const m = /^(\d+)\.(\d+)(?:\.|$)/.exec(version || "");
+        return m && (Number(m[1]) < 1 || (Number(m[1]) === 1 && Number(m[2]) < 7)) ? CRONIE_OLD_PATH : CRONIE_PATH;
+    }
     const SYSTEMD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
+
+    /* What cronie passes on from its own environment to every crontab, below the
+       crontab's variables: env_set_from_environ (src/env.c, called by load_user in
+       src/user.c; the same at cronie-1.5.7 and cronie-1.7.0). Its environment is the one
+       systemd gives services (`systemctl show-environment`, LANG and the like from
+       /etc/locale.conf); the unit's own Environment= and EnvironmentFile= are not read.
+       Debian's cron passes on nothing of its own. */
+    const CRONIE_PASSES = ["LANG", "LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MONETARY", "LC_MESSAGES",
+                           "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE", "LC_MEASUREMENT", "LC_IDENTIFICATION",
+                           "LC_ALL", "LANGUAGE", "RANDOM_DELAY"];
 
     /* How cron gives its jobs their environment on this server, from what the page reads
        (see BASICS_SCRIPT): o.flavor "debian" or "cronie", o.args the cron daemon's
-       command line (running, else the unit's ExecStart), o.pam { NAME: text } of
-       cron's PAM service and what it includes, o.files { PATH: text } of the env files
-       those name, o.managerPath the PATH of systemd's environment for services.
-       Result { pam: {NAME: value}, path: cron's default PATH or null, user: whether cron
-       sets USER }. Debian's cron opens the PAM session, then sets the credentials;
-       cronie the other way round. Its default PATH: Debian's cron "/usr/bin:/bin",
-       none with -P (Ubuntu starts it so); cronie its _PATH_STDPATH, with -P its own. */
+       command line (running, else the unit's ExecStart), o.version cronie's version,
+       o.pam { NAME: text } of cron's PAM service and what it includes, o.files
+       { PATH: text } of the env files those name, o.managerEnv { NAME: value } of
+       systemd's environment for services, o.systemd whether systemd runs.
+       Result { pam: {NAME: value}, passed: {NAME: value} (what cronie passes on of its
+       own), path: cron's default PATH or null, user: whether cron sets USER, logind:
+       whether cron opens a logind session for every job }. Debian's cron opens the PAM
+       session, then sets the credentials; cronie the other way round. Its default PATH:
+       Debian's cron "/usr/bin:/bin", none with -P (Ubuntu starts it so); cronie's by its
+       version (croniePath), with -P its own.
+       logind: pam_systemd.so in the session stack of cron's PAM service, with systemd
+       running (Fedora and the RHEL family: crond includes password-auth, which has
+       "-session optional pam_systemd.so"). pam_systemd then puts the session into the
+       PAM environment that cron gives the job (src/login/pam_systemd.c, systemd v252
+       and v257): XDG_SESSION_ID, XDG_SESSION_TYPE "unspecified" and XDG_SESSION_CLASS
+       "background" (cron sets PAM_TTY to "cron"), XDG_RUNTIME_DIR, and
+       DBUS_SESSION_BUS_ADDRESS when the user's bus socket exists. Run now and a unit open
+       no such session, so the page gives none of them and says so. */
     function cronEnvModel(o) {
         o = o || {};
         const cronie = o.flavor === "cronie";
+        const service = cronie ? "crond" : "cron";
         const noDefault = /(^|\s)-[A-Za-z]*P[A-Za-z]*(?=\s|;|$)/.test(o.args || "");
+        const manager = o.managerEnv || {};
         const pam = {};
-        pamEnvModules(o.pam || {}, cronie ? "crond" : "cron", cronie ? ["auth", "session"] : ["session", "auth"])
+        pamEnvModules(o.pam || {}, service, cronie ? ["auth", "session"] : ["session", "auth"])
             .forEach(args => {
                 const file = pamEnvFileOf(args);
                 if (file && has(o.files || {}, file)) applyEnvFile(pam, o.files[file]);
             });
-        const path = cronie ? (noDefault ? o.managerPath || SYSTEMD_PATH : CRONIE_PATH) : (noDefault ? null : "/usr/bin:/bin");
-        return { pam, path, user: cronie };
+        const passed = {};
+        if (cronie) CRONIE_PASSES.forEach(k => { if (has(manager, k)) passed[k] = manager[k]; });
+        const path = cronie ? (noDefault ? manager.PATH || SYSTEMD_PATH : croniePath(o.version))
+            : (noDefault ? null : "/usr/bin:/bin");
+        const logind = !!o.systemd && pamEnvModules(o.pam || {}, service, ["session"], "pam_systemd.so").length > 0;
+        return { pam, passed, path, user: cronie, logind };
     }
 
     /* The environment cron gives a job of user (default root, at home; another user's
-       home as read from the user database): the variables from PAM, overridden by the
-       crontab's variables (cronEnv, see envBefore) and cron's own: SHELL, HOME and PATH
-       unless the crontab sets them, LOGNAME, and USER where cron sets it. */
+       home as read from the user database): the variables from PAM, overridden by what
+       cronie passes on of its own, the crontab's variables (cronEnv, see envBefore) and
+       cron's own: SHELL, HOME and PATH unless the crontab sets them, LOGNAME, and USER
+       where cron sets it. */
     function jobEnvironment(cronEnv, home, user, model) {
         model = model || { pam: {}, path: "/usr/bin:/bin", user: false };
         user = user || "root";
@@ -644,7 +686,7 @@
         if (!has(own, "PATH") && model.path) own.PATH = model.path;
         own.LOGNAME = user;
         if (model.user) own.USER = user;
-        return Object.assign({}, model.pam, own);
+        return Object.assign({}, model.pam, model.passed || {}, own);
     }
 
     /* ---------- run capture (cockpit-cronjobs-run) ---------- */
@@ -1110,7 +1152,7 @@
         setEnabled, setJob, newJob, rawLine, entryLine,
         parseSystemCrontab, cronDNameValid, cronDSkip, hasUnescapedPercent, cronCommand,
         mkprints, loggedCommand, parseCronLog, lastRun, lastStart, cronLogs, cronLogOutcome, signalName,
-        parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, cronEnvModel, jobEnvironment,
+        parseEnvLine, envBefore, pamLines, pamEnvModules, applyEnvFile, croniePath, cronEnvModel, jobEnvironment,
         shellQuote, shellUnquote, unwrapCommand, wrapCommand, canCapture, makeJobId, captureJobs, jobName, slug,
         cksum,
         validTimeZone, wallParts, isWildcard, nextRun, runsBetween,

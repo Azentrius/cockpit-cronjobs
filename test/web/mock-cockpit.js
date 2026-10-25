@@ -199,21 +199,22 @@
     /* How cron gives jobs their environment (?cronenv=): Debian's cron by default (PATH
        /usr/bin:/bin, LANG from /etc/default/locale, a proxy from /etc/environment);
        "ubuntu": started with -P, PATH from /etc/environment; "nopath": -P without a PATH
-       anywhere. With ?flavor=cronie: cronie's crond and system-auth. Then what systemd
-       gives every service. */
+       anywhere. With ?flavor=cronie: cronie's crond (?cronie=VERSION, 1.7.0 by default) and
+       system-auth, whose pam_systemd opens a logind session for every job where systemd
+       runs. Then what systemd gives every service. */
     function cronEnvOutput() {
         const mode = params.get("cronenv") || "debian";
         const cronie = params.get("flavor") === "cronie";
         const sec = (n, body) => "\x1e" + n + "\n" + body + "\n";
         let out = sec("crond", "run /usr/sbin/" + (cronie ? "crond -n" : "cron -f" + (mode === "debian" ? "" : " -P") +
                                                    (M.cronLevel !== null ? " -L " + M.cronLevel : "")) +
-                               "\nsince " + (now() - M.cronSinceAgo));
+                               "\nsince " + (now() - M.cronSinceAgo) + (cronie ? "\nversion " + (params.get("cronie") || "1.7.0") : ""));
         if (M.systemd) out += sec("manager", "LANG=C.UTF-8\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin");
         if (cronie) {
             out += sec("pam:crond", "account    required   pam_access.so\naccount    include    system-auth\n" +
                                     "session    required   pam_loginuid.so\nsession    include    system-auth\nauth       include    system-auth");
             out += sec("pam:system-auth", "auth        required      pam_env.so\nauth        sufficient    pam_unix.so\n" +
-                                          "session     required      pam_unix.so");
+                                          "-session    optional      pam_systemd.so\nsession     required      pam_unix.so");
         } else {
             out += sec("pam:cron", "@include common-auth\nsession    required     pam_loginuid.so\n" +
                                    "session       required   pam_env.so\n# In addition, read system locale information\n" +
