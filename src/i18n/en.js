@@ -293,6 +293,8 @@
         runEnv: (path, home, shell) => `With cron's environment: \`${path}\`, \`${home}\`, shell \`${shell}\`.`,
         runEnvNoPath: (home, shell) => `With cron's environment, which sets no \`PATH\` here: \`${home}\`, shell \`${shell}\`.`,
         runEnvOthers: list => `Also set: ${list}.`,
+        runLogind: "On this server cron also opens a logind session for every job (`XDG_SESSION_ID`, `XDG_RUNTIME_DIR` " +
+                   "and others). Run now does not, so those variables are missing here.",
         runRecorded: "Result and output are recorded.",
         runStdin: "The text after % in the line is passed as input, as cron does.",
         runKeepOpen: "The job stops if you close this page while it runs.",
@@ -408,6 +410,8 @@
                             "so it is off at first.",
         convShowUnits: "Show units",
         convHideUnits: "Hide units",
+        convLogind: "On this server cron opens a logind session for every job (`XDG_SESSION_ID`, `XDG_RUNTIME_DIR` " +
+                    "and others). The timer's service does not, so those variables are missing there.",
         convAfter: user => `Afterwards the line in the ${crontabName(user)} is turned off and gets a note. A backup is made first.`,
         convConfirm: "Convert job",
         converting: "Converting …",

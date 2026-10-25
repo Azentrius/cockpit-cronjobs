@@ -292,6 +292,8 @@
         runEnv: (path, home, shell) => `Mit der Umgebung von cron: \`${path}\`, \`${home}\`, Shell \`${shell}\`.`,
         runEnvNoPath: (home, shell) => `Mit der Umgebung von cron, die hier keinen \`PATH\` setzt: \`${home}\`, Shell \`${shell}\`.`,
         runEnvOthers: list => `Außerdem gesetzt: ${list}.`,
+        runLogind: "Auf diesem Server öffnet cron außerdem für jeden Job eine logind-Sitzung (`XDG_SESSION_ID`, " +
+                   "`XDG_RUNTIME_DIR` und weitere). „Jetzt ausführen“ tut das nicht, diese Variablen fehlen hier also.",
         runRecorded: "Ergebnis und Ausgabe werden erfasst.",
         runStdin: "Der Text nach % in der Zeile wird als Eingabe übergeben, wie bei cron.",
         runKeepOpen: "Der Job wird angehalten, wenn Sie diese Seite schließen, während er läuft.",
@@ -409,6 +411,8 @@
                             "das nicht, deshalb ist es zunächst aus.",
         convShowUnits: "Einheiten ansehen",
         convHideUnits: "Einheiten ausblenden",
+        convLogind: "Auf diesem Server öffnet cron für jeden Job eine logind-Sitzung (`XDG_SESSION_ID`, `XDG_RUNTIME_DIR` " +
+                    "und weitere). Der Dienst des Timers tut das nicht, diese Variablen fehlen dort also.",
         convAfter: user => `Danach wird die Zeile in der ${crontabName(user)} ausgeschaltet und mit einem Hinweis versehen. ` +
                    "Vorher wird ein Backup angelegt.",
         convConfirm: "Job umwandeln",
