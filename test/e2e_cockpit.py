@@ -644,9 +644,14 @@ with sync_playwright() as p:
         time.sleep(5)
     jrows = page.locator("#runs-body tbody tr").all_inner_texts()
     check(jrows and all("Fehler · Exit 1" in x for x in jrows), "the timer's runs from the journal: " + repr(jrows))
-    page.locator("#runs-body [data-key^='out:']").first.click()
-    wait_js(page, "document.querySelector('#runs-body pre')")
-    check(page.text_content("#runs-body pre") == "failing from systemd", "its output: " + repr(page.text_content("#runs-body pre")))
+    has_out = page.locator("#runs-body [data-key^='out:']").count() > 0
+    check(has_out, "the timer's runs offer their output: " + repr(jrows) + "\n" +
+          sh(f"journalctl -u {fail_timer}.service -o json --no-pager -n 12 "
+             "--output-fields=MESSAGE,INVOCATION_ID,_SYSTEMD_INVOCATION_ID,_PID,_COMM").stdout[-4000:])
+    if has_out:
+        page.locator("#runs-body [data-key^='out:']").first.click()
+        wait_js(page, "document.querySelector('#runs-body pre')")
+        check(page.text_content("#runs-body pre") == "failing from systemd", "its output: " + repr(page.text_content("#runs-body pre")))
     page.screenshot(path=os.path.join(SHOTS, "e2e-journal-runs.png"))
     page.click("#runs-close-btn")
 
