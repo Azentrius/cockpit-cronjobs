@@ -646,6 +646,8 @@ with sync_playwright() as p:
     # the timer's runs, from the journal: failed, with what it wrote. systemd tells of the failure
     # and the service's output reaches journald on its own stream, so a dialog opened right after
     # the failure may find the run without its output yet: then it is opened again, a while later.
+    # (journald may also store that line without _SYSTEMD_INVOCATION_ID, the shell having ended:
+    # R.parseJournal gives it to the run started before it.)
     for _ in range(6):
         page.click(f"[data-key='sum-timer:{fail_timer}.timer']")
         wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1", timeout=30)

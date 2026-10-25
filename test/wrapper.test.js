@@ -417,6 +417,32 @@ t("journal runs: running, lost ends, cut output, lines that are no runs", () => 
     assert.deepStrictEqual(R.parseJournal("-- No entries --\n{broken\n{\"_PID\":\"1\",\"INVOCATION_ID\":\"x\",\"__REALTIME_TIMESTAMP\":\"1\"}\n", 20, 0), []);
 });
 
+/* Rocky Linux 10.2 (systemd 257), `systemd-run --on-calendar=... /bin/sh -c 'echo failing from systemd;
+   exit 1'`, the fields the page asks for: journald stored the service's one line without
+   _SYSTEMD_INVOCATION_ID (the shell had ended when it looked in /proc), so it is the output of the
+   run started before it. */
+t("journal runs: output without an invocation belongs to the run started before it", () => {
+    const id = "f7a9791f5ef74e2fbcdb657c26edd488";
+    const lines = [
+        { _PID: "1", INVOCATION_ID: id, MESSAGE_ID: "39f53479d3a045ac8e11786248231fbf", JOB_RESULT: "done",
+          MESSAGE: "Started cj-e2e-fail.service - [systemd-run] /bin/sh -c \"echo failing from systemd; exit 1\".",
+          __REALTIME_TIMESTAMP: "1792967100522192" },
+        { _PID: "10381", MESSAGE: "failing from systemd", __REALTIME_TIMESTAMP: "1792967100531883" },
+        { _PID: "1", INVOCATION_ID: id, MESSAGE_ID: "98e322203f7a4ed290d09fe03c09fe15", EXIT_CODE: "exited", EXIT_STATUS: "1",
+          MESSAGE: "cj-e2e-fail.service: Main process exited, code=exited, status=1/FAILURE", __REALTIME_TIMESTAMP: "1792967100533323" },
+        { _PID: "1", INVOCATION_ID: id, MESSAGE_ID: "d9b373ed55a64feb8242e02dbe79a49c", UNIT_RESULT: "exit-code",
+          MESSAGE: "cj-e2e-fail.service: Failed with result 'exit-code'.", __REALTIME_TIMESTAMP: "1792967100533376" },
+    ].map(o => JSON.stringify(o));
+    const runs = R.parseJournal(lines.join("\n") + "\n", 20, 65536);
+    assert.deepStrictEqual(runs.map(r => [r.out, R.outcome(r), r.rc, r.output]), [[id, "failed", 1, "failing from systemd"]]);
+    assert.deepStrictEqual(R.parseJournal(lines.slice(1).join("\n"), 20, 65536).map(r => r.output), [""],
+                           "a line before any run with an invocation belongs to none");
+    const two = R.parseJournal(JOURNAL.concat(lines).join("\n"), 20, 65536);
+    assert.strictEqual(two[0].output, "failing from systemd", "after the other runs, to the newest");
+    assert.strictEqual(two.slice(1).map(r => r.output).join("\n"), R.parseJournal(JOURNAL.join("\n"), 20, 65536).map(r => r.output).join("\n"),
+                       "the others keep theirs");
+});
+
 t("missed runs: the next run after the last one cron started, once its time is past", () => {
     const at = iso => Date.parse(iso);
     const run = (iso, trigger) => ({ start: at(iso) / 1000 + 0.4, trigger: trigger || "schedule" });
