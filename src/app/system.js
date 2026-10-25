@@ -346,22 +346,44 @@ export function readBasics() {
    Sections start with RS (\\036) and their name; RS is removed from all file contents,
    so that nobody can fake a section with a line in their own crontab. Read as bytes,
    so that a file in another encoding does not take everything else down with it.
-   Every entry of /etc/cron.d gets a section "d:LMODE:LUID:MODE:UID:NLINK:NAME":
+   Every entry of /etc/cron.d gets a section "d:LMODE:LUID:MODE:UID:NLINK:TYPE:NAME":
    raw mode (hex) and owner of the entry itself, then of what opening it gives
    (a link followed; empty for a link to nothing), for C.cronDSkip. Only regular
    files are read. uid tells whether it ran as root (other users' crontabs need
    that); /etc/anacrontab is only read to see which recorded jobs are still
-   mentioned somewhere. */
+   mentioned somewhere.
+   $1 is the cron flavour. Only cronie refuses a crontab for its SELinux context, and
+   only with SELinux enforcing: only then come a section "selinux" with the type of
+   the files of /etc/cron.d, and TYPE, the SELinux type of what opening an entry
+   gives (the third field of its context; empty where stat prints "?" or no context,
+   and always without SELinux). The type of the files is that of /etc/cron.d itself:
+   a file created there gets the directory's type, which is the one the policy gives
+   them (system_cron_spool_t on Fedora and RHEL) unless the directory was relabelled;
+   it takes one more stat, where matchpathcon would need the policy's file contexts
+   and its output parsed. */
 const SYSTEM_SCRIPT = `sec() { printf '\\036%s\\n' "$1"; }
 show() { tr -d '\\036' < "$1" 2>/dev/null; echo; }
 name() { printf '%s' "$1" | tr -d '\\036\\n'; }
+setype() {
+  c=$(stat -L -c %C "$1" 2>/dev/null) || c=
+  case $c in *:*:*) c=\${c#*:*:}; c=\${c%%:*} ;; *) c= ;; esac
+  case $c in *[!A-Za-z0-9_]*) c= ;; esac
+  printf '%s' "$c"
+}
 sec uid; id -u
 sec etc; show /etc/crontab
+selinux=
+if [ "$1" = cronie ] && [ "$(getenforce 2>/dev/null)" = Enforcing ]; then
+  selinux=$(setype /etc/cron.d)
+  sec selinux; printf '%s\\n' "$selinux"
+fi
 for f in /etc/cron.d/*; do
   [ -e "$f" ] || [ -L "$f" ] || continue
   self=$(stat -c '%f:%u' "$f" 2>/dev/null) || self=:
   target=$(stat -L -c '%f:%u:%h' "$f" 2>/dev/null) || target=::
-  sec "d:$self:$target:$(name "\${f##*/}")"
+  type=
+  if [ -n "$selinux" ]; then type=$(setype "$f"); fi
+  sec "d:$self:$target:$type:$(name "\${f##*/}")"
   if [ -f "$f" ]; then show "$f"; fi
 done
 if [ -f /etc/anacrontab ]; then sec anacron; show /etc/anacrontab; fi
@@ -403,15 +425,18 @@ const S_IFREG = 0o100000;
 const S_IFLNK = 0o120000;
 
 export function readSystem(flavor) {
-    return spawn(["sh", "-c", SYSTEM_SCRIPT], { superuser: "try", err: "ignore", binary: true, environ: ["LC_ALL=C"] })
+    return spawn(["sh", "-c", SYSTEM_SCRIPT, "cockpit-cronjobs", flavor === "cronie" ? "cronie" : "debian"],
+                 { superuser: "try", err: "ignore", binary: true, environ: ["LC_ALL=C"] })
         .then(out => parseSystem(decode(out), flavor));
 }
 
 /* sys.texts: every crontab as read, for finding the recorded jobs no line uses
    any more (see orphanList). sys.userNames: whose crontabs there are (as root only).
-   Every job has tz, its own zone under cronie (CRON_TZ above it in its file), else null. */
+   Every job has tz, its own zone under cronie (CRON_TZ above it in its file), else null.
+   sys.selinux: with cronie and SELinux enforcing, the type of the files of /etc/cron.d,
+   else null; each entry of sys.crond has selinuxType, the type of what it opens (or null). */
 function parseSystem(out, flavor) {
-    const sys = { etc: [], crond: [], users: [], userNames: [], periodic: [], root: false, texts: [] };
+    const sys = { etc: [], crond: [], users: [], userNames: [], periodic: [], root: false, texts: [], selinux: null };
     const zoneOf = env => {
         const tz = flavor === "cronie" ? env.CRON_TZ : null;
         return tz && C.validTimeZone(tz) ? tz : null;
@@ -421,22 +446,25 @@ function parseSystem(out, flavor) {
         if (name === "etc" || name === "anacron" || /^[du]:/.test(name)) sys.texts.push(body);
         if (name === "uid") sys.root = body.trim() === "0";
         else if (name === "etc") sys.etc = systemJobs(body);
+        else if (name === "selinux") sys.selinux = flavor === "cronie" && /^\w+$/.test(body.trim()) ? body.trim() : null;
         else if (name.startsWith("d:")) {
-            const m = /^d:([0-9a-f]*):(\d*):([0-9a-f]*):(\d*):(\d*):(.*)$/.exec(name);
+            const m = /^d:([0-9a-f]*):(\d*):([0-9a-f]*):(\d*):(\d*):(\w*):(.*)$/.exec(name);
             if (!m) return;
-            const file = m[6];
+            const file = m[7];
             const self = parseInt(m[1], 16);
             const mode = parseInt(m[3], 16);
+            const selinuxType = m[6] || null;
             const ignored = C.cronDSkip({
                 name: file,
                 link: m[1] && (self & S_IFMT) === S_IFLNK ? { uid: +m[2] } : null,
-                target: m[3] && m[4] && m[5] ? { regular: (mode & S_IFMT) === S_IFREG, mode: mode & 0o7777, uid: +m[4], nlink: +m[5] }
+                target: m[3] && m[4] && m[5] ? { regular: (mode & S_IFMT) === S_IFREG, mode: mode & 0o7777, uid: +m[4], nlink: +m[5],
+                                                 type: selinuxType }
                     : null,
-            }, flavor !== "cronie");
+            }, flavor !== "cronie", sys.selinux);
             const jobs = systemJobs(body);
-            jobs.forEach(j => sys.crond.push(Object.assign({ file, ignored }, j)));
+            jobs.forEach(j => sys.crond.push(Object.assign({ file, ignored, selinuxType }, j)));
             /* Skipped and nothing to show (a link to nothing, a directory): the file alone. */
-            if (!jobs.length && ignored) sys.crond.push({ file, ignored, schedule: null, user: null, command: null, tz: null });
+            if (!jobs.length && ignored) sys.crond.push({ file, ignored, selinuxType, schedule: null, user: null, command: null, tz: null });
         } else if (name.startsWith("u:")) {
             const user = name.slice(2);
             sys.userNames.push(user);

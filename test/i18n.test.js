@@ -72,6 +72,28 @@ t("code marks come in pairs", () => {
     }));
 });
 
+/* Why cron skips an entry of /etc/cron.d: the same reasons in every language, and C.cronDSkip
+   gives no other. Under SELinux the text names the entry's type and that of /etc/cron.d's files,
+   as code, and says how to give a file the right one. */
+t("every reason why cron skips an entry of /etc/cron.d has a text", () => {
+    const reasons = (/Reasons: ([a-zA-Z, ]+)\./.exec(libs) || [])[1].split(/, /).sort();
+    LANGS.forEach(l => assert.deepStrictEqual(Object.keys(texts[l].ui.ignoredWhy).sort(), reasons, l));
+});
+t("the reason SELinux names both types and the fixes", () => {
+    LANGS.forEach(l => {
+        const why = texts[l].ui.ignoredWhy.selinux;
+        assert.strictEqual(typeof why, "function", l);
+        const s = why("etc_t", "system_cron_spool_t");
+        assert.strictEqual(typeof s, "string", l);
+        assert.strictEqual((s.match(/`/g) || []).length % 2, 0, l + ": code marks in pairs");
+        ["`etc_t`", "`system_cron_spool_t`", "`restorecon`", "`chcon -t system_cron_spool_t`", "SELinux"]
+            .forEach(part => assert.ok(s.includes(part), `${l}: ${part}`));
+    });
+    Object.entries(texts.en.ui.ignoredWhy).forEach(([k, v]) => {
+        if (k !== "selinux") LANGS.forEach(l => assert.strictEqual(typeof texts[l].ui.ignoredWhy[k], "string", `${l}.${k}`));
+    });
+});
+
 /* The line the hint on cron's log gives for systemd, read as systemd reads Environment=: words
    split at spaces outside double quotes, the quotes removed. It must set EXTRA_OPTS to all of
    "-L 15"; unquoted, systemd sets "-L" alone and cron does not start. */

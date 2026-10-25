@@ -186,6 +186,11 @@
             mode: "cron überspringt diese Datei wegen ihrer Rechte: Sie muss für den Besitzer lesbar und nicht ausführbar " +
                   "sein, ohne setuid-, setgid- oder Sticky-Bit.",
             links: "cron überspringt diese Datei, weil sie mehr als einen Hardlink hat.",
+            selinux: (type, want) => `cron überspringt diese Datei unter SELinux wegen ihres Kontexts: Der Typ \`${type}\` ` +
+                                     `(bei einem Link der seines Ziels) ist nicht \`${want}\`, der Typ der Dateien in ` +
+                                     "`/etc/cron.d`. Für eine Datei in `/etc/cron.d` setzt `restorecon` den richtigen Typ; bei " +
+                                     "einem Link legen Sie die Datei selbst in `/etc/cron.d` ab oder geben seinem Ziel diesen Typ " +
+                                     `mit \`chcon -t ${want}\`.`,
         },
         usersTitle: "Weitere Benutzer",
         usersDesc: "Crontabs weiterer Benutzer, die diese Seite nur anzeigen kann.",
