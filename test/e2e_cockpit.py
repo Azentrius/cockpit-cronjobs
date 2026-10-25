@@ -175,12 +175,16 @@ if not sh("pgrep -x cron || pgrep -x crond").stdout.strip():
 # Debian's cron checks a link's owner, then the target's owner, type, write bits and hard
 # links; cronie follows a link unchecked, then wants a regular file of root's with
 # (mode & 07533) == 0400 (check_open in its database.c), so it skips an executable one too.
+# With SELinux enforcing, cronie then also wants the file's context to be an entry point of the
+# job's domain (get_security_context in its security.c), so it skips a link to a file of /etc
+# (etc_t); it logs that in permissive mode too, but reads the file then.
+CRONIE_SELINUX = CRONIE and sh("getenforce").stdout.strip() == "Enforcing"
 CROND_DIR = "/etc/cron.d"
 CROND_SRC = "/etc/cj-e2e"
 CROND = {
     "cj-e2e-ok": (None, None),
     "cj-e2e-exec": ("mode", "BAD FILE MODE") if CRONIE else (None, None),
-    "cj-e2e-link": (None, None),
+    "cj-e2e-link": ("selinux", "Unauthorized SELinux context") if CRONIE_SELINUX else (None, None),
     "cj-e2e-linkuser": (None, None) if CRONIE else ("linkOwner", "WRONG SYMLINK OWNER"),
     "cj-e2e-broken": ("broken", "CAN'T OPEN") if CRONIE else ("broken", "CAN'T OPEN SYMLINK"),
     "cj-e2e-owner": ("owner", "WRONG FILE OWNER"),
@@ -213,11 +217,11 @@ os.mkdir(f"{CROND_DIR}/cj-e2e-dir")
 crond_file(f"{CROND_DIR}/cj-e2e-writable", 0o664)
 crond_file(f"{CROND_DIR}/cj-e2e-hard")
 os.link(f"{CROND_DIR}/cj-e2e-hard", f"{CROND_SRC}/hard")
-# With SELinux, cronie also wants a file's context to be an entry point of the job's domain
-# (get_security_context in its security.c) and skips a link to a file of /etc (etc_t). Until the
-# page tells that (README, Known limits), the links' targets get the label of /etc/cron.d's files.
+# With SELinux, the target of cj-e2e-linkuser gets the label of /etc/cron.d's files, so that cronie
+# reads it; cj-e2e-link keeps that of /etc (etc_t) where cronie skips it for that, and gets the label
+# too where it would only log it (permissive).
 if sh("selinuxenabled").returncode == 0:
-    sh(f"chcon --reference={CROND_DIR}/cj-e2e-ok {CROND_SRC}/link {CROND_SRC}/linkuser")
+    sh(f"chcon --reference={CROND_DIR}/cj-e2e-ok {CROND_SRC}/linkuser" + ("" if CRONIE_SELINUX else f" {CROND_SRC}/link"))
 
 with sync_playwright() as p:
     # In a VM the browser runs on the CI runner (python -m playwright run-server), the test here.
@@ -651,9 +655,14 @@ with sync_playwright() as p:
         time.sleep(5)
     jrows = page.locator("#runs-body tbody tr").all_inner_texts()
     check(jrows and all("Fehler · Exit 1" in x for x in jrows), "the timer's runs from the journal: " + repr(jrows))
-    page.locator("#runs-body [data-key^='out:']").first.click()
-    wait_js(page, "document.querySelector('#runs-body pre')")
-    check(page.text_content("#runs-body pre") == "failing from systemd", "its output: " + repr(page.text_content("#runs-body pre")))
+    has_out = page.locator("#runs-body [data-key^='out:']").count() > 0
+    check(has_out, "the timer's runs offer their output: " + repr(jrows) + "\n" +
+          sh(f"journalctl -u {fail_timer}.service -o json --no-pager -n 12 "
+             "--output-fields=MESSAGE,INVOCATION_ID,_SYSTEMD_INVOCATION_ID,_PID,_COMM").stdout[-4000:])
+    if has_out:
+        page.locator("#runs-body [data-key^='out:']").first.click()
+        wait_js(page, "document.querySelector('#runs-body pre')")
+        check(page.text_content("#runs-body pre") == "failing from systemd", "its output: " + repr(page.text_content("#runs-body pre")))
     page.screenshot(path=os.path.join(SHOTS, "e2e-journal-runs.png"))
     page.click("#runs-close-btn")
 
@@ -971,7 +980,7 @@ with sync_playwright() as p:
     wait_idle(page)
     why_text = {"linkOwner": "Link ist, der nicht root gehört", "broken": "Link ins Leere", "owner": "weil sie nicht root gehört",
                 "notFile": "keine normale Datei", "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink",
-                "mode": "wegen ihrer Rechte"}
+                "mode": "wegen ihrer Rechte", "selinux": "unter SELinux wegen ihres Kontexts: Der Typ etc_t"}
     shown = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
         tr.querySelector('.az-mono').textContent, (tr.querySelector('.cron-ignored-why') || {}).textContent || null]))""")
     for name, (reason, _) in CROND.items():

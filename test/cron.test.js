@@ -454,6 +454,36 @@ t("cron.d, cronie: executable, setuid, sticky or not readable by the owner", () 
 t("cron.d, cronie: the mode comes before the owner", () => assert.strictEqual(skip(false, {}, { mode: 0o755, uid: 1000 }), "mode"));
 t("cron.d, cronie: not owned by root", () => assert.strictEqual(skip(false, {}, { uid: 1000 }), "owner"));
 t("cron.d, cronie: hard links do not matter", () => assert.strictEqual(skip(false, {}, { nlink: 3 }), null));
+/* With SELinux enforcing, cronie then wants the context of what it opens to be an entry point of
+   its job's domain (get_security_context in security.c): here, the type of /etc/cron.d's files. */
+const SPOOL = "system_cron_spool_t";
+const skipSe = (debian, o, t) => C.cronDSkip(entry(o, t || {}), debian, SPOOL);
+t("cron.d, cronie with SELinux: a file of the type of /etc/cron.d's files is read", () => {
+    assert.strictEqual(skipSe(false, {}, { type: SPOOL }), null);
+    assert.strictEqual(skipSe(false, { link: { uid: 0 } }, { type: SPOOL }), null);
+});
+t("cron.d, cronie with SELinux: a link to a file of another type", () => {
+    assert.strictEqual(skipSe(false, { link: { uid: 0 } }, { type: "etc_t" }), "selinux");
+    assert.strictEqual(skipSe(false, {}, { type: "admin_home_t" }), "selinux", "a file moved in keeps its type");
+});
+t("cron.d, cronie with SELinux: name, type, mode and owner come first", () => {
+    assert.strictEqual(skipSe(false, { name: "job~" }, { type: "etc_t" }), "name");
+    assert.strictEqual(C.cronDSkip(entry({ link: { uid: 0 } }, null), false, SPOOL), "broken");
+    assert.strictEqual(skipSe(false, {}, { type: "etc_t", regular: false }), "notFile");
+    assert.strictEqual(skipSe(false, {}, { type: "etc_t", mode: 0o755 }), "mode");
+    assert.strictEqual(skipSe(false, {}, { type: "etc_t", mode: 0o664 }), "writable");
+    assert.strictEqual(skipSe(false, {}, { type: "etc_t", uid: 1000 }), "owner");
+});
+t("cron.d, cronie: without SELinux enforcing or a known type, contexts do not count", () => {
+    assert.strictEqual(skip(false, { link: { uid: 0 } }, { type: "etc_t" }), null, "no type of /etc/cron.d's files");
+    assert.strictEqual(C.cronDSkip(entry({ link: { uid: 0 } }, { type: "etc_t" }), false, null), null);
+    [null, undefined, ""].forEach(type => assert.strictEqual(skipSe(false, {}, { type }), null, String(type)));
+});
+t("cron.d, Debian: contexts do not count", () => {
+    assert.strictEqual(skipSe(true, { link: { uid: 0 } }, { type: "etc_t" }), null);
+    assert.strictEqual(skipSe(true, { link: { uid: 1000 } }, { type: "etc_t" }), "linkOwner");
+    assert.strictEqual(skipSe(true, {}, { type: "etc_t", nlink: 2 }), "links");
+});
 t("system crontab parsing", () => {
     const s = "SHELL=/bin/sh\n17 *\t* * *\troot\tcd / && run-parts --report /etc/cron.hourly\n" +
               "@reboot www-data /x\n# 1 2 3 4 5 root no\n";

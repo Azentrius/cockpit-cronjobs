@@ -1875,40 +1875,54 @@ with sync_playwright() as p:
         "group-writable": ["81b4:0:81b4:0:1", "0 3 * * * root /usr/bin/true\n"],
         "hard-linked": ["81a4:0:81a4:0:2", "0 4 * * * root /usr/bin/true\n"],
         "executable": ["81ed:0:81ed:0:1", "0 5 * * * root /usr/bin/true\n"],
+        "link-etc": ["a1ff:0:81a4:0:1", "0 6 * * * root /usr/bin/true\n"],
     }
+    # With SELinux enforcing, the type of what an entry opens (the others have that of /etc/cron.d's files)
+    TYPES = {"link-etc": "etc_t", "executable": "etc_t"}
     WHY = {"linkOwner": "Link ist, der nicht root gehört", "broken": "Link ins Leere", "notFile": "keine normale Datei",
-           "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink", "mode": "wegen ihrer Rechte"}
-    EXPECT = {
-        "debian": {"link-ok": None, "link-user": "linkOwner", "link-broken": "broken", "a-dir": "notFile",
-                   "group-writable": "writable", "hard-linked": "links", "executable": None},
-        "cronie": {"link-ok": None, "link-user": None, "link-broken": "broken", "a-dir": "notFile",
-                   "group-writable": "writable", "hard-linked": None, "executable": "mode"},
-    }
-    for flavor, expect in EXPECT.items():
+           "writable": "Gruppe oder andere", "links": "mehr als einen Hardlink", "mode": "wegen ihrer Rechte",
+           "selinux": "unter SELinux wegen ihres Kontexts: Der Typ etc_t (bei einem Link der seines Ziels) ist nicht "
+                      "system_cron_spool_t"}
+    DEBIAN = {"link-ok": None, "link-user": "linkOwner", "link-broken": "broken", "a-dir": "notFile",
+              "group-writable": "writable", "hard-linked": "links", "executable": None, "link-etc": None}
+    CRONIE = {"link-ok": None, "link-user": None, "link-broken": "broken", "a-dir": "notFile",
+              "group-writable": "writable", "hard-linked": None, "executable": "mode", "link-etc": None}
+    # cronie checks the context only with SELinux enforcing, and after type, mode and owner; Debian's cron not at all
+    EXPECT = {"debian": DEBIAN, "cronie": CRONIE, "debian+selinux": DEBIAN, "cronie+selinux": {**CRONIE, "link-etc": "selinux"}}
+    for case, expect in EXPECT.items():
+        flavor, _, selinux = case.partition("+")
         page = open_page(browser, "flavor=" + flavor)
-        page.evaluate("""m => Object.entries(m).forEach(([f, [meta, text]]) => {
-            window.__mock.sys.crond[f] = text; window.__mock.sys.crondMeta[f] = meta; })""", CROND)
+        page.evaluate("""([m, types, selinux]) => { Object.entries(m).forEach(([f, [meta, text]]) => {
+            window.__mock.sys.crond[f] = text; window.__mock.sys.crondMeta[f] = meta; });
+            window.__mock.sys.crondType = types; window.__mock.selinux = selinux ? 'system_cron_spool_t' : null; }""",
+                      [CROND, TYPES, selinux])
         page.click("#reload")
         wait_idle(page)
         got = page.evaluate("""() => Object.fromEntries(Array.from(document.querySelectorAll('#crond-body tbody tr')).map(tr => [
             tr.querySelector('.az-mono').textContent,
             { why: (tr.querySelector('.cron-ignored-why') || {}).textContent || null,
+              title: (tr.querySelector('.az-label--warning') || {}).title || null,
+              code: Array.from(tr.querySelectorAll('.cron-ignored-why code')).map(c => c.textContent),
               label: !!tr.querySelector('.az-label--warning'), cells: tr.innerText }]))""")
         tl = page.inner_text("#tl-card")
         for f, reason in expect.items():
             row_info = got.get(f)
             if reason is None:
                 check(row_info is not None and row_info["why"] is None and not row_info["label"] and f in tl,
-                      f"{flavor}: {f} is read: {row_info!r}")
+                      f"{case}: {f} is read: {row_info!r}")
             else:
                 check(row_info is not None and row_info["label"] and row_info["why"] and WHY[reason] in row_info["why"]
-                      and f not in tl, f"{flavor}: {f} skipped ({reason}): {row_info!r}")
+                      and row_info["title"] == row_info["why"] and f not in tl, f"{case}: {f} skipped ({reason}): {row_info!r}")
+        if selinux and flavor == "cronie":
+            check(got["link-etc"]["code"][:2] == ["etc_t", "system_cron_spool_t"] and
+                  "chcon -t system_cron_spool_t" in got["link-etc"]["code"],
+                  f"{case}: the types and the fix as code: {got['link-etc']!r}")
         check(got["link-broken"]["cells"].count("—") == 4, f"{flavor}: a file without jobs shows dashes: {got['link-broken']!r}")
-        if flavor == "debian":
+        if case == "debian":
             show_tab(page, "system")
             page.locator("#crond-card").scroll_into_view_if_needed()
             shot(page, "de-light-crond", full=False)
-        check(not page.problems, f"no console problems (cron.d, {flavor}): " + repr(page.problems))
+        check(not page.problems, f"no console problems (cron.d, {case}): " + repr(page.problems))
         page.context.close()
 
     page = open_page(browser, "tz=Europe/Berlin&tzmode=fallback")

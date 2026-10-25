@@ -45,8 +45,8 @@ The screenshots show test data in a stand-in for Cockpit; they come from the CI 
 - **Everything that runs, in one place.** The root crontab, `/etc/crontab`, `/etc/cron.d`, the crontabs of
   other users, the scripts in `/etc/cron.hourly` … `/etc/cron.monthly`, and systemd timers. Schedules are
   written out in words; next runs are shown in server time, and in your own time when that differs.
-  Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links) are marked
-  with the reason, by the rules of the cron that is installed.
+  Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links, and with
+  cronie under SELinux the context) are marked with the reason, by the rules of the cron that is installed.
 - **Three tabs.** Overview (the latest results, the next 24 hours, the root crontab and those of other
   users), systemd timers, and System (`/etc/crontab`, `/etc/cron.d`, the periodic scripts). Notices stay
   visible in every tab; switching tabs loads nothing.
@@ -478,9 +478,11 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
   another user's crontab, only in number: their only names are a command or begin with the user's.
 - On the RHEL rebuilds, which the end-to-end test covers in Rocky Linux 9 and 10 with SELinux
   enforcing, the page does not know everything yet:
-  - With SELinux, cronie skips a file of `/etc/cron.d` whose context its job may not enter, such as a
-    link to a file elsewhere in `/etc` (`etc_t`); crond logs "Unauthorized SELinux context" for it, but
-    the page shows the file as read.
+  - With SELinux enforcing, cronie skips a file of `/etc/cron.d` whose context its job may not enter,
+    such as a link to a file elsewhere in `/etc` (`etc_t`), and logs "Unauthorized SELinux context".
+    The page marks a file whose type (for a link, that of its target) is not the type of `/etc/cron.d`
+    itself, but it does not ask the policy: a file of another type the policy lets cron's jobs enter is
+    marked as skipped, and when `/etc/cron.d` itself is labelled wrongly, the page does not see it.
   - cronie opens a logind session for every job (`pam_systemd` in `password-auth`), so its jobs have
     `XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and the like; run now and a
     converted job do not, as the page says in both dialogs (see [Cron's environment](#crons-environment)).
