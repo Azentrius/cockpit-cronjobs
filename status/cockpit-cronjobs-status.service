@@ -6,7 +6,11 @@ Documentation=https://github.com/Azentrius/cockpit-cronjobs#status-for-the-statu
 
 [Service]
 Type=oneshot
-ExecStart=/usr/lib/cockpit-cronjobs/cronjobs-status write
+# Through /bin/sh, not the file itself: under SELinux systemd runs a file of /usr/lib (lib_t) in its
+# own domain (init_t), which may not read the users' crontabs (user_cron_spool_t), so the helper
+# stopped there. A shell (shell_exec_t) runs in an unconfined domain (initrc_t), as other helpers
+# run through python3 do (unconfined_service_t).
+ExecStart=/bin/sh /usr/lib/cockpit-cronjobs/cronjobs-status write
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=2min
