@@ -318,6 +318,19 @@ const runAwk = (awk, args, input) => spawnSync(awk.bin ? path.join(awk.bin, "awk
 const LOGGED = ["/bin/true", "date +\\%F > /tmp/x%input%more", "echo a\\\\%b", "echo a\\\\b 'x'", "printf 'café €'",
                 "echo \x7f \x01", "echo\ttab", "echo 100%", "%", "\\%", "echo \\\\\\%", "echo '%' \"\\%\"", "a  b   c"];
 
+/* cronie's log when PAM refuses its jobs (cronie 1.7.0 on Rocky Linux 10, a line of /etc/environment
+   pam_env cannot read), as journalctl -o short-unix prints it: a refusal comes from crond, the process
+   that would start the job, before it calls itself CROND; the starts come from CROND. */
+const crondLine = (sec, pid, msg) => `${sec}.250000 host crond[${pid}]: ${msg}`;
+const crondStart = (sec, pid, user, command) => `${sec}.250000 host CROND[${pid}]: (${user}) CMD (${command})`;
+const refusal = (sec, pid, user, reason = "Critical error - immediate abort") => [
+    crondLine(sec, pid, "pam_env(crond:setcred): Unable to read configuration file /etc//environment line 3: Missing delimiter"),
+    crondLine(sec, pid, `(${user}) PAM ERROR (${reason})`),
+    crondLine(sec, pid, `(${user}) FAILED to authorize user with PAM (${reason})`),
+];
+/* The page's script for cron's log, as it runs it. */
+const PAGE_LOG_SCRIPT = /const CRON_LOG_SCRIPT = `([\s\S]*?)`;/.exec(fs.readFileSync(path.join(SRC, "app", "system.js"), "utf8"))[1];
+
 for (const awk of AWKS.filter(a => a.bin)) {
     t(awk.name + ": jobs named as cron logs them, as the page names them (C.loggedCommand)", () => {
         const user = LOGGED.map(c => "* * * * * " + c).join("\n") + `\n@daily ${WRAP} rec-0001 'x'\n`;
@@ -342,6 +355,28 @@ for (const awk of AWKS.filter(a => a.bin)) {
             const c = C.cronLogs("debian", args, 0);
             assert.strictEqual(r.status === 0, c.start && c.failure, args + ": starts and failures, or no job a failure is of");
         }
+    });
+
+    t(awk.name + ": whose jobs PAM refused, read as the page reads them (CRON_LOG_SCRIPT, C.parsePamRefusals)", () => {
+        const journal = fs.mkdtempSync(path.join(os.tmpdir(), "cronjobs-pam-"));
+        const lines = [].concat(
+            crondLine(NOW - 900, 700, "(CRON) STARTUP (1.7.0)"), crondStart(NOW - 840, 7001, "root", "/usr/bin/true"),
+            refusal(NOW - 600, 7040, "root"), refusal(NOW - 600, 7041, "alice"), refusal(NOW - 540, 7050, "www-data"),
+            /* www-data's jobs start again; another boot changes nothing */
+            crondStart(NOW - 480, 7061, "www-data", "php -f /var/www/cron.php"), "-- Boot 0123456789abcdef0123456789abcdef --",
+            refusal(NOW - 420, 7070, "root", "Permission denied"),
+            /* a start whose command looks like a refusal is a start; a refusal without a reason is none */
+            crondStart(NOW - 360, 7081, "bob", "echo ') FAILED to authorize user with PAM (x)'"),
+            crondLine(NOW - 300, 7090, "(carol) FAILED to authorize user with PAM"));
+        fs.writeFileSync(path.join(journal, "cron.log"), lines.join("\n") + "\n");
+        const page = spawnSync("/bin/sh", ["-c", PAGE_LOG_SCRIPT],
+                               { env: { PATH: FAKES + ":" + awk.bin + ":/usr/bin:/bin", LC_ALL: "C", FAKE_JOURNAL: journal } });
+        assert.strictEqual(page.status, 0, page.stderr.toString());
+        const byPage = C.parsePamRefusals(page.stdout.toString()).map(x => x.user).sort();
+        assert.deepStrictEqual(byPage, ["alice", "root"], "refused until a job of theirs starts");
+        const r = runAwk(awk, [awkProgram("REFUSED_AWK")], lines.join("\n") + "\n");
+        assert.strictEqual(r.status, 0, r.stderr.toString());
+        assert.deepStrictEqual(r.stdout.toString().trim().split("\n").sort(), byPage, "the helper as the page");
     });
 }
 
@@ -914,6 +949,60 @@ for (const sh of SHELLS) {
             const d = written(sh, awk, fx);
             assert.strictEqual(d.en.summary, "The cron service is not running, so no cron job starts. 1 job failed in the last 24 hours.");
             assert.strictEqual(d.de.summary, "Der cron-Dienst läuft nicht, daher startet kein cron-Job. 1 Job ist in den letzten 24 Stunden fehlgeschlagen.");
+        });
+
+        t(name + "PAM refuses cronie's jobs: the cron service is a danger, root by name, other users counted", () => {
+            const pam = (lines, setup, tab) => {
+                const fx = fixture();
+                Object.assign(fx, { cron: "crond.service active", pgrep: "crond" }, setup || {});
+                crontab(fx, "root", tab || "* * * * * /usr/bin/true\n");
+                cronLog(fx, [].concat(...lines));
+                const d = written(sh, awk, fx);
+                return { fx, en: d.en, de: d.de, raw: d.raw, c: item(d.en, "cron"), cde: item(d.de, "cron") };
+            };
+            let r = pam([refusal(NOW - 300, 7040, "root"), refusal(NOW - 300, 7041, "alice"), refusal(NOW - 280, 7042, "www-data"),
+                         refusal(NOW - 260, 7043, "bob"), [crondStart(NOW - 200, 7044, "bob", "/usr/local/bin/report")],
+                         refusal(NOW - 90000, 7045, "carol")]);
+            assert.deepStrictEqual([r.en.state, r.c.state, r.c.value, r.c.detail, r.cde.value, r.cde.detail],
+                ["danger", "danger", "PAM refuses jobs",
+                 "crond.service is running, but PAM refused to start the jobs of root and 2 other users (cron's log, last 24 hours), " +
+                 "and none of them has started since.",
+                 "PAM weist Jobs ab",
+                 "crond.service läuft, aber PAM hat die Jobs von root und 2 weiteren Benutzern abgewiesen (Log von cron, letzte 24 " +
+                 "Stunden), und seitdem ist keiner gestartet."], "bob's jobs start again, carol's refusal is older than 24 hours");
+            assert.strictEqual(r.en.summary, "PAM refuses to start the cron jobs of root and 2 other users, so they do not run.");
+            assert.strictEqual(r.de.summary, "PAM lässt die cron-Jobs von root und 2 weiteren Benutzern nicht starten, daher laufen sie nicht.");
+            assert.ok(["alice", "www-data", "bob", "carol"].every(u => !r.raw.en.includes(u) && !r.raw.de.includes(u)), "no user name but root");
+            const calls = journalCalls(r.fx).filter(c => c.startsWith("- "));
+            assert.strictEqual(calls.length, 1, calls.join("; "));
+            assert.ok(Math.abs(Number(calls[0].split(" ")[1]) - (NOW - 86400)) < 600, "the last 24 hours: " + calls[0]);
+            for (const [users, en, de] of [[["root"], "root", "root"],
+                                           [["root", "alice"], "root and 1 other user", "root und einem weiteren Benutzer"],
+                                           [["alice"], "another user", "einem anderen Benutzer"],
+                                           [["alice", "bob"], "2 other users", "2 anderen Benutzern"]]) {
+                r = pam(users.map((u, k) => refusal(NOW - 300, 7100 + k, u)));
+                assert.strictEqual(r.en.summary, `PAM refuses to start the cron jobs of ${en}, so they do not run.`, users.join());
+                assert.strictEqual(r.de.summary, `PAM lässt die cron-Jobs von ${de} nicht starten, daher laufen sie nicht.`, users.join());
+                assert.ok(r.c.detail.includes(`the jobs of ${en} (`) && r.cde.detail.includes(`die Jobs von ${de} abgewiesen`),
+                          r.c.detail + " | " + r.cde.detail);
+            }
+            /* and a failed job besides; without systemd */
+            r = pam([refusal(NOW - 300, 7040, "root")], { systemd: "no" }, `* * * * * ${wrapped("pam-0001", "x")}\n`);
+            runs(r.fx, "root", "pam-0001", [rec(NOW - 60, 1)]);
+            const d = written(sh, awk, r.fx);
+            assert.strictEqual(item(d.en, "cron").detail.indexOf("cron is running, but PAM refused to start the jobs of root ("), 0);
+            assert.strictEqual(d.en.summary, "PAM refuses to start the cron jobs of root, so they do not run. 1 job failed in the last 24 hours.");
+            assert.strictEqual(d.de.summary,
+                               "PAM lässt die cron-Jobs von root nicht starten, daher laufen sie nicht. 1 Job ist in den letzten 24 Stunden fehlgeschlagen.");
+            /* a job of theirs started since: as before */
+            r = pam([refusal(NOW - 300, 7040, "root"), [crondStart(NOW - 240, 7050, "root", "/usr/bin/true")]]);
+            assert.deepStrictEqual([r.en.state, r.c.state, r.c.value, r.c.detail], ["ok", "ok", "running", "crond.service is running."]);
+            /* Debian's cron is not asked, and stopped, cron is stopped */
+            for (const [setup, value] of [[{ cron: "cron.service active", pgrep: "cron" }, "running"],
+                                          [{ cron: "crond.service inactive", pgrep: "" }, "stopped"]]) {
+                r = pam([refusal(NOW - 300, 7040, "root")], setup);
+                assert.deepStrictEqual([r.c.value, journalCalls(r.fx)], [value, []], JSON.stringify(setup));
+            }
         });
 
         t(name + "status without a status file: none, and why", () => {

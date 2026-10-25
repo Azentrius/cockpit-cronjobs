@@ -20,7 +20,9 @@
 # exit code other than 0 or was aborted, as on the page; a converted job when systemd says a run of
 # its service in the last 24 hours failed, or the run lost its end; any other job of those crontabs,
 # /etc/crontab and /etc/cron.d when cron logged that a run of it started in the last 24 hours
-# failed (the page's CRON_LOG_SCRIPT reads the same lines).
+# failed (the page's CRON_LOG_SCRIPT reads the same lines). When cronie runs (crond), its log of the
+# last 24 hours also tells whether PAM refused to start the jobs of a user, none of whom started
+# since: then the cron service is a danger, though it runs (root by name, other users counted).
 #
 # Exit codes: 0 done (a failed job is a finding, not an error), 64 wrong call, 77 "write" without
 # root, 1 the status could not be written.
@@ -81,7 +83,7 @@ head_json() {
 
 # Where a click on the Status Board goes: the place on the page that shows the item (PLACES in
 # src/app/tabs.js): the latest results with the failures first, the crontabs, the notices (where
-# the page says that cron is not running).
+# the page says that cron is not running, or that PAM refuses its jobs).
 link() {
     case $1 in
         failed) printf '#/overview/results' ;;
@@ -359,6 +361,23 @@ function ended(k, x,   a, i, c) {
 }
 '
 
+# The users whose jobs PAM refused, each once, from cron's log (standard input: journalctl -o
+# short-unix, oldest first), as the page reads them (CRON_LOG_SCRIPT): cronie logs "(USER) FAILED
+# to authorize user with PAM (REASON)" when PAM does not let it start a job of USER, and a start
+# "(USER) CMD (COMMAND)" after that says PAM lets it start them again. Only the names, to count them.
+REFUSED_AWK='
+{
+    i = index($0, ": (")
+    if (i == 0) next
+    m = substr($0, i + 2)
+    if (!match(substr($0, 1, i - 1), /[[][0-9]+[]]$/)) next
+    u = substr(m, 2, index(m, ")") - 2)
+    if (m ~ /^[(][^()]*[)] CMD [(].*[)]$/) delete refused[u]
+    else if (m ~ /^[(][^()]*[)] FAILED to authorize user with PAM [(].*[)]$/) refused[u] = 1
+}
+END { for (u in refused) print u }
+'
+
 # Whether the -L of a cron command line (standard input, as BASICS_SCRIPT reads it) has 4 and 1:
 # Debian's cron then logs failed jobs, and their starts, which say which job a failure is of (without
 # them a failure belongs to no job, and nothing can be said). As C.cronLogs reads it: 1 without one,
@@ -607,6 +626,40 @@ count_log() {
     done < "$tmp/lognames"
 }
 
+# When cronie runs (a process crond): counts the users whose jobs PAM refused in the last 24 hours,
+# and of whom no job started since, into refused, root among them when refused_root is 1
+# (REFUSED_AWK). cronie logs a refusal as crond, before the process calls itself CROND to start the
+# job, and the starts as CROND. Debian's cron (cron, CRON) is not asked.
+count_refused() {
+    refused=0
+    refused_root=0
+    command -v pgrep > /dev/null 2>&1 && pgrep -x crond > /dev/null 2>&1 || return 0
+    command -v journalctl > /dev/null 2>&1 || return 0
+    journalctl --no-pager -o short-unix --since "@$since" _UID=0 SYSLOG_IDENTIFIER=crond SYSLOG_IDENTIFIER=CROND < /dev/null 2> /dev/null |
+        awk "$REFUSED_AWK" > "$tmp/refused"
+    refused=$(wc -l < "$tmp/refused" | tr -d ' ')
+    if grep -qx root "$tmp/refused"; then refused_root=1; fi
+}
+
+# Whose jobs PAM refuses (count_refused), without a name but root's: "root", "root and 2 other
+# users", "another user", "3 other users"; in German the dative, after "von".
+refused_whom() {
+    others=$((refused - refused_root))
+    if [ "$refused_root" = 1 ]; then
+        if [ "$others" = 0 ]; then
+            printf root
+        elif [ "$others" = 1 ]; then
+            say "root and 1 other user" "root und einem weiteren Benutzer"
+        else
+            say "root and $others other users" "root und $others weiteren Benutzern"
+        fi
+    elif [ "$others" = 1 ]; then
+        say "another user" "einem anderen Benutzer"
+    else
+        say "$others other users" "$others anderen Benutzern"
+    fi
+}
+
 # The failed jobs by ID or path and the failed timers of root's crontab by name, the first few and
 # how many more; the timers of other users' crontabs and the failed jobs of the crontabs that do
 # not record their runs only in that number.
@@ -647,7 +700,8 @@ worst() {
     printf none
 }
 
-# The status document in $lang, from what count, count_log, count_timers and cron_service found.
+# The status document in $lang, from what count, count_log, count_timers, cron_service and
+# count_refused found.
 document() {
     known=$((recorded + converted))
 
@@ -696,15 +750,23 @@ document() {
         u_detail=$(say "There are no jobs in the crontabs of root and other users." "In den Crontabs von root und anderen Benutzern gibt es keine Jobs.")
     fi
 
-    # Stopped, it is a danger when the crontabs have jobs it no longer starts, else a warning.
+    # Stopped, it is a danger when the crontabs have jobs it no longer starts, else a warning. Running,
+    # it is a danger too when PAM refuses its jobs (count_refused).
     c_title=$(say "Cron service" "Cron-Dienst")
     c_unit=${cron% *}
     c_run=${cron##* }
+    c_refused=0
     if [ "$c_unit" = - ]; then c_unit=cron; fi
     if [ -z "$cron" ]; then
         c_state=none
         c_value=
         c_detail=$(say "No cron service was found." "Es wurde kein cron-Dienst gefunden.")
+    elif [ "$c_run" = active ] && [ "$refused" -gt 0 ]; then
+        c_state=danger
+        c_refused=1
+        whom=$(refused_whom)
+        c_value=$(say "PAM refuses jobs" "PAM weist Jobs ab")
+        c_detail=$(say "$c_unit is running, but PAM refused to start the jobs of $whom (cron's log, last 24 hours), and none of them has started since." "$c_unit läuft, aber PAM hat die Jobs von $whom abgewiesen (Log von cron, letzte 24 Stunden), und seitdem ist keiner gestartet.")
     elif [ "$c_run" = active ]; then
         c_state=ok
         c_value=$(say running "läuft")
@@ -716,7 +778,11 @@ document() {
     fi
 
     if [ "$c_state" = danger ] || [ "$c_state" = warning ]; then
-        summary=$(say "The cron service is not running, so no cron job starts." "Der cron-Dienst läuft nicht, daher startet kein cron-Job.")
+        if [ "$c_refused" = 1 ]; then
+            summary=$(say "PAM refuses to start the cron jobs of $whom, so they do not run." "PAM lässt die cron-Jobs von $whom nicht starten, daher laufen sie nicht.")
+        else
+            summary=$(say "The cron service is not running, so no cron job starts." "Der cron-Dienst läuft nicht, daher startet kein cron-Job.")
+        fi
         if [ "$bad" = 1 ]; then
             summary="$summary $(say "1 job failed in the last 24 hours." "1 Job ist in den letzten 24 Stunden fehlgeschlagen.")"
         elif [ "$bad" -gt 1 ]; then
@@ -769,6 +835,7 @@ write() {
     count_log
     count_timers
     cron=$(cron_service)
+    count_refused
     # 711 as the page sets it: others reach the status files by name but list nothing.
     install -d -m 711 "$state" && chmod 711 "$state" || exit 1
     for lang in en de; do

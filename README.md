@@ -315,7 +315,7 @@ English for any other language). Without the file it reports `none` and why.
 |---|---|---|
 | `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, or cron's log says a run of another job failed, with the number of those jobs, their IDs, the names of the timers and the paths of the jobs of `/etc/crontab` and `/etc/cron.d`; `ok` when none did; `none` when no job records its runs, none was converted and cron logs no failures | `#/overview/results`: the latest results, failures first |
 | `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known (or, when cron logs failures, only those); `ok` when every job records them | `#/overview/crontab`: the root crontab, the other users' after it |
-| `cron` | `ok` when the cron service runs; when it does not, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask | `#/overview/notices`: where the page says that cron is not running |
+| `cron` | `ok` when the cron service runs; `danger` when it runs but cronie's log of the last 24 hours shows that PAM refused to start the jobs of a user and none of that user's jobs started since (root by name, other users in number); when it does not run, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask | `#/overview/notices`: where the page says that cron is not running, or that PAM refuses its jobs |
 
 The crontabs of root and the other users count: the jobs there are the ones the page can record,
 read as the page reads them, and the jobs converted from them, whose runs come from the journal of
@@ -324,10 +324,13 @@ conversion wrote, checked as back to cron checks them. When Debian's cron logs s
 read from its command line as the page reads it), its log of the last 24 hours counts as well, read
 as on the page: a failure belongs to the job whose start names the same process, and counts when that
 job is still in one of those crontabs, `/etc/crontab` or `/etc/cron.d` and does not record its runs
-(those count from their records). The files hold numbers, states, job IDs, the names of timers
-converted from root's crontab and the paths of `/etc/crontab` and `/etc/cron.d/FILE` for their jobs;
-no user names, commands or output. Timers converted from another user's crontab and jobs of the
-crontabs that failed by cron's log are only counted, since the name a conversion suggests begins with
+(those count from their records). When cronie runs (`crond`), its log of the last 24 hours also says
+whether PAM refused to start the jobs of a user ("FAILED to authorize user with PAM", which cronie logs
+as `crond`), read as on the page: a refusal counts until a job of that user starts again. The files
+hold numbers, states, job IDs, the names of timers converted from root's crontab and the paths of
+`/etc/crontab` and `/etc/cron.d/FILE` for their jobs; no user names, commands or output. Timers
+converted from another user's crontab, jobs of the crontabs that failed by cron's log and users other
+than root whose jobs PAM refused are only counted, since the name a conversion suggests begins with
 the user's and a job without recording has no name but its command. Each item is stale after an hour
 without a new status (`stale_after`), that is four runs of the timer missed.
 
@@ -338,11 +341,11 @@ tab has an address of its own (`#/overview`, `#/timers`, `#/system`), and a tab 
 into it.
 
 **In Cockpit's menu** the entry “Cron Jobs” shows the same state with Cockpit's own icon (red: a job
-failed or cron is stopped; yellow: a warning, or the status is more than an hour old) and the summary
-as its tooltip, judged as the Status Board judges it; nothing to do, no icon. For this Cockpit loads
-the page hidden right after the login (`preload` in `src/manifest.json`, as for Cockpit's own Software
-updates page); until you open it, the page only reads the status file of its language every five
-minutes (`src/menu-status.js`) and runs nothing else.
+failed, cron is stopped or PAM refuses its jobs; yellow: a warning, or the status is more than an hour
+old) and the summary as its tooltip, judged as the Status Board judges it; nothing to do, no icon. For
+this Cockpit loads the page hidden right after the login (`preload` in `src/manifest.json`, as for
+Cockpit's own Software updates page); until you open it, the page only reads the status file of its
+language every five minutes (`src/menu-status.js`) and runs nothing else.
 
 The packages and `make install` turn the timer on, and it stays on through upgrades. To turn it off for
 good: `sudo systemctl mask --now cockpit-cronjobs-status.timer`.
@@ -392,6 +395,10 @@ systemd would add and cron does not give, such as `USER` on Debian and Ubuntu. W
   text that is not UTF-8. The card says which; fix the crontab on the console, then reload.
 - **“The run recorder is missing”** or **“can be updated”:** jobs that record their runs need
   `/usr/local/libexec/cockpit-cronjobs-run`; the notice installs or updates it.
+- **“PAM keeps cron from starting jobs”:** cronie's log shows that PAM refused to start the jobs of the
+  users named, with PAM's reason, and none of their jobs has started since. `journalctl -t crond` says
+  why; a common cause is a line of `/etc/environment` that pam_env cannot read, such as one with
+  `export` where Linux-PAM reads the file with libeconf. Once their jobs start again, the notice goes.
 - **How a run ended is not shown** for jobs that do not record their runs: Debian's and Ubuntu's cron log
   only the start unless told otherwise, and the System tab says so. To have cron log the end and failures
   as well, start it with `-L 15`. On Ubuntu, `sudo systemctl edit cron.service` and add
@@ -478,8 +485,8 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
     from `pam_systemd`), and its `PATH` and `LANG` are not the ones the page gives.
   - Where Linux-PAM reads `/etc/environment` with libeconf (Rocky Linux 10), `export` is not allowed,
     single quotes stay and the space before a `#` goes; a line pam_env cannot read makes PAM refuse
-    every cron job (crond logs "FAILED to authorize user with PAM"), and the page does not warn about
-    that.
+    every cron job (crond logs "FAILED to authorize user with PAM"). The page and the status warn when
+    cronie's log shows PAM refusing jobs, until a job of that user starts again.
 - BusyBox cron (Alpine) is not supported. The packages are tested on Debian 13, Fedora 43, Rocky
   Linux and AlmaLinux 9 and 10; installing them on Ubuntu, RHEL itself or openSUSE is untested.
 - English and German only (see [Translations](#translations)).
