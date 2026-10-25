@@ -45,12 +45,11 @@ def pam_env_econf():
 
 
 PAM_ECONF = pam_env_econf()
-# Known limits on the RHEL rebuilds (README, Known limits), left out where environments are compared
-# until the page knows them: cronie opens a logind session for every job (pam_systemd in
-# password-auth), with variables that run now and a unit do not get; and its PATH and LANG differ.
+# A known limit on the RHEL rebuilds (README, Known limits): cronie opens a logind session for every
+# job (pam_systemd in password-auth), whose variables run now and a unit cannot have. The page says
+# so where it shows their environment; only these are left out where environments are compared.
 CRON_SESSION = {"DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "XDG_SESSION_CLASS", "XDG_SESSION_ID",
                 "XDG_SESSION_TYPE"} if CRONIE else set()
-CRON_KNOWN = CRON_SESSION | ({"LANG", "PATH"} if CRONIE else set())
 
 URL = os.environ.get("COCKPIT_URL", "http://127.0.0.1:9091/cockpit/@localhost/cronjobs/index.html")
 WRAP = "/usr/local/libexec/cockpit-cronjobs-run"
@@ -459,6 +458,12 @@ with sync_playwright() as p:
     by_cron = who_parts(wait_file("/tmp/cj-e2e-root-cron"))
     check(by_cron[0] == "root" and by_cron[1] == "/root" and by_cron[2].get("CJ_E2E_EXPORT") == "quoted value" and
           by_cron[2].get("USER") == ("root" if CRONIE else None), "cron ran the job as root with /etc/environment: " + repr(by_cron))
+    if CRONIE:
+        # all of it once in the log, so that each release's values can be read there
+        print((sh("crond -V").stdout.strip() or "cronie") + " gave root's job:\n" +
+              "".join(f"  {k}={v}\n" for k, v in sorted(by_cron[2].items())), end="")
+    # whether cron opened a logind session for the job (pam_systemd), which the page names
+    logind = "XDG_SESSION_ID" in by_cron[2]
     # cron's log: the page finds that run of the jobs, which do not record their runs, by the
     # command as cron logs it. Debian's cron in CI once with -L 15 (start, end, failure, the job's
     # PID before the command): then how they ended; else only when they started, and a hint on -L.
@@ -509,15 +514,21 @@ with sync_playwright() as p:
     who_row.locator("[data-key^='run:']").click()
     check("Außerdem gesetzt:" in page.inner_text("#run-env") and "CJ_E2E_EXPORT" in page.inner_text("#run-env"),
           "the run dialog names the other variables: " + page.inner_text("#run-env"))
+    check(("logind-Sitzung" in page.inner_text("#run-env")) == logind,
+          f"the run dialog names cron's logind session exactly when there is one ({logind}): " + page.inner_text("#run-env"))
     page.click("#run-start")
     wait_js(page, "!document.querySelector('#run-done-actions').hidden")
     page.click("#run-close-btn")
     by_now = who_parts(read("/tmp/cj-e2e-root-out"))
-    check(by_now[:2] == by_cron[:2] and not env_diff(by_cron[2], by_now[2], CRON_KNOWN),
-          "run now: the environment cron gives, all of it: " + repr(env_diff(by_cron[2], by_now[2], CRON_KNOWN)))
+    check(by_now[:2] == by_cron[:2] and not env_diff(by_cron[2], by_now[2], CRON_SESSION),
+          "run now: the environment cron gives, all of it: " + repr(env_diff(by_cron[2], by_now[2], CRON_SESSION)))
     unit = "cj-e2e-who"
     who_row.locator("[data-key^='more:']").click()
     page.locator(".cron-menu__item", has_text="In systemd-Timer umwandeln").click()
+    wait_js(page, "!document.querySelector('#conv-dlg').hidden")
+    check(page.locator("#conv-logind").is_visible() == logind and
+          ("logind-Sitzung" in page.inner_text("#conv-logind")) == logind,
+          f"the conversion names cron's logind session exactly when there is one ({logind}): " + page.inner_text("#conv-logind"))
     page.fill("#conv-name", unit)
     wait_js(page, "!document.querySelector('#conv-ok').disabled")
     page.click("#conv-ok")
@@ -526,9 +537,9 @@ with sync_playwright() as p:
     os.remove("/tmp/cj-e2e-root-out")
     started = sh(f"systemctl start {unit}.service")
     by_unit = who_parts(read("/tmp/cj-e2e-root-out"))
-    check(started.returncode == 0 and by_unit[:2] == by_cron[:2] and not env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN | CRON_KNOWN),
+    check(started.returncode == 0 and by_unit[:2] == by_cron[:2] and not env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN | CRON_SESSION),
           "the converted unit: the environment cron gives, all of it: " + started.stderr +
-          repr(env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN | CRON_KNOWN)) + "\n" + (read(f"/etc/systemd/system/{unit}.service") or ""))
+          repr(env_diff(by_cron[2], by_unit[2], SYSTEMD_OWN | CRON_SESSION)) + "\n" + (read(f"/etc/systemd/system/{unit}.service") or ""))
     # the converted job keeps its history: the run of its service, from the journal
     page.click("#reload")
     wait_idle(page)
@@ -791,9 +802,9 @@ with sync_playwright() as p:
     log = page.text_content("#run-log")   # not inner_text: a value may end in a space
     cron_ran, now_ran = who_parts(who), who_parts(log)
     check("OK" in page.inner_text("#run-label") and cron_ran[0] == now_ran[0] == USER and cron_ran[1] == now_ran[1] and
-          not env_diff(cron_ran[2], now_ran[2], CRON_KNOWN) and cron_ran[2].get("CJ_E2E_INNER") == "a\"b",
+          not env_diff(cron_ran[2], now_ran[2], CRON_SESSION) and cron_ran[2].get("CJ_E2E_INNER") == "a\"b",
           "run now: the user, working directory and environment cron gave, all of it: " +
-          repr(env_diff(cron_ran[2], now_ran[2], CRON_KNOWN)) + " " + repr(log))
+          repr(env_diff(cron_ran[2], now_ran[2], CRON_SESSION)) + " " + repr(log))
     page.screenshot(path=os.path.join(SHOTS, "e2e-user-run.png"))
     page.click("#run-close-btn")
 
@@ -910,9 +921,9 @@ with sync_playwright() as p:
     by_unit = who_parts(read("/tmp/cj-e2e-user-unit"))
     check(started.returncode == 0 and by_unit[0] == USER and by_unit[1] == cron_ran[1] and
           os.path.exists("/tmp/cj-e2e-user-unit") and os.stat("/tmp/cj-e2e-user-unit").st_uid == uid and
-          not env_diff(cron_ran[2], by_unit[2], SYSTEMD_OWN | CRON_KNOWN),
+          not env_diff(cron_ran[2], by_unit[2], SYSTEMD_OWN | CRON_SESSION),
           "the converted unit runs as the user, where and with what cron gives it: " + started.stderr +
-          repr(env_diff(cron_ran[2], by_unit[2], SYSTEMD_OWN | CRON_KNOWN)) + "\n" + unit_text)
+          repr(env_diff(cron_ran[2], by_unit[2], SYSTEMD_OWN | CRON_SESSION)) + "\n" + unit_text)
     urow.locator("[data-key^='more:']").click()
     page.locator(".cron-menu__item", has_text="Zurück zu cron").click()
     wait_js(page, "!document.querySelector('#back-ok').disabled")

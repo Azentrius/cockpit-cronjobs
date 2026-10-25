@@ -48,6 +48,10 @@ export function openConvert(user, index, openerKey) {
     let name = suggestName(user, info.command);
     for (let n = 2; taken.has(name); n++) name = suggestName(user, info.command) + "-" + n;
     $("conv-intro").textContent = T.convIntro(user);
+    /* cron's logind session (C.cronEnvModel) is not something a unit can give */
+    const logind = !!(state.basics.cronEnv && state.basics.cronEnv.logind);
+    fill($("conv-logind"), logind ? rich(T.convLogind) : null);
+    $("conv-logind").hidden = !logind;
     $("conv-after").textContent = T.convAfter(user);
     $("conv-name").value = name;
     $("conv-persistent").checked = false;

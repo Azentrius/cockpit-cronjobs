@@ -84,6 +84,16 @@ t("the hint's line for systemd sets the whole option", () => {
     });
 });
 
+/* Where cron opens a logind session for each job, the run dialog and the conversion name it with
+   the variables run now and a unit do not get (C.cronEnvModel); the end-to-end test looks for
+   "logind". */
+t("the notes on cron's logind session name it and its variables", () => {
+    LANGS.forEach(l => ["runLogind", "convLogind"].forEach(k => {
+        const s = texts[l].ui[k];
+        assert.ok(/logind/.test(s) && s.includes("`XDG_SESSION_ID`") && s.includes("`XDG_RUNTIME_DIR`"), `${l}.${k}`);
+    }));
+});
+
 t("locales", () => {
     assert.strictEqual(texts.de.locale, "de-DE");
     assert.strictEqual(texts.en.locale, "en-US");
