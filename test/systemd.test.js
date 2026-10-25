@@ -124,6 +124,15 @@ t("analyze output, UTC", () => {
     assert.deepStrictEqual(SD.parseAnalyzeCalendar(out).map(x => new Date(x).toISOString()),
                            ["2026-10-13T00:00:00.000Z", "2026-10-14T00:00:00.000Z"]);
 });
+/* systemd 252 (RHEL 9 and its rebuilds) prints the runs after the next as "Iter. #N";
+   real output of Rocky Linux 9.8 for the schedule of `30 1 * * 0`. */
+t("analyze output, systemd 252 (Iter. #N)", () => {
+    const out = "Normalized form: Sun *-*-* 01:30:00\n    Next elapse: Sun 2026-11-01 01:30:00 UTC\n" +
+                "       From now: 6 days left\n       Iter. #2: Sun 2026-11-08 01:30:00 UTC\n" +
+                "       From now: 1 week 6 days left\n       Iter. #3: Sun 2026-11-15 01:30:00 UTC\n";
+    assert.deepStrictEqual(SD.parseAnalyzeCalendar(out).map(x => new Date(x).toISOString()),
+                           ["2026-11-01T01:30:00.000Z", "2026-11-08T01:30:00.000Z", "2026-11-15T01:30:00.000Z"]);
+});
 t("analyze output, other zone without DST (no UTC line)", () => {
     const out = "    Next elapse: Tue 2026-10-13 00:00:00 GMT\n";
     assert.deepStrictEqual(SD.parseAnalyzeCalendar(out), [Date.UTC(2026, 9, 13)]);
