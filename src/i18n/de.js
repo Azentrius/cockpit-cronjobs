@@ -45,6 +45,14 @@
         cronDownTitle: "Der cron-Dienst läuft nicht",
         cronDownBody: "Geplante Jobs werden erst wieder ausgeführt, wenn er gestartet ist.",
         openServices: "In Dienste öffnen",
+        pamRefusedTitle: "PAM hindert cron daran, Jobs zu starten",
+        pamRefusedBody: (who, when) => `Laut dem Log von cron hat PAM die Jobs von ${who} abgewiesen, zuletzt ${when}, und ` +
+                                       "seitdem ist keiner dieser Jobs gestartet. Den Grund nennt das Journal von crond " +
+                                       "(`journalctl -t crond`); häufig ist es eine Zeile in `/etc/environment`, die pam_env " +
+                                       "nicht lesen kann, etwa eine mit `export`. Dieser Hinweis verschwindet, sobald diese " +
+                                       "Jobs wieder starten.",
+        pamRefusedUser: (user, reason) => `${user} (${reason})`,
+        pamRefusedMore: n => n === 1 ? "1 weiteren Benutzer" : `${n} weiteren Benutzern`,
         noCrontabTitle: "cron ist nicht installiert",
         noCrontabBody: "Der Befehl `crontab` wurde nicht gefunden. Installieren Sie das cron-Paket Ihrer " +
                        "Distribution (etwa `cron` oder `cronie`).",

@@ -169,7 +169,7 @@ async function load() {
         readCronLog(),
     ]);
     if (logSeq > cronLogShown) {
-        state.cronLog = cronLog.status === "fulfilled" ? cronLog.value : null;
+        setCronLog(cronLog.status === "fulfilled" ? cronLog.value : null);
         cronLogShown = logSeq;
     }
     if (root.status === "fulfilled") setCrontab("root", root.value);
@@ -235,6 +235,14 @@ export function refreshRuns() {
    again). Every read, a reload's too, gets a number: an answer that comes back after a newer one
    was shown is dropped. A read that fails keeps what was read before. */
 const CRON_LOG_EVERY = 60000;
+
+/* What a read of cron's log found (readCronLog), or null when it could not be read: the runs
+   cron started, and whose jobs PAM refuses. */
+function setCronLog(log) {
+    state.cronLog = log ? log.runs : null;
+    state.cronRefused = log ? log.refused : [];
+}
+
 let cronLogSeq = 0;
 let cronLogShown = 0;
 let cronLogReadAt = 0;
@@ -246,7 +254,7 @@ export function refreshCronLog(force) {
     const seq = ++cronLogSeq;
     return readCronLog().then(log => {
         if (seq <= cronLogShown) return;   /* a newer read was shown already */
-        state.cronLog = log;
+        setCronLog(log);
         cronLogShown = seq;
     }, () => { /* the next reload says what is wrong */ }).finally(() => {
         cronLogLoading = false;

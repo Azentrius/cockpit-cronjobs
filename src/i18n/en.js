@@ -47,6 +47,14 @@
         cronDownTitle: "The cron service is not running",
         cronDownBody: "Scheduled jobs do not run until it is started again.",
         openServices: "Open in Services",
+        pamRefusedTitle: "PAM keeps cron from starting jobs",
+        /* who: pamRefusedUser for each user (and pamRefusedMore); when: "today at 14:03" */
+        pamRefusedBody: (who, when) => `cron's log shows that PAM refused to start the jobs of ${who}, most recently ${when}, ` +
+                                       "and no job of theirs has started since. The journal of crond says why " +
+                                       "(`journalctl -t crond`); a common cause is a line in `/etc/environment` that pam_env " +
+                                       "cannot read, such as one with `export`. This notice goes away once their jobs start again.",
+        pamRefusedUser: (user, reason) => `${user} (${reason})`,
+        pamRefusedMore: n => n === 1 ? "1 more user" : `${n} more users`,
         noCrontabTitle: "cron is not installed",
         noCrontabBody: "The `crontab` command was not found. Install your distribution's cron package " +
                        "(for example `cron` or `cronie`).",

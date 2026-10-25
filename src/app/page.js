@@ -7,7 +7,7 @@
 
 import {
     $, C, cap, clock, codeSafe, cronNext, fill, fmtClock, fmtDuration, fmtLocal, fmtRelative, fmtShort, fmtWhen, h, icon,
-    keyOf, R, rich, S, SD, state, T, tzLabel, withFix,
+    joinList, keyOf, R, rich, S, SD, state, T, tzLabel, withFix,
 } from "./core.js";
 import { errText, installWrapper } from "./system.js";
 import {
@@ -39,7 +39,21 @@ export function showAlert(kind, title, body) {
 }
 export function clearAlerts() { fill($("alerts")); }
 
-/* Lasting notes about the server: no mail program, cron not running, run recorder. */
+/* How many of the users whose jobs PAM refuses the notice names; the others in number. */
+const REFUSED_NAMED = 5;
+
+/* The notice that PAM refuses cron's jobs (state.cronRefused): the users, root first, each with
+   PAM's reason as cron logged it, and when that last happened. Names and reasons come from the
+   log, so they go in as plain text (codeSafe: no code marks of their own). */
+function pamRefusedBody(refused) {
+    const named = refused.slice(0, REFUSED_NAMED)
+        .map(r => r.reason ? T.pamRefusedUser(codeSafe(r.user), codeSafe(r.reason)) : codeSafe(r.user));
+    if (refused.length > named.length) named.push(T.pamRefusedMore(refused.length - named.length));
+    return T.pamRefusedBody(joinList(named), fmtWhen(Math.max.apply(null, refused.map(r => r.at))));
+}
+
+/* Lasting notes about the server: no mail program, cron not running, PAM refusing cron's jobs,
+   run recorder. */
 export function renderNotices() {
     const b = state.basics;
     const out = [];
@@ -54,6 +68,7 @@ export function renderNotices() {
                 T.openServices, icon("external-link-alt"))
             : null));
     }
+    if (state.cronRefused.length) out.push(alertEl("danger", T.pamRefusedTitle, pamRefusedBody(state.cronRefused)));
     if (capturedJobs.length && b.wrapper === "missing") {
         out.push(alertEl("danger", T.wrapperMissingTitle, T.wrapperMissingBody(capturedJobs.length, C.WRAPPER_PATH),
             h("button", { class: "az-btn az-btn--link", type: "button", id: "wrapper-install",

@@ -743,6 +743,31 @@ t("cron's log: commands as cron writes them, the newest start of each", () => {
     assert.strictEqual(C.lastStart(null, "root", "x"), null, "no log");
     assert.strictEqual(C.lastRun(null, "root", "x"), null, "no log");
 });
+t("cron's log: whose jobs PAM refused, root first, the log's text as it came, cut", () => {
+    const long = "x".repeat(200);
+    const refused = C.parsePamRefusals([
+        "1792800120 - - (root) CMD (/usr/bin/true)",
+        "PAM 1792800300 (www-data) (Critical error - immediate abort)",
+        "PAM 1792800100 (alice) (Permission denied)",
+        "PAM 1792800400 (root) (Critical error - immediate abort)",
+        "PAM 1792800200 (root) (an older line of root's)",
+        "PAM 1792800500 (bob) (<b>not bold</b> `no code` (nested))",
+        "PAM 1792800600 (carol) ()",
+        "PAM 1792800700 (dave) (" + long + ")",
+        "PAM 1792800800 (two words) (x)", "PAM x (eve) (x)", "PAM 1792800900 (" + "f".repeat(65) + ") (x)",
+        "PAM 1792801000 (frank) x", "pam 1792801000 (frank) (x)", "PAM 1792801000 (frank) (x) ", "",
+    ].join("\n"));
+    assert.deepStrictEqual(refused.map(r => r.user), ["root", "alice", "bob", "carol", "dave", "www-data"],
+                           "root first, then by name; a name with a space, without a time, too long or a line of another form is none");
+    assert.deepStrictEqual(refused[0], { user: "root", at: 1792800400000, reason: "Critical error - immediate abort" }, "the newest of a user");
+    assert.strictEqual(refused[2].reason, "<b>not bold</b> `no code` (nested)", "the reason as cron logged it");
+    assert.strictEqual(refused[3].reason, "", "no reason");
+    assert.strictEqual(Array.from(refused[4].reason).length, 120, "a long reason is cut");
+    assert.ok(refused[4].reason.endsWith("x…"));
+    assert.deepStrictEqual(C.parsePamRefusals(""), []);
+    assert.deepStrictEqual(C.parsePamRefusals(null), []);
+    assert.strictEqual(C.parseCronLog("PAM 1792800400 (root) (Critical error - immediate abort)").size, 0, "no run");
+});
 t("cron's log: what cron logs, and what it says about a run", () => {
     const L = (args, since) => C.cronLogs("debian", args, since);
     assert.deepStrictEqual(L("/usr/sbin/cron -f -P", 5), { start: true, end: false, failure: false, since: 5 }, "-L 1 by default");

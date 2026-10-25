@@ -138,6 +138,7 @@
        the newest, else it lost its end (aborted). */
     function parseJournal(text, keep, limit) {
         const byId = new Map();
+        let last = null;   /* the run of the newest line with an invocation so far */
         String(text || "").split("\n").forEach(line => {
             if (line.charAt(0) !== "{") return;
             const o = parseJson(line);
@@ -145,9 +146,18 @@
             const own = String(o._PID) === "1";
             const id = own ? o.INVOCATION_ID : o._SYSTEMD_INVOCATION_ID;
             const ts = Number(o.__REALTIME_TIMESTAMP) / 1e6;
-            if (typeof id !== "string" || !INVOCATION_RE.test(id) || !isFinite(ts) || ts <= 0) return;
+            if (!isFinite(ts) || ts <= 0) return;
+            if (typeof id !== "string" || !INVOCATION_RE.test(id)) {
+                /* journald reads _SYSTEMD_INVOCATION_ID from /proc of the process that wrote the
+                   line: of one that had already ended (a short service's last words) it has none.
+                   The runs of one service follow each other, so such a line of the service is the
+                   output of the run started last before it. */
+                if (!own && last) last.lines.push(journalText(o.MESSAGE));
+                return;
+            }
             let r = byId.get(id);
             if (!r) byId.set(id, r = { id, start: ts, end: null, rc: null, signal: false, ok: false, failed: false, lines: [] });
+            last = r;
             r.start = Math.min(r.start, ts);
             if (!own) {
                 r.lines.push(journalText(o.MESSAGE));

@@ -803,6 +803,30 @@ with sync_playwright() as p:
     check(page.inner_text("#cronlog-hint") == "", "cronie: no hint on -L")
     check(not page.problems, "no console problems (cron's log, cronie): " + repr(page.problems))
     page.context.close()
+
+    # cronie's log shows that PAM refused jobs (a line of /etc/environment pam_env cannot read): a
+    # danger notice naming the users, root first, with PAM's reason as cron logged it, all as text;
+    # it goes when the log is read again and their jobs start (the log names none then)
+    page = open_page(browser, "flavor=cronie")
+    page.evaluate("""() => { window.__mock.cronRefused = [[600, 'www-data', '<b>not bold</b> `no code`'],
+                                                          [120, 'root', 'Critical error - immediate abort']]; }""")
+    page.click("#reload")
+    wait_idle(page)
+    notice = page.locator("#notices .az-alert--danger")
+    text = notice.inner_text() if notice.count() == 1 else ""
+    check("PAM hindert cron daran, Jobs zu starten" in text and
+          "root (Critical error - immediate abort) und www-data (<b>not bold</b> 'no code')" in text and
+          "zuletzt " in text and "journalctl -t crond" in text and notice.get_attribute("role") == "alert" and
+          notice.locator("b").count() == 0 and notice.locator("code").count() == 3,
+          "PAM refuses jobs: who, why, when, what to look at, the log's text as text: " + repr(text))
+    page.evaluate("() => { window.__mock.cronRefused = []; }")
+    reads = mock(page, "cronLogReads")
+    page.evaluate("() => { window.__mock.hint(true); window.__mock.hint(false); }")
+    wait_js(page, f"window.__mock.cronLogReads > {reads}")
+    wait_js(page, "!document.querySelector('#notices .az-alert--danger')")
+    check("PAM" not in page.inner_text("#notices"), "their jobs start again: no notice, without reloading")
+    check(not page.problems, "no console problems (PAM refuses jobs): " + repr(page.problems))
+    page.context.close()
     # the log cannot be read: dashes, and nothing about starts
     page = open_page(browser)
     page.evaluate("() => { window.__mock.cronLog = null; }")

@@ -646,6 +646,8 @@ with sync_playwright() as p:
     # the timer's runs, from the journal: failed, with what it wrote. systemd tells of the failure
     # and the service's output reaches journald on its own stream, so a dialog opened right after
     # the failure may find the run without its output yet: then it is opened again, a while later.
+    # (journald may also store that line without _SYSTEMD_INVOCATION_ID, the shell having ended:
+    # R.parseJournal gives it to the run started before it.)
     for _ in range(6):
         page.click(f"[data-key='sum-timer:{fail_timer}.timer']")
         wait_js(page, "document.querySelectorAll('#runs-body tbody tr').length >= 1", timeout=30)
@@ -754,6 +756,77 @@ with sync_playwright() as p:
     wait_idle(page)
     check(crontab() == start and fail_timer not in page.inner_text("#sum-body") and conv_fail not in page.inner_text("#sum-body") and
           "Der cron-Dienst läuft nicht" not in page.inner_text("#notices"), "back as before")
+
+    # cronie, whose pam_env reads /etc/environment with libeconf: a line it cannot read makes PAM refuse
+    # every job, and crond logs "(root) FAILED to authorize user with PAM (…)" instead of starting it.
+    # The page warns and names root with PAM's reason, the status makes its item cron a danger; once
+    # /etc/environment is fixed and a job of root started again, both are as before. Everything is put
+    # back even when a check fails.
+    if CRONIE and PAM_ECONF:
+        env_now = read(ETC_ENV)
+        start = crontab()
+        pam_job = "true # cj-e2e-pam"
+        try:
+            pam_since = int(time.time())
+            with open(ETC_ENV, "a") as f:
+                f.write("export CJ_E2E_BROKEN=1\n")
+            clear_of_cron_check()
+            sh("crontab -u root -", input=start + f"* * * * * {pam_job}\n")
+            refused = ""
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                refused = sh(f"journalctl _UID=0 SYSLOG_IDENTIFIER=crond --no-pager -q -o cat --since @{pam_since}").stdout
+                if "(root) FAILED to authorize user with PAM (" in refused:
+                    break
+                time.sleep(3)
+            check("(root) FAILED to authorize user with PAM (" in refused,
+                  "a line pam_env cannot read: cronie refuses root's jobs: " + refused[-2000:])
+            page.click("#reload")
+            wait_idle(page)
+            notice = page.inner_text("#notices")
+            check("PAM hindert cron daran, Jobs zu starten" in notice and "Jobs von root (" in notice and
+                  "journalctl -t crond" in notice and USER not in notice,
+                  "the page warns that PAM refuses root's jobs: " + repr(notice))
+            page.locator("#notices").scroll_into_view_if_needed()
+            page.screenshot(path=os.path.join(SHOTS, "e2e-pam-refused.png"))
+            sh("systemctl start cockpit-cronjobs-status.service")
+            rc, doc, out = status_as_nobody("en")
+            cron_item = status_item(doc, "cron")
+            check(rc == 0 and doc.get("state") == "danger" and cron_item.get("state") == "danger" and
+                  cron_item.get("value") == "PAM refuses jobs" and
+                  cron_item.get("detail", "").startswith(f"{CRON_UNIT}.service is running, but PAM refused to start the jobs of root (") and
+                  doc.get("summary", "").startswith("PAM refuses to start the cron jobs of root, so they do not run.") and
+                  USER not in out, "the status while PAM refuses root's jobs: " + out)
+            rc, doc, out = status_as_nobody("de")
+            check(status_item(doc, "cron").get("value") == "PAM weist Jobs ab" and
+                  doc.get("summary", "").startswith("PAM lässt die cron-Jobs von root nicht starten"), "the same in German: " + out)
+
+            # fixed: the next start of root's job ends the notice
+            fixed = int(time.time())
+            with open(ETC_ENV, "w") as f:
+                f.write(env_now or "")
+            started = ""
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                started = sh(f"journalctl _UID=0 SYSLOG_IDENTIFIER=CROND --no-pager -q -o cat --since @{fixed}").stdout
+                if f"(root) CMD ({pam_job})" in started:
+                    break
+                time.sleep(3)
+            check(f"(root) CMD ({pam_job})" in started, "/etc/environment fixed: cronie starts root's job again: " + started[-2000:])
+            page.click("#reload")
+            wait_idle(page)
+            check("PAM" not in page.inner_text("#notices"), "a job of root started again: no notice: " + page.inner_text("#notices"))
+            sh("systemctl start cockpit-cronjobs-status.service")
+            rc, doc, out = status_as_nobody("en")
+            check(status_item(doc, "cron").get("state") == "ok" and status_item(doc, "cron").get("value") == "running",
+                  "the status after root's job started again: " + out)
+        finally:
+            with open(ETC_ENV, "w") as f:
+                f.write(env_now or "")
+            sh("crontab -u root -", input=start)
+        page.click("#reload")
+        wait_idle(page)
+        check(crontab() == start, "root's crontab as before the PAM check")
 
     # another user's crontab: a card of its own, written as that user's crontab with backups of its own,
     # and cron runs the jobs as that user
