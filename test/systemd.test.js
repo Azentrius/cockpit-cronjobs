@@ -48,13 +48,34 @@ t("calendar: @reboot", () => assert.deepStrictEqual(SD.calendarFromCron("@reboot
 t("calendar: invalid", () => assert.strictEqual(SD.calendarFromCron("61 * * * *").ok, false));
 
 /* Compare with systemd itself: the union of the expressions must give the same runs. */
-function analyze(spec, n, tz) {
-    const out = execFileSync("systemd-analyze", ["calendar", "--iterations=" + n, spec],
-                             { env: { LC_ALL: "C", TZ: tz, PATH: process.env.PATH } }).toString();
+function analyze(spec, n, tz, base) {
+    const args = ["calendar", "--iterations=" + n].concat(base ? ["--base-time=" + base] : [], [spec]);
+    const out = execFileSync("systemd-analyze", args, { env: { LC_ALL: "C", TZ: tz, PATH: process.env.PATH } }).toString();
     return SD.parseAnalyzeCalendar(out);
 }
 let haveAnalyze = false;
 try { execFileSync("systemd-analyze", ["--version"]); haveAnalyze = true; } catch (_) { /* not installed */ }
+let haveBaseTime = false;
+try {
+    execFileSync("systemd-analyze", ["calendar", "--base-time=2026-01-01 00:00:00 UTC", "*-*-* 00:00:00"], { stdio: "ignore" });
+    haveBaseTime = true;
+} catch (_) { /* older systemd-analyze */ }
+
+/* cron's runs as a timer has them: where the clock changes, systemd fires at each wall clock
+   time of the calendar once, at its first occurrence, and never at a time the clock skips.
+   cron runs the wildcard jobs again in the hour the end of summer time repeats, and right
+   after the clock jumps ahead it runs the jobs at a fixed time of the hour it skipped (lib/
+   cron.js, nextRun; the README, "When the clock changes"). Those runs are cron's alone. */
+function asTimer(ours, schedule, tz) {
+    const MIN = 60000;
+    const wall = x => { const w = C.wallParts(x, tz); return Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi); };
+    const offset = x => wall(x) - Math.floor(x / MIN) * MIN;
+    return ours.filter(x => {
+        const back = offset(x - 3 * 3600000) - offset(x);
+        if (back > 0 && wall(x - back) === wall(x)) return false;               // the second time this time comes
+        return C.runsBetween(schedule, wall(x) - MIN, wall(x), "UTC", 1).length === 1;  // not a time skipped
+    });
+}
 
 const SCHEDULES = Object.keys(CAL).concat(["45 23 31 * *", "0 0 1,15 * 1", "59 1 * * *", "0 2 29 2 *",
     "*/7 3-5 * * *", "15 */6 * * 1-5", "0 12 * 2-11 sat", "30 4 1 1 *", "0,30 8-18 * * 1-5", "5-55/10 * * * *",
@@ -66,7 +87,7 @@ if (haveAnalyze) {
             const theirs = Array.from(new Set([].concat(...specs.map(x => analyze(x, 12, tz))))).sort((a, b) => a - b).slice(0, 12);
             const now = Date.now();
             const horizon = now + 5 * 365 * 86400000;
-            const ours = C.runsBetween(s, now - 120000, horizon + 86400000, tz, 14);
+            const ours = asTimer(C.runsBetween(s, now - 120000, horizon + 86400000, tz, 30), s, tz);
             theirs.splice(0, theirs.length, ...theirs.filter(x => x <= horizon));
             const k = ours.indexOf(theirs[0]);
             assert.ok(k >= 0 && k <= 2, "first run " + new Date(theirs[0]).toISOString() + " vs " + ours.slice(0, 3).map(x => new Date(x).toISOString()));
@@ -78,9 +99,13 @@ if (haveAnalyze) {
     ["30 4 1 1 *", "0 2 29 2 *", "0 0 1 */6 *", "*/5 * * * *"].forEach(s => t("conversion check takes the next 5 runs, however rare: " + s, () => {
         const specs = SD.calendarFromCron(s).specs;
         const theirs = Array.from(new Set([].concat(...specs.map(x => analyze(x, 5, "Europe/Berlin"))))).sort((a, b) => a - b).slice(0, 5);
-        const ours = C.runsBetween(s, Date.now() - 60000, theirs[theirs.length - 1], "Europe/Berlin", theirs.length + 2);
+        const ours = C.runsBetween(s, Date.now() - 60000, theirs[theirs.length - 1], "Europe/Berlin", theirs.length + 4);
         assert.strictEqual(theirs.length, 5);
-        assert.ok(SD.sameRuns(theirs, ours), theirs.map(x => new Date(x).toISOString()) + " vs " + ours.map(x => new Date(x).toISOString()));
+        /* where the clock changes among them, cron has a run the timer does not, and the check says so */
+        const changes = asTimer(ours, s, "Europe/Berlin").length !== ours.length;
+        assert.strictEqual(SD.sameRuns(theirs, ours), !changes,
+                           theirs.map(x => new Date(x).toISOString()) + " vs " + ours.map(x => new Date(x).toISOString()));
+        assert.ok(SD.sameRuns(theirs, asTimer(ours, s, "Europe/Berlin")), "the timer's runs are cron's but for the clock change");
         assert.ok(!SD.sameRuns(theirs, C.runsBetween(s.replace(/^\S+/, m => m === "*/5" ? "*/10" : "31"), Date.now() - 60000,
                                                       theirs[theirs.length - 1], "Europe/Berlin", 7)), "another schedule does not pass");
     }));
@@ -91,6 +116,30 @@ if (haveAnalyze) {
         const ours = C.runsBetween("30 2 * * 1-5", now, now + 30 * 86400000, "America/New_York", 6);
         assert.deepStrictEqual(theirs, ours);
     });
+    /* The clock changes themselves, at fixed times (systemd-analyze --base-time): the end of
+       summer time in New York on 2026-11-01 (01:00 comes twice) and its start on 2027-03-14
+       (02:00 to 03:00 does not come). */
+    if (haveBaseTime) {
+        const iso = a => a.map(x => new Date(x).toISOString().slice(0, 16));
+        t("clock goes back: cron runs @hourly again in the repeated hour, the timer does not", () => {
+            const base = Date.parse("2026-11-01T04:30:00Z");
+            const ours = C.runsBetween("@hourly", base, base + 5 * 3600000, "America/New_York", 4);
+            const theirs = analyze("*-*-* *:00:00", 3, "America/New_York", "2026-11-01 04:30:00 UTC");
+            assert.deepStrictEqual(iso(ours), ["2026-11-01T05:00", "2026-11-01T06:00", "2026-11-01T07:00", "2026-11-01T08:00"]);
+            assert.deepStrictEqual(iso(theirs), ["2026-11-01T05:00", "2026-11-01T07:00", "2026-11-01T08:00"]);
+            assert.deepStrictEqual(iso(asTimer(ours, "@hourly", "America/New_York")), iso(theirs));
+        });
+        t("clock jumps ahead: cron runs 30 2 * * * right after the jump, the timer not that day", () => {
+            const base = Date.parse("2027-03-14T05:00:00Z");
+            const ours = C.runsBetween("30 2 * * *", base, base + 3 * 86400000, "America/New_York", 3);
+            const theirs = analyze("*-*-* 02:30:00", 2, "America/New_York", "2027-03-14 05:00:00 UTC");
+            assert.deepStrictEqual(iso(ours), ["2027-03-14T07:00", "2027-03-15T06:30", "2027-03-16T06:30"]);
+            assert.deepStrictEqual(iso(theirs), ["2027-03-15T06:30", "2027-03-16T06:30"]);
+            assert.deepStrictEqual(iso(asTimer(ours, "30 2 * * *", "America/New_York")), iso(theirs));
+        });
+    } else {
+        skipped++;
+    }
 } else {
     skipped++;
 }

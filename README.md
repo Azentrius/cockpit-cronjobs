@@ -164,6 +164,9 @@ With cronie, `CRON_TZ` is taken into account for next runs, the timeline and the
 crontab including `/etc/crontab` and `/etc/cron.d`. When the clock changes, next runs and the timeline
 follow cron: when summer time ends, the repeated hour runs only the jobs with `*` in the minute or hour
 field again; when it starts, jobs at a fixed time of the skipped hour run right after the change.
+A systemd timer does neither: it fires at each time once and never at a time the clock skips. While
+such a run is among the next runs, the conversion's check finds that systemd would run the job at
+other times and does not convert it; after the change it does.
 
 Changes need administrative access in Cockpit (“Limited access” turned off). Without it the page shows
 the system crontabs and timers, and nothing of other users' crontabs.
