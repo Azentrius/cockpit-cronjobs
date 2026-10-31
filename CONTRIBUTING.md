@@ -32,7 +32,7 @@ make docs-shots  # the screenshots of the README into docs/ (CI keeps them as th
 ```
 
 The `test` workflow runs the unit tests, the browser tests, the lint and the package builds on every
-push and pull request, and installs the `.deb` on Debian and the `.rpm` on Fedora. Its job `test` and
+pull request and every push to `main`, and installs the `.deb` on Debian and the `.rpm` on Fedora. Its job `test` and
 the end-to-end check `e2e` have to be green before a merge.
 
 ## End-to-end test
