@@ -45,6 +45,12 @@ Cockpit for it). CI runs it on the runner's throw-away VM twice: with the Cockpi
 cron as installed, and with the Cockpit of its backports and cron at `-L 15`. A change to what the
 page does with cron, systemd or the crontabs gets a step there.
 
+`test/e2e/upgrade.sh`, just as destructive, installs the previous release, sets it up with recorded
+jobs of root and of another user, installs the build over it and removes it (CI: job `upgrade` on the
+runner, and the suite `upgrade` of job `e2e-el` in Rocky Linux VMs with SELinux enforcing). A change
+to the packages, the status helper or the files the page keeps in `/var/lib/cockpit-cronjobs` gets a
+step there.
+
 ## How the page is built
 
 - **Byte for byte.** Crontab lines the user does not change are written back exactly. Every write of a

@@ -11,6 +11,17 @@ on:
 permissions:
   contents: read
 
+# The release the upgrade test (test/e2e/upgrade.sh) installs first: 2.10.2, the last one before the
+# changes for cronie and SELinux (its status unit fails under SELinux enforcing), as its GitHub
+# release serves it, pinned by SHA-256 (test/e2e/release-asset.sh also checks them against the
+# release's SHA256SUMS).
+env:
+  PREVIOUS_TAG: v2.10.2
+  PREVIOUS_DEB: cockpit-cronjobs_2.10.2-1_all.deb
+  PREVIOUS_DEB_SHA256: f92f1736afd8438dc5eefd8a0de213f04c1f4d287efef7f7247584e9df8e5e2c
+  PREVIOUS_RPM: cockpit-cronjobs-2.10.2-1.noarch.rpm
+  PREVIOUS_RPM_SHA256: 7476b1008c734f44e5f53c58b12838468fc23e2c0091a44a9770dd1d55a817f0
+
 jobs:
   test:
     runs-on: ubuntu-24.04
@@ -159,6 +170,50 @@ jobs:
             test ! -e /usr/lib/cockpit-cronjobs
             test ! -e /var/lib/cockpit-cronjobs/status.json'
 
+  # The update from the previous release (PREVIOUS_* above) on this throw-away runner, with Debian's
+  # cron and the .deb (test/e2e/upgrade.sh; the same test runs with cronie and the .rpm in job
+  # e2e-el): that release set up as on its page, with jobs of root and of another user that record
+  # their runs, and its status unit; then the package of this build over it with apt. Crontabs,
+  # recorded runs, the run recorder and the status timer stay; the status counts the failed jobs
+  # for a user without rights; cron goes on recording; removing the package leaves the crontabs,
+  # the runs and the run recorder. The steps and the raw answers are in the artifact
+  # upgrade-ubuntu.
+  upgrade:
+    name: upgrade (ubuntu-24.04, cron)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The package of this build, cron and Cockpit's bridge
+        run: |
+          sudo sh tools/apt-update.sh
+          sudo apt-get install -y -qq --no-install-recommends rpm cron cockpit-bridge > /dev/null
+          make packages
+      - name: The .deb of the previous release (test/e2e/release-asset.sh)
+        run: sh test/e2e/release-asset.sh "$GITHUB_REPOSITORY" "$PREVIOUS_TAG" "$PREVIOUS_DEB" "$PREVIOUS_DEB_SHA256" previous
+      - name: The previous release, set up as on its page, and its status unit (test/e2e/upgrade.sh old)
+        run: sudo env OUT="$PWD/upgrade-session" sh test/e2e/upgrade.sh old "previous/$PREVIOUS_DEB"
+      - name: This build over it (test/e2e/upgrade.sh new)
+        run: sudo env OUT="$PWD/upgrade-session" sh test/e2e/upgrade.sh new dist/*.deb
+      - name: The package removed (test/e2e/upgrade.sh remove)
+        run: sudo env OUT="$PWD/upgrade-session" sh test/e2e/upgrade.sh remove
+      - name: Report and logs
+        if: always()
+        run: |
+          # The script ran as root: the folder is root's until it is handed back.
+          sudo mkdir -p upgrade-session
+          sudo chown -R "$(id -u)" upgrade-session
+          [ ! -f upgrade-session/report.md ] || cat upgrade-session/report.md >> "$GITHUB_STEP_SUMMARY"
+          sudo journalctl --no-pager -n 500 -u cron -u cockpit-cronjobs-status > upgrade-session/journal.txt 2>&1 || true
+      - name: Keep the report and the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-ubuntu
+          path: upgrade-session/
+
   # The main flows against a real Cockpit, root's real crontab and a running cron daemon.
   # Destructive, which is what the runner's throwaway VM is for (see test/e2e_cockpit.py).
   # Twice: with the Cockpit of Ubuntu 24.04 itself (314), which a server keeps unless it is set up
@@ -252,18 +307,25 @@ jobs:
           path: test/shots/
 
   # The same end-to-end test with cronie and the .rpm in a Rocky Linux VM with SELinux enforcing
-  # (tools/vm.sh: the pinned cloud image under KVM on this runner). The test runs as root in the
-  # machine against its Cockpit (port 9091, forwarded here); the browser stays on this runner,
-  # behind a Playwright server bound to 127.0.0.1 that an SSH tunnel brings into the machine (the
-  # server takes no other Host header). The job fails on every SELinux denial
-  # between the mark after the set-up and the end of the test. A pilot: not yet part of e2e.
+  # (suite e2e; tools/vm.sh: the pinned cloud image under KVM on this runner). The test runs as root
+  # in the machine against its Cockpit (port 9091, forwarded here); the browser stays on this
+  # runner, behind a Playwright server bound to 127.0.0.1 that an SSH tunnel brings into the machine
+  # (the server takes no other Host header). The job fails on every SELinux denial
+  # between the mark after the set-up and the end of the test.
+  # The same upgrade test as job upgrade (suite upgrade), with the .rpm of the previous release
+  # first: its status unit has to fail there with an SELinux denial (systemd ran its helper in
+  # init_t, which may not read the crontabs of users); the mark comes after that, so the check
+  # covers the upgrade, the new status unit, the runs cron records after it and the removal.
+  # A pilot: not yet part of e2e.
   e2e-el:
-    name: e2e (${{ matrix.os }}, cronie, SELinux enforcing)
+    name: ${{ matrix.suite }} (${{ matrix.os }}, cronie, SELinux enforcing)
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
+        os: [rocky-9, rocky-10]
+        suite: [e2e, upgrade]
         include:
           - { os: rocky-9, python: python3.12 }
           - { os: rocky-10, python: python3 }
@@ -274,6 +336,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: matrix.suite == 'e2e'
         with:
           python-version: "3.12"
       - name: The package of this build, QEMU and cloud-init's seed tool
@@ -282,9 +345,11 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends rpm qemu-system-x86 qemu-utils cloud-image-utils > /dev/null
           make packages
       - name: Playwright (pinned in test/requirements.txt)
+        if: matrix.suite == 'e2e'
         run: pip install -r test/requirements.txt
       # Only the browser, two tries of four minutes (see the job test).
       - name: Browser (Chromium from Playwright's CDN, two tries)
+        if: matrix.suite == 'e2e'
         timeout-minutes: 10
         run: |
           for try in 1 2; do
@@ -309,11 +374,15 @@ jobs:
         with:
           path: ~/.cache/azentrius-vm
           key: vm-${{ steps.image.outputs.name }}
+      - name: The .rpm of the previous release (test/e2e/release-asset.sh)
+        if: matrix.suite == 'upgrade'
+        run: sh test/e2e/release-asset.sh "$GITHUB_REPOSITORY" "$PREVIOUS_TAG" "$PREVIOUS_RPM" "$PREVIOUS_RPM_SHA256" previous
       - name: Boot ${{ matrix.os }} (tools/vm.sh)
         env:
           OS: ${{ matrix.os }}
         run: sh tools/vm.sh start "$OS"
       - name: Cockpit, cronie, the package, the test and Playwright for it in the machine
+        if: matrix.suite == 'e2e'
         env:
           PY: ${{ matrix.python }}
         run: |
@@ -325,10 +394,19 @@ jobs:
           sh tools/vm.sh root systemctl enable --now crond
           sh tools/vm.sh root "$PY" -m venv /root/cj/venv
           sh tools/vm.sh root /root/cj/venv/bin/pip install -q "$(grep '^playwright==' test/requirements.txt)"
+      # Installed by hand, so that removing the package does not take them along as dependencies.
+      - name: cronie, Cockpit's bridge, the packages and the upgrade test in the machine
+        if: matrix.suite == 'upgrade'
+        run: |
+          sh tools/vm.sh root dnf install -y -q cockpit-bridge cronie diffutils python3
+          sh tools/vm.sh root systemctl enable --now crond
+          sh tools/vm.sh copy /root/up dist/*.rpm test/e2e/upgrade.sh
+          sh tools/vm.sh copy /root/up/previous "previous/$PREVIOUS_RPM"
       # cockpit-ws from a copy (bin_t): the original's label would take it into the web server's
       # confined domain, which may not run a bridge as root. This way the bridge runs as root in the
       # caller's domain, as an administrator's does after a login.
       - name: Cockpit in the machine as root, without login, and the Playwright server here
+        if: matrix.suite == 'e2e'
         run: |
           sh tools/vm.sh root install -m 755 /usr/libexec/cockpit-ws /usr/local/bin/cockpit-ws-e2e
           sh tools/vm.sh root sh -c "'systemctl is-active --quiet firewalld && firewall-cmd -q --add-port=9091/tcp || true'"
@@ -345,19 +423,46 @@ jobs:
           if [ "$up" != 1 ]; then cat "$RUNNER_TEMP/playwright-server.log"; exit 1; fi
           sh tools/vm.sh back 3333
       - name: The SELinux check catches a denial on purpose; then the mark in the audit log
+        if: matrix.suite == 'e2e'
         run: |
           sh tools/vm.sh avc-selftest
           sh tools/vm.sh avc-mark
       - name: End-to-end test in the machine (as root)
+        if: matrix.suite == 'e2e'
         run: |
           sh tools/vm.sh root sh -c "'cd /root/cj && PLAYWRIGHT_WS=ws://127.0.0.1:3333/ CRONJOBS_E2E_DESTRUCTIVE=1 venv/bin/python test/e2e_cockpit.py'"
+      - name: The SELinux check catches a denial on purpose
+        if: matrix.suite == 'upgrade'
+        run: sh tools/vm.sh avc-selftest
+      - name: The previous release, set up as on its page, and its status unit (test/e2e/upgrade.sh old)
+        if: matrix.suite == 'upgrade'
+        run: sh tools/vm.sh root sh -c "'cd /root/up && OUT=/root/up/session sh upgrade.sh old /root/up/previous/$PREVIOUS_RPM'"
+      - name: The mark in the audit log, after the denials of the previous release
+        if: matrix.suite == 'upgrade'
+        run: sh tools/vm.sh avc-mark
+      - name: This build over it (test/e2e/upgrade.sh new)
+        if: matrix.suite == 'upgrade'
+        run: sh tools/vm.sh root sh -c "'cd /root/up && OUT=/root/up/session sh upgrade.sh new /root/up/cockpit-cronjobs-*.rpm'"
+      - name: The package removed (test/e2e/upgrade.sh remove)
+        if: matrix.suite == 'upgrade'
+        run: sh tools/vm.sh root sh -c "'cd /root/up && OUT=/root/up/session sh upgrade.sh remove'"
       - name: No SELinux denials during the test
         run: sh tools/vm.sh avc-check
       - name: Logs
         if: always()
+        env:
+          OS: ${{ matrix.os }}
+          SUITE: ${{ matrix.suite }}
         run: |
           mkdir -p e2e-el
-          sh tools/vm.sh fetch e2e-el /root/cj/test/shots /root/cj/cockpit-ws.log || true
+          if [ "$SUITE" = upgrade ]; then
+            sh tools/vm.sh fetch e2e-el /root/up/session || true
+            if [ -f e2e-el/root/up/session/report.md ]; then
+              { echo "### upgrade, $OS"; cat e2e-el/root/up/session/report.md; } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            sh tools/vm.sh fetch e2e-el /root/cj/test/shots /root/cj/cockpit-ws.log || true
+          fi
           sh tools/vm.sh root journalctl -u crond --no-pager -n 200 > e2e-el/crond.txt 2>&1 || true
           sh tools/vm.sh logs e2e-el || true
           cp "$RUNNER_TEMP/playwright-server.log" e2e-el/ 2> /dev/null || true
@@ -365,7 +470,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: e2e-${{ matrix.os }}
+          name: ${{ matrix.suite }}-${{ matrix.os }}
           path: e2e-el/
 
   # The required check: green only when the end-to-end test passed with both. It runs even when
