@@ -189,9 +189,11 @@ and comes with the next release. The end-to-end and upgrade tests run the packag
 cronie in Rocky Linux 9 and 10 VMs with SELinux enforcing (see [Development](#development)). 2.10.2,
 the latest release, does not have these changes:
 
-- With SELinux enforcing its status timer cannot read the crontabs of other users and writes no
-  status, so the Status Board and the menu icon get none. On `main` the status unit starts the helper
-  through `/bin/sh`, which SELinux lets read them (see [Status for the Status Board](#status-for-the-status-board)).
+- With SELinux enforcing its status unit fails as soon as root or another user has a crontab: systemd
+  runs the helper in its own domain (`init_t`), which may not read crontabs (`user_cron_spool_t`), so
+  the unit writes no status and the Status Board and the menu icon get none. On `main` the unit starts
+  the helper through `/bin/sh`, which SELinux lets read them (see
+  [Status for the Status Board](#status-for-the-status-board)).
 - Run now and converted jobs get the `PATH` of cronie 1.7 also from an older cronie (RHEL 9 has 1.5.7,
   whose jobs get `/usr/bin:/bin`) and no `LANG` from cronie, and the dialogs do not say that cronie
   opens a logind session for each job (see [Cron's environment](#crons-environment)).
@@ -499,7 +501,8 @@ for a user without rights, and that the removal takes the package's files, units
 and leaves the crontabs, the runs and the run recorder. CI runs it with Debian's cron and the `.deb`
 on the runner (job `upgrade`), and with cronie and the `.rpm` in the Rocky Linux 9 and 10 VMs (job
 `e2e-el`, suite `upgrade`, not yet a required check). There the status unit of 2.10.2 has to fail
-with an SELinux denial first, and the check for denials covers everything from the upgrade on. While
+first, with an SELinux denial for root's crontab alone and again with the other user's, and the check
+for denials covers everything from the upgrade on. While
 the build has the version of 2.10.2, before a release raises it, it is installed over that release as
 a reinstall, which runs the package's scripts as an upgrade does.
 

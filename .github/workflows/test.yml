@@ -314,7 +314,7 @@ jobs:
   # between the mark after the set-up and the end of the test.
   # The same upgrade test as job upgrade (suite upgrade), with the .rpm of the previous release
   # first: its status unit has to fail there with an SELinux denial (systemd ran its helper in
-  # init_t, which may not read the crontabs of users); the mark comes after that, so the check
+  # init_t, which may not read crontabs, root's included); the mark comes after that, so the check
   # covers the upgrade, the new status unit, the runs cron records after it and the removal.
   # A pilot: not yet part of e2e.
   e2e-el:

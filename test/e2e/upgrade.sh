@@ -15,9 +15,10 @@
 #         up as an administrator sets it up on its page: the run recorder that comes with it, jobs
 #         of root and of cjuser that record their runs (one of each fails) and one of each that
 #         does not. cron records runs of all four. Then that release's status unit: with SELinux
-#         enforcing it fails, as 2.10.2 does there (systemd runs the helper in init_t, which may
-#         not read the crontab of cjuser: an AVC denial, "cannot read the crontab of cjuser", and
-#         no status for the Status Board); without SELinux it writes the status.
+#         enforcing it fails, as 2.10.2 does there, with root's crontab alone already (systemd
+#         runs the helper in init_t, which may not read crontabs: an AVC denial, "cannot read the
+#         crontab of root" or "of cjuser", and no status for the Status Board); without SELinux it
+#         writes the status.
 # new     The package of this build over it, as an update from the package repository does (as a
 #         reinstall while this build has the version of that release, before a release raises
 #         it): both crontabs byte for byte, every recorded run with its output, the run recorder,
@@ -115,6 +116,17 @@ timer_state() { echo "$(systemctl is-enabled "$timer" 2> /dev/null || true) $(sy
 status_as() { setpriv --reuid="$(id -u "$1")" --regid="$(id -g "$1")" --clear-groups "$helper" status --lang "$2"; }
 # Lines of the audit log after line $1 that tell of an SELinux denial.
 denials_after() { tail -n +"$(($1 + 1))" "$audit" | grep -E 'type=(AVC|USER_AVC|SELINUX_ERR|USER_SELINUX_ERR) ' || true; }
+# wait_denial MARK NAME FILE: the denials after line MARK of init_t reading the crontab NAME
+# (user_cron_spool_t) into FILE; waits up to ten seconds for them, as auditd writes asynchronously.
+wait_denial() {
+    for _ in $(seq 1 10); do
+        denials_after "$1" | grep 'scontext=system_u:system_r:init_t:' | grep -F "name=\"$2\"" |
+            grep -E 'tcontext=[^ ]*:user_cron_spool_t:' > "$3" || true
+        [ ! -s "$3" ] || return 0
+        sleep 1
+    done
+    return 1
+}
 
 # check_status FILE LANG WANT: the status document FILE in LANG against WANT: "none" (no status
 # written) or "counted" (the two failed jobs by their IDs, the two without recording, cron running).
@@ -272,18 +284,20 @@ MAILTO=""
 EOF
     cat "$keep/root.tab" | crontab -u root -
     if [ "$selinux" = 1 ]; then
-        # With only root's crontab: does the unit of that release read it? A note, not a check.
+        # With only root's crontab the unit of that release fails already: crontab labels root's
+        # crontab user_cron_spool_t too.
         rm -f "$state/status.json" "$state/status.de.json"
         mark=$(wc -l < "$audit")
         since=$(date +%s)
         rc=0
         systemctl start "$service" > /dev/null 2>&1 || rc=$?
-        sleep 3
-        said=$(journalctl -u "$service" --since "@$since" --no-pager -o cat 2> /dev/null | grep 'cronjobs-status:' | tail -n 1 || true)
-        written=none
-        if [ -f "$state/status.json" ]; then written=written; fi
-        note "With only root's crontab ($(ls -Z /var/spool/cron/root | cut -d ' ' -f 1)), the status unit of $old_version:" \
-            "exit $rc, $(denials_after "$mark" | wc -l) SELinux denials, status file $written. ${said:-}"
+        journalctl -u "$service" --since "@$since" --no-pager -o cat > "$out/old-unit-root.txt" 2>&1 || true
+        [ "$rc" != 0 ] && grep -qx 'cronjobs-status: cannot read the crontab of root' "$out/old-unit-root.txt" ||
+            fail "with only root's crontab, the unit of $old_version: exit $rc; $(cat "$out/old-unit-root.txt")"
+        wait_denial "$mark" root "$out/old-avc-root.txt" || fail "with only root's crontab, no denial of init_t for it: $(denials_after "$mark")"
+        [ ! -e "$state/status.json" ] || fail "with only root's crontab, a status file was written"
+        ok "with only root's crontab ($(ls -Z /var/spool/cron/root | cut -d ' ' -f 1)) the unit of $old_version fails already:" \
+            "exit $rc, \"cronjobs-status: cannot read the crontab of root\", a denial of init_t for it, no status"
         systemctl reset-failed "$service" 2> /dev/null || true
     fi
     id -u "$user" > /dev/null 2>&1 || useradd -m -s /bin/sh "$user"
@@ -327,13 +341,8 @@ EOF
         [ "$rc" != 0 ] || fail "the unit of $old_version ran under SELinux enforcing: the old failure did not show"
         grep -qx "cronjobs-status: cannot read the crontab of $user" "$out/old-unit-journal.txt" ||
             fail "the unit failed, but not for the crontab of $user: $(cat "$out/old-unit-journal.txt")"
-        # auditd writes asynchronously.
-        for _ in $(seq 1 10); do
-            denials_after "$mark" | grep 'scontext=system_u:system_r:init_t:' | grep -E 'tcontext=[^ ]*:user_cron_spool_t:' > "$out/old-avc.txt" || true
-            [ ! -s "$out/old-avc.txt" ] || break
-            sleep 1
-        done
-        [ -s "$out/old-avc.txt" ] || fail "no SELinux denial of init_t for the crontabs (user_cron_spool_t): $(denials_after "$mark")"
+        wait_denial "$mark" "$user" "$out/old-avc.txt" ||
+            fail "no SELinux denial of init_t for the crontab of $user (user_cron_spool_t): $(denials_after "$mark")"
         [ ! -e "$state/status.json" ] || fail "a status file was written"
         msg=$(check_status "$out/old-status.json" en none) || fail "the status as nobody: $msg"
         ok "as on systems with SELinux enforcing, the unit fails (exit $rc): \"$(cat "$out/old-unit-journal.txt" | grep cronjobs-status: | tail -n 1)\""
