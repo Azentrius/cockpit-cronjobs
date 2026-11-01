@@ -13,9 +13,8 @@ what cron's own log tells about them: when they started and, where cron logs it,
 never their output. A status for the Azentrius Status Board says, without opening the page, when a job
 failed or cron is not running.
 
-It works with Debian's and Ubuntu's cron and with cronie. The support for cronie with SELinux enforcing
-(RHEL 9 and 10 and their rebuilds) is on `main` and comes with the next release; 2.10.2, the latest
-release, does not have it (see [cronie and SELinux](#cronie-and-selinux)).
+It works with Debian's and Ubuntu's cron and with cronie, since 2.11.0 also with SELinux enforcing
+(RHEL 9 and 10 and their rebuilds; see [cronie and SELinux](#cronie-and-selinux)).
 
 | Light | Dark |
 |---|---|
@@ -54,8 +53,8 @@ The screenshots show test data in a stand-in for Cockpit; they come from the CI 
   other users, the scripts in `/etc/cron.hourly` … `/etc/cron.monthly`, and systemd timers. Schedules are
   written out in words; next runs are shown in server time, and in your own time when that differs.
   Files in `/etc/cron.d` that cron skips (name, owner, permissions, symbolic links, hard links, and with
-  cronie under SELinux the context, on `main`, not in 2.10.2) are marked with the reason, by the rules of
-  the cron that is installed.
+  cronie under SELinux the context, since 2.11.0) are marked with the reason, by the rules of the cron
+  that is installed.
 - **Three tabs.** Overview (the latest results, the next 24 hours, the root crontab and those of other
   users), systemd timers, and System (`/etc/crontab`, `/etc/cron.d`, the periodic scripts). Notices stay
   visible in every tab; switching tabs loads nothing.
@@ -184,15 +183,15 @@ the system crontabs and timers, and nothing of other users' crontabs.
 
 ### cronie and SELinux
 
-The support for cronie with SELinux enforcing, as on RHEL 9 and 10 and their rebuilds, is on `main`
-and comes with the next release. The end-to-end and upgrade tests run the packages of `main` with
-cronie in Rocky Linux 9 and 10 VMs with SELinux enforcing (see [Development](#development)). 2.10.2,
-the latest release, does not have these changes:
+Cron Jobs supports cronie with SELinux enforcing, as on RHEL 9 and 10 and their rebuilds, since
+2.11.0. The end-to-end and upgrade tests run the packages with cronie in Rocky Linux 9 and 10 VMs with
+SELinux enforcing (see [Development](#development)). 2.10.2 and older do not have these changes, so
+update to 2.11.0 or later there:
 
-- With SELinux enforcing its status unit fails as soon as root or another user has a crontab: systemd
-  runs the helper in its own domain (`init_t`), which may not read crontabs (`user_cron_spool_t`), so
-  the unit writes no status and the Status Board and the menu icon get none. On `main` the unit starts
-  the helper through `/bin/sh`, which SELinux lets read them (see
+- With SELinux enforcing their status unit fails as soon as root or another user has a crontab:
+  systemd runs the helper in its own domain (`init_t`), which may not read crontabs
+  (`user_cron_spool_t`), so the unit writes no status and the Status Board and the menu icon get none.
+  Since 2.11.0 the unit starts the helper through `/bin/sh`, which SELinux lets read them (see
   [Status for the Status Board](#status-for-the-status-board)).
 - Run now and converted jobs get the `PATH` of cronie 1.7 also from an older cronie (RHEL 9 has 1.5.7,
   whose jobs get `/usr/bin:/bin`) and no `LANG` from cronie, and the dialogs do not say that cronie
@@ -341,8 +340,8 @@ the helper:
 
 `cronjobs-status status --lang en|de` prints the status as JSON. It needs no administrative access:
 `cockpit-cronjobs-status.timer` works the status out as root every 15 minutes (and two minutes after a
-boot; its service starts the helper through `/bin/sh`, so that SELinux lets it read every crontab, on
-`main`, not in 2.10.2: see [cronie and SELinux](#cronie-and-selinux)) and
+boot; its service starts the helper through `/bin/sh`, so that SELinux lets it read every crontab,
+since 2.11.0: see [cronie and SELinux](#cronie-and-selinux)) and
 writes it to `/var/lib/cockpit-cronjobs/status.json` (English) and `status.de.json` (German),
 mode 644; `status` only reads the file of the language asked for (German for `de` and its regions,
 English for any other language). Without the file it reports `none` and why.
@@ -351,7 +350,7 @@ English for any other language). Without the file it reports `none` and why.
 |---|---|---|
 | `failed` | `danger` when a recorded job failed or was aborted in the last 24 hours, or a run of a job converted to a systemd timer failed or lost its end, or cron's log says a run of another job failed, with the number of those jobs, their IDs, the names of the timers and the paths of the jobs of `/etc/crontab` and `/etc/cron.d`; `ok` when none did; `none` when no job records its runs, none was converted and cron logs no failures | `#/overview/results`: the latest results, failures first |
 | `unrecorded` | `none` with the number of jobs that do not record their runs, whose results are therefore not known (or, when cron logs failures, only those); `ok` when every job records them | `#/overview/crontab`: the root crontab, the other users' after it |
-| `cron` | `ok` when the cron service runs; `danger` when it runs but cronie's log of the last 24 hours shows that PAM refused to start the jobs of a user and none of that user's jobs started since (root by name, other users in number; on `main`, not in 2.10.2); when it does not run, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask | `#/overview/notices`: where the page says that cron is not running, or that PAM refuses its jobs |
+| `cron` | `ok` when the cron service runs; `danger` when it runs but cronie's log of the last 24 hours shows that PAM refused to start the jobs of a user and none of that user's jobs started since (root by name, other users in number; since 2.11.0); when it does not run, `danger` if the crontabs of root and the other users have jobs, else `warning`; `none` when there is no cron service to ask | `#/overview/notices`: where the page says that cron is not running, or that PAM refuses its jobs |
 
 The crontabs of root and the other users count: the jobs there are the ones the page can record,
 read as the page reads them, and the jobs converted from them, whose runs come from the journal of
@@ -362,8 +361,8 @@ as on the page: a failure belongs to the job whose start names the same process,
 job is still in one of those crontabs, `/etc/crontab` or `/etc/cron.d` and does not record its runs
 (those count from their records). When cronie runs (`crond`), its log of the last 24 hours also says
 whether PAM refused to start the jobs of a user ("FAILED to authorize user with PAM", which cronie logs
-as `crond`), read as on the page: a refusal counts until a job of that user starts again (on `main`,
-not in 2.10.2). The files
+as `crond`), read as on the page: a refusal counts until a job of that user starts again (since
+2.11.0). The files
 hold numbers, states, job IDs, the names of timers converted from root's crontab and the paths of
 `/etc/crontab` and `/etc/cron.d/FILE` for their jobs; no user names, commands or output. Timers
 converted from another user's crontab, jobs of the crontabs that failed by cron's log and users other
@@ -378,7 +377,7 @@ tab has an address of its own (`#/overview`, `#/timers`, `#/system`), and a tab 
 into it.
 
 **In Cockpit's menu** the entry “Cron Jobs” shows the same state with Cockpit's own icon (red: a job
-failed, cron is stopped or, on `main`, PAM refuses its jobs; yellow: a warning, or the status is more than an hour
+failed, cron is stopped or, since 2.11.0, PAM refuses its jobs; yellow: a warning, or the status is more than an hour
 old) and the summary as its tooltip, judged as the Status Board judges it; nothing to do, no icon. For
 this Cockpit loads the page hidden right after the login (`preload` in `src/manifest.json`, as for
 Cockpit's own Software updates page); until you open it, the page only reads the status file of its
@@ -413,8 +412,8 @@ Where cron's PAM service has `pam_systemd` in its session stack (Fedora and the 
 `XDG_SESSION_ID`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS` and the like. Run now and a timer open
 no such session; the page does not make those variables up, and says so in both dialogs.
 
-cronie's `LANG` and the like (2.), its `PATH` by version (4.) and the note on the logind session are on
-`main`, not in 2.10.2 (see [cronie and SELinux](#cronie-and-selinux)).
+cronie's `LANG` and the like (2.), its `PATH` by version (4.) and the note on the logind session came
+with 2.11.0 (see [cronie and SELinux](#cronie-and-selinux)).
 
 ## Files
 
@@ -443,7 +442,7 @@ cronie's `LANG` and the like (2.), its `PATH` by version (4.) and the note on th
   text that is not UTF-8. The card says which; fix the crontab on the console, then reload.
 - **“The run recorder is missing”** or **“can be updated”:** jobs that record their runs need
   `/usr/local/libexec/cockpit-cronjobs-run`; the notice installs or updates it.
-- **“PAM keeps cron from starting jobs”** (on `main`, not in 2.10.2): cronie's log shows that PAM
+- **“PAM keeps cron from starting jobs”** (since 2.11.0): cronie's log shows that PAM
   refused to start the jobs of the users named, with PAM's reason, and none of their jobs has started
   since. `journalctl -t crond` says why; a common cause is a line of `/etc/environment` that pam_env
   cannot read, such as one with `export` where Linux-PAM reads the file with libeconf. Once their jobs
@@ -502,9 +501,8 @@ and leaves the crontabs, the runs and the run recorder. CI runs it with Debian's
 on the runner (job `upgrade`), and with cronie and the `.rpm` in the Rocky Linux 9 and 10 VMs (job
 `e2e-el`, suite `upgrade`, not yet a required check). There the status unit of 2.10.2 has to fail
 first, with an SELinux denial for root's crontab alone and again with the other user's, and the check
-for denials covers everything from the upgrade on. While
-the build has the version of 2.10.2, before a release raises it, it is installed over that release as
-a reinstall, which runs the package's scripts as an upgrade does.
+for denials covers everything from the upgrade on. A build with the version of that release goes over
+it as a reinstall, which runs the package's scripts as an upgrade does.
 
 How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); what comes next is in
 [ROADMAP.md](ROADMAP.md).
@@ -541,7 +539,7 @@ How to set up, test and send a change is in [CONTRIBUTING.md](CONTRIBUTING.md); 
 - Missed runs are found for jobs that record their runs, and only on the page, not in the status.
 - The status names failed jobs of the crontabs that do not record their runs, and timers converted from
   another user's crontab, only in number: their only names are a command or begin with the user's.
-- The support for cronie with SELinux enforcing is on `main`, not in 2.10.2, the latest release (see
+- The support for cronie with SELinux enforcing came with 2.11.0 (see
   [cronie and SELinux](#cronie-and-selinux)). On the RHEL rebuilds, which the end-to-end and upgrade
   tests cover in Rocky Linux 9 and 10 with SELinux enforcing, the page does not know everything yet:
   - With SELinux enforcing, cronie skips a file of `/etc/cron.d` whose context its job may not enter,
