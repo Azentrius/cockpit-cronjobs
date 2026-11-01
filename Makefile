@@ -106,5 +106,5 @@ packages: stage
 # script itself, so "unused variable" (SC2034) is off for that file only.
 lint:
 	shellcheck --severity=warning --exclude=SC2034 src/cockpit-cronjobs-run
-	shellcheck --severity=warning tools/*.sh status/cronjobs-status packaging/scripts/*
+	shellcheck --severity=warning tools/*.sh test/e2e/*.sh status/cronjobs-status packaging/scripts/*
 	ruff check .

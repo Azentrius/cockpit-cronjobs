@@ -133,7 +133,7 @@ jobs:
             echo "sudo zypper install --allow-unsigned-rpm ./$rpm   # openSUSE"
             echo '```'
             echo
-            echo "The \`.rpm\` carries no package signature; the two checks take its place. The tests install the packages on Debian 13 and Fedora 43 only."
+            echo "The \`.rpm\` carries no package signature; the two checks take its place. The tests install the packages on Debian 13, Ubuntu 24.04, Fedora 43 and Rocky Linux and AlmaLinux 9 and 10, and run the end-to-end test and an upgrade from an earlier release on Ubuntu 24.04 and, with cronie and SELinux enforcing, in Rocky Linux 9 and 10."
             echo
             echo "Other systems: \`sudo tar -xzf cockpit-cronjobs-$VERSION.tar.gz -C /usr/share/cockpit\`."
           } >> notes.md

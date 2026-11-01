@@ -10,27 +10,32 @@
   <summary xml:lang="de">Alle Cron-Jobs und systemd-Timer an einem Ort</summary>
   <description>
     <p>
-      A Cockpit page for cron. It shows everything that is scheduled on the server, with a timeline
-      of the next 24 hours, changes the root crontab and those of other users safely and keeps
-      backups of them, records the result of every run, starts jobs on demand and turns cron jobs
-      into systemd timers and back.
+      Cockpit management of cron jobs and systemd timers, with crontab editing, optional run
+      recording, manual runs and conversion to timers. The page shows everything that is scheduled
+      on the server, with a timeline of the next 24 hours, changes the root crontab and those of
+      other users safely and keeps backups of them, records exit code, duration and output of the
+      runs of the jobs you choose, starts jobs on demand and turns cron jobs into systemd timers and
+      back.
     </p>
     <p xml:lang="de">
-      Eine Cockpit-Seite für cron. Sie zeigt alles, was auf dem Server geplant ist, mit einer
-      Zeitleiste der nächsten 24 Stunden, ändert die Crontab von root und die anderer Benutzer sicher
-      und sichert sie, hält das Ergebnis jedes Laufs fest, startet Jobs auf Knopfdruck und macht aus
-      Cron-Jobs systemd-Timer und wieder zurück.
+      Cockpit-Verwaltung von Cron-Jobs und systemd-Timern, mit Bearbeitung der Crontabs, optionaler
+      Erfassung der Läufe, manuellen Läufen und Umwandlung in Timer. Die Seite zeigt alles, was auf
+      dem Server geplant ist, mit einer Zeitleiste der nächsten 24 Stunden, ändert die Crontab von
+      root und die anderer Benutzer sicher und sichert sie, erfasst Exitcode, Dauer und Ausgabe der
+      Läufe der Jobs Ihrer Wahl, startet Jobs auf Knopfdruck und macht aus Cron-Jobs systemd-Timer
+      und wieder zurück.
     </p>
     <p>
       Failed and missed runs show at a glance, runs of jobs that do not record come from cron's
-      own log (with how they ended, where cron logs it), and a status for the Azentrius Status
-      Board and Cockpit's menu says when something failed or cron is not running.
+      own log (with how they ended, where cron logs it, but without their output), and a status for
+      the Azentrius Status Board and Cockpit's menu says when something failed or cron is not
+      running.
     </p>
     <p xml:lang="de">
       Fehlgeschlagene und ausgefallene Läufe sind auf einen Blick zu sehen, Läufe von Jobs ohne
-      Erfassung kommen aus dem Log von cron (mit ihrem Ausgang, wo cron ihn loggt), und ein Status
-      für das Azentrius Status Board und Cockpits Menü meldet, wenn etwas fehlschlug oder cron nicht
-      läuft.
+      Erfassung kommen aus dem Log von cron (mit ihrem Ausgang, wo cron ihn loggt, aber ohne ihre
+      Ausgabe), und ein Status für das Azentrius Status Board und Cockpits Menü meldet, wenn etwas
+      fehlschlug oder cron nicht läuft.
     </p>
   </description>
   <extends>org.cockpit_project.cockpit</extends>
