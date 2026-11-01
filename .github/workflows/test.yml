@@ -67,8 +67,8 @@ jobs:
             $s write
             test "$(stat -c %a /var/lib/cockpit-cronjobs/status.de.json)" = 644
             $s status --lang de | grep -q "\"summary\":\"In den Crontabs von root und anderen Benutzern gibt es keine Jobs.\""'
-          docker run --rm -v "$PWD/dist:/dist:ro" fedora:43 sh -ec '
-            dnf install -y -q /dist/*.rpm
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/tools/dnf.sh:/dnf.sh:ro" fedora:43 sh -ec '
+            sh /dnf.sh install -y -q /dist/*.rpm
             rpm -V cockpit-cronjobs
             test -f /usr/share/cockpit/cronjobs/manifest.json
             s=/usr/lib/cockpit-cronjobs/cronjobs-status
@@ -112,6 +112,8 @@ jobs:
   # took are printed), the status as the board reads it before and after a write, the removal
   # with the status files. No Cockpit, cron daemon or systemd runs there, so an installed package
   # is not yet a tested system.
+  # dnf runs through tools/dnf.sh, with time limits and three tries: on AlmaLinux the first dnf
+  # install of a job once took almost 14 minutes, and once ran until the job's time limit.
   install:
     name: install (${{ matrix.image }})
     runs-on: ubuntu-24.04
@@ -133,10 +135,10 @@ jobs:
         env:
           IMAGE: ${{ matrix.image }}
         run: |
-          docker run --rm -v "$PWD/dist:/dist:ro" "$IMAGE" sh -ec '
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/tools/dnf.sh:/dnf.sh:ro" "$IMAGE" sh -ec '
             . /etc/os-release
             echo "$PRETTY_NAME"
-            dnf install -y -q /dist/*.rpm
+            sh /dnf.sh install -y -q /dist/*.rpm
             rpm -q cockpit-bridge cronie
             rpm -V cockpit-cronjobs
             test -f /usr/share/cockpit/cronjobs/manifest.json
