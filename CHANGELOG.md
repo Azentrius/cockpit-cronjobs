@@ -1,5 +1,50 @@
 # Changelog
 
+## 2.11.0 – 2026-11-01
+
+Cron Jobs works with cronie under SELinux enforcing, as on RHEL 9 and 10 and their rebuilds: the
+status is written there, the page marks what cronie skips for its SELinux context, gives jobs cronie's
+environment and warns when PAM keeps cronie from starting them; the Azentrius add-ons share one block
+in Cockpit's menu.
+
+- **Status under SELinux:** with SELinux enforcing, `cockpit-cronjobs-status.service` failed as soon
+  as root or another user had a crontab, and wrote no status, so the Status Board and the menu icon had
+  none: systemd ran the helper, a file of `/usr/lib`, in its own domain (`init_t`), which may not read
+  crontabs (`user_cron_spool_t`). The unit starts it through `/bin/sh` now, which SELinux runs in an
+  unconfined domain. Without SELinux nothing changes.
+- **`/etc/cron.d` under SELinux:** with cronie and SELinux enforcing, the System tab marks a file of
+  `/etc/cron.d` that cronie skips for its SELinux context ("Unauthorized SELinux context"), such as a
+  link to a file elsewhere in `/etc`, and names both types and the fix (`restorecon`, or `chcon -t` on
+  a link's target). The page compares the type of the file (for a link, of its target) with that of
+  `/etc/cron.d` itself.
+- **cronie's environment:** run now and converted jobs get the `PATH` cronie gives by its version
+  (up to 1.6 `/usr/bin:/bin`, as on RHEL 9; from 1.7 `/usr/bin:/bin:/usr/sbin:/sbin`) and the `LANG`,
+  `LC_` variables and `LANGUAGE` that crond passes on from its own environment. Where cron's PAM
+  session opens a logind session for every job (`pam_systemd`, as on Fedora and the RHEL family), the
+  run and conversion dialogs say so, since run now and a timer have none.
+- **PAM refusing cronie's jobs:** when PAM does not let cronie start the jobs of a user (crond logs
+  "FAILED to authorize user with PAM", for example for a line of `/etc/environment` that pam_env with
+  libeconf cannot read, as on RHEL 10), the page shows a notice with the users and PAM's reason, and
+  the status item `cron` becomes `danger` ("PAM refuses jobs"; root by name, other users counted).
+  Both go once a job of that user starts again.
+- **Conversion check with systemd 252:** on RHEL 9 the check before a conversion compared only the
+  next run with `systemd-analyze`, which prints the later ones there as "Iter. #N"; it compares the
+  next five again.
+- **Output of short services:** the runs dialog of a timer showed a run of a short service without
+  its output when journald stored the service's last line without the run's invocation. Such a line
+  now goes to the run started before it.
+- **Menu:** Cron Jobs sits with the other Azentrius add-ons at the end of System (`order` 105, was
+  112), the menu search finds it with "azentrius", and Cockpit's Help menu links the README.
+- **Tests:** the `.rpm` is installed on Rocky Linux and AlmaLinux 9 and 10; the end-to-end test runs
+  with cronie in Rocky Linux 9 and 10 VMs with SELinux enforcing and fails on any denial; an upgrade
+  test installs 2.10.2 from its release, with recorded jobs of root and of another user, and this
+  version over it, on Ubuntu 24.04 and in those VMs, where the status unit of 2.10.2 first has to fail
+  with its SELinux denial.
+- **README, AppStream data and package description:** run recording is optional, and exit codes and
+  output are complete only with it; the README says what 2.10.2 and older lack with cronie and SELinux,
+  and describes the tested Cockpit versions and systems, the release tests and what the status timer
+  writes exactly.
+
 ## 2.10.2 – 2026-10-23
 
 Runs from cron's log are read again with the runs and stay with their own processes: a PID used again
